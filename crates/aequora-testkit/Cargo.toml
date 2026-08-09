@@ -1,0 +1,40 @@
+[package]
+name = "aequora-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-client = { version = "0.1.0", path = "../aequora-client" }
+aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
+aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
+aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+postcard.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
+aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
+aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+criterion.workspace = true
+proptest = "=1.6.0"
+tokio.workspace = true
+
+[[bench]]
+name = "core_pipeline"
+harness = false
+
+[lints]
+workspace = true

@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Stable quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+      - name: Formatting
+        run: cargo +stable fmt --all -- --check
+      - name: Check every target and feature
+        run: cargo +stable check --workspace --all-targets --all-features --locked
+      - name: Enforce independent database feature profiles
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: bash scripts/check-database-neutrality.sh
+      - name: Strict Clippy
+        run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Workspace tests
+        run: cargo +stable test --workspace --all-features --locked
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo +stable doc --workspace --all-features --no-deps --locked
+
+  msrv:
+    name: Rust 1.87 MSRV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MSRV
+        run: rustup toolchain install 1.87.0 --profile minimal
+      - name: Check every target and feature at MSRV
+        run: cargo +1.87.0 check --workspace --all-targets --all-features --locked
+
+  postgres:
+    name: PostgreSQL transaction integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: aequora
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aequora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      AEQUORA_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/aequora
+      AEQUORA_TEST_NEON_DIRECT_URL: ${{ secrets.AEQUORA_TEST_NEON_DIRECT_URL }}
+      AEQUORA_TEST_NEON_POOLED_URL: ${{ secrets.AEQUORA_TEST_NEON_POOLED_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Exercise PostgreSQL and configured Neon transaction boundaries
+        run: cargo +stable test -p aequora-store-postgres --test postgres_live --locked
+      - name: Exercise Stoolap client through HTTP and Axum to PostgreSQL or Neon
+        run: cargo +stable test -p aequora --test database_neutrality_live --all-features --locked
+
+  artifact-gates:
+    name: Fuzz, benchmark, and examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Build every fuzz target
+        run: cargo +stable check --manifest-path fuzz/Cargo.toml --bins --locked
+      - name: Build the Criterion pipeline harness
+        run: cargo +stable bench -p aequora-testkit --bench core_pipeline --no-run --locked
+      - name: Package every publishable crate
+        run: cargo +stable package --workspace --no-verify --locked
+      - name: Run the in-process example
+        run: cargo +stable run -p aequora --example in_process --features testkit --locked
+      - name: Run the Stoolap ERP example
+        run: cargo +stable run -p aequora --example school_erp --features stoolap,testkit --locked

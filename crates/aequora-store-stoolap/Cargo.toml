@@ -1,0 +1,27 @@
+[package]
+name = "aequora-store-stoolap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+blake3.workspace = true
+hex.workspace = true
+postcard.workspace = true
+serde.workspace = true
+stoolap.workspace = true
+
+[dev-dependencies]
+aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

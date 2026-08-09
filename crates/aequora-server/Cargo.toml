@@ -1,0 +1,25 @@
+[package]
+name = "aequora-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
+aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
+aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+async-trait.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

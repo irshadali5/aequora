@@ -1,0 +1,29 @@
+[package]
+name = "aequora-quic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-codec = { version = "0.1.0", path = "../aequora-codec", features = ["zstd"] }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+quinn.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rcgen = "=0.13.2"
+time = "=0.3.45"

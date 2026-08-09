@@ -1,0 +1,25 @@
+[package]
+name = "aequora-store-postgres"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+blake3.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "aequora-crdt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+postcard.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

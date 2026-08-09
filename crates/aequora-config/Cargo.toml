@@ -1,0 +1,29 @@
+[package]
+name = "aequora-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+axum = ["dep:aequora-axum"]
+http-client = ["dep:aequora-http"]
+
+[dependencies]
+aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
+aequora-client = { version = "0.1.0", path = "../aequora-client" }
+aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

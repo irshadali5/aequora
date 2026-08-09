@@ -1,0 +1,28 @@
+[package]
+name = "aequora-codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[features]
+default = ["postcard"]
+postcard = []
+ron = ["dep:ron"]
+json = ["dep:serde_json"]
+zstd = ["dep:zstd"]
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+postcard.workspace = true
+ron = { workspace = true, optional = true }
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
+zstd = { workspace = true, optional = true }
+
+[lints]
+workspace = true

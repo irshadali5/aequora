@@ -1,0 +1,51 @@
+[package]
+name = "aequora-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+aequora-codec = { path = "../crates/aequora-codec", features = ["zstd"] }
+aequora-conflict = { path = "../crates/aequora-conflict" }
+aequora-executor = { path = "../crates/aequora-executor" }
+aequora-protocol = { path = "../crates/aequora-protocol" }
+aequora-types = { path = "../crates/aequora-types" }
+async-trait = "0.1.92"
+libfuzzer-sys = "0.4.10"
+postcard = { version = "1.1.3", features = ["use-std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt"] }
+
+[[bin]]
+name = "protocol_frames"
+path = "fuzz_targets/protocol_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dependency_batches"
+path = "fuzz_targets/dependency_batches.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "conflict_merge"
+path = "fuzz_targets/conflict_merge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "schema_migration"
+path = "fuzz_targets/schema_migration.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

@@ -1,0 +1,69 @@
+[package]
+name = "aequora"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[features]
+default = ["postcard"]
+postcard = []
+ron = ["aequora-codec/ron"]
+json = ["aequora-codec/json"]
+axum = ["dep:aequora-axum", "aequora-config/axum"]
+http-client = ["dep:aequora-http", "aequora-config/http-client"]
+postgres = ["dep:aequora-store-postgres"]
+stoolap = ["dep:aequora-store-stoolap"]
+testkit = ["dep:aequora-testkit", "dep:tokio"]
+tracing = ["aequora-observability/tracing"]
+quic = ["dep:aequora-quic"]
+
+[dependencies]
+aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
+aequora-blob = { version = "0.1.0", path = "../aequora-blob" }
+aequora-client = { version = "0.1.0", path = "../aequora-client" }
+aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
+aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
+aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
+aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-config = { version = "0.1.0", path = "../aequora-config" }
+aequora-crdt = { version = "0.1.0", path = "../aequora-crdt" }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
+aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-partition = { version = "0.1.0", path = "../aequora-partition" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
+aequora-routing = { version = "0.1.0", path = "../aequora-routing" }
+aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
+aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
+aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
+aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+tokio = { workspace = true, optional = true }
+
+[[example]]
+name = "in_process"
+required-features = ["testkit"]
+
+[[example]]
+name = "school_erp"
+required-features = ["stoolap", "testkit"]
+
+[dev-dependencies]
+async-trait.workspace = true
+axum.workspace = true
+hex.workspace = true
+postcard.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

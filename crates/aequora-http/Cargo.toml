@@ -1,0 +1,31 @@
+[package]
+name = "aequora-http"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-codec = { version = "0.1.0", path = "../aequora-codec", features = ["zstd"] }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+http.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+aequora-axum = { version = "0.1.0", path = "../aequora-axum" }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+axum.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

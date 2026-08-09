@@ -1,0 +1,19 @@
+[package]
+name = "aequora-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
