@@ -8,7 +8,8 @@ use aequora_protocol::{ChangeKind, OperationAck, Partition, RemoteChange, Snapsh
 use aequora_store::{
     AuditLog, AuditOffset, AuditPage, ChangeJournal, ChangePage, CommitOperation, CommitOutcome,
     EntityReader, EntitySnapshot, JournalCompactor, OperationLedger, SnapshotDescriptor,
-    SnapshotPage, SnapshotStore, StoreError,
+    SnapshotPage, SnapshotStore, StoreError, StoreErrorReason, TransactionCapabilities,
+    TransactionCapabilityProvider,
 };
 use aequora_types::{
     ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp, NodeId,
@@ -183,6 +184,12 @@ pub struct SqlxPostgresBackend {
     pool: PgPool,
 }
 
+impl TransactionCapabilityProvider for SqlxPostgresBackend {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        TransactionCapabilities::FULL_AUTHORITATIVE
+    }
+}
+
 /// Bounded application-side pool behavior for regular and serverless `PostgreSQL` deployments.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PostgresPoolConfig {
@@ -332,7 +339,9 @@ impl SqlxPostgresBackend {
         &self.pool
     }
 
-    /// Verifies that the runtime pool can acquire a healthy connection and execute a query.
+    /// Verifies that the runtime pool can acquire a healthy connection, the schema is current,
+    /// and a transaction can access and no-op-write critical journal/ledger metadata before an
+    /// explicit rollback. The probe never inserts or changes domain state.
     ///
     /// This is suitable for application readiness checks, including after a Neon compute wakes
     /// from suspension.
@@ -352,6 +361,22 @@ impl SqlxPostgresBackend {
                 status.applied_version, status.expected_version
             )));
         }
+        let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+        sqlx::query("UPDATE aequora_sync_events SET sequence = sequence WHERE FALSE")
+            .execute(&mut *transaction)
+            .await
+            .map_err(postgres_error)?;
+        sqlx::query(
+            "UPDATE aequora_applied_operations SET server_sequence = server_sequence WHERE FALSE",
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        sqlx::query("SELECT minimum_cursor FROM aequora_journal_floors LIMIT 0")
+            .execute(&mut *transaction)
+            .await
+            .map_err(postgres_error)?;
+        transaction.rollback().await.map_err(postgres_error)?;
         Ok(())
     }
 
@@ -552,7 +577,27 @@ fn verify_migration_record(
 
 #[allow(clippy::needless_pass_by_value)]
 fn postgres_error(error: sqlx::Error) -> StoreError {
-    StoreError::transient(format!("PostgreSQL operation failed: {error}"))
+    let reason = error
+        .as_database_error()
+        .and_then(sqlx::error::DatabaseError::code)
+        .and_then(|code| postgres_transaction_retry_reason(code.as_ref()));
+    reason.map_or_else(
+        || StoreError::transient(format!("PostgreSQL operation failed: {error}")),
+        |reason| {
+            StoreError::transient_with_reason(
+                reason,
+                format!("PostgreSQL transaction aborted: {error}"),
+            )
+        },
+    )
+}
+
+fn postgres_transaction_retry_reason(code: &str) -> Option<StoreErrorReason> {
+    match code {
+        "40001" => Some(StoreErrorReason::SerializationFailure),
+        "40P01" => Some(StoreErrorReason::Deadlock),
+        _ => None,
+    }
 }
 
 fn corrupt(message: impl Into<String>) -> StoreError {
@@ -719,15 +764,34 @@ impl PostgresBackend for SqlxPostgresBackend {
 
     #[allow(clippy::too_many_lines)]
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError> {
+        const MAX_TRANSACTION_ATTEMPTS: u32 = 3;
+        if !commit.has_valid_version_transition() {
+            return Err(corrupt(
+                "authoritative entity version must advance by exactly one",
+            ));
+        }
+        let mut attempt = 1_u32;
+        loop {
+            let result: Result<CommitOutcome, StoreError> = async {
         let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
-        let lock_key = format!(
-            "{}:{}:{}",
+        // Operation identity is locked first so concurrent replays serialize even if a malformed
+        // retry changes its entity fields. Every transaction then takes the entity lock in the
+        // same operation-then-entity order, preventing an insert race for an absent entity without
+        // introducing lock-order cycles.
+        let operation_lock_key = format!("operation:{}:{}", commit.tenant_id, commit.operation_id);
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(operation_lock_key)
+            .execute(&mut *transaction)
+            .await
+            .map_err(postgres_error)?;
+        let entity_lock_key = format!(
+            "entity:{}:{}:{}",
             commit.tenant_id,
             commit.entity.entity_type.get(),
             commit.entity.entity_id
         );
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(lock_key)
+            .bind(entity_lock_key)
             .execute(&mut *transaction)
             .await
             .map_err(postgres_error)?;
@@ -848,6 +912,17 @@ impl PostgresBackend for SqlxPostgresBackend {
             sequence: Sequence(from_i64(sequence, "server sequence")?),
             duplicate: false,
         }))
+            }
+            .await;
+            match result {
+                Err(error)
+                    if attempt < MAX_TRANSACTION_ATTEMPTS && error.requires_transaction_retry() =>
+                {
+                    attempt = attempt.saturating_add(1);
+                }
+                result => return result,
+            }
+        }
     }
 
     async fn minimum_retained_cursor(
@@ -877,7 +952,7 @@ impl PostgresBackend for SqlxPostgresBackend {
     ) -> Result<ChangePage, StoreError> {
         let query_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
         let rows = sqlx::query(
-            "SELECT sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node FROM aequora_sync_events WHERE tenant_id = $1 AND scope_id = $2 AND sequence > $3 ORDER BY sequence LIMIT $4",
+            "SELECT sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node, MAX(sequence) OVER () AS journal_head FROM aequora_sync_events WHERE tenant_id = $1 AND scope_id = $2 AND sequence > $3 ORDER BY sequence LIMIT $4",
         )
         .bind(tenant.as_uuid())
         .bind(scope.as_uuid())
@@ -886,6 +961,17 @@ impl PostgresBackend for SqlxPostgresBackend {
         .fetch_all(&self.pool)
         .await
         .map_err(postgres_error)?;
+        let journal_head = rows
+            .first()
+            .map(|row| {
+                row.try_get::<i64, _>("journal_head")
+                    .map_err(postgres_error)
+                    .and_then(|value| from_i64(value, "journal head"))
+                    .map(Sequence)
+            })
+            .transpose()?
+            .unwrap_or(sequence)
+            .max(sequence);
         let mut changes = Vec::with_capacity(rows.len().min(limit));
         let mut payload_bytes = 0_usize;
         let mut has_more = rows.len() > limit;
@@ -904,6 +990,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         Ok(ChangePage {
             changes,
             next_sequence,
+            journal_head,
             has_more,
         })
     }
@@ -1259,6 +1346,12 @@ impl<B> PostgresStore<B> {
     }
 }
 
+impl<B: TransactionCapabilityProvider> TransactionCapabilityProvider for PostgresStore<B> {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        self.backend.transaction_capabilities()
+    }
+}
+
 #[async_trait]
 impl<B: PostgresBackend> EntityReader for PostgresStore<B> {
     async fn read_entity(
@@ -1363,9 +1456,9 @@ impl<B: PostgresBackend> AuditLog for PostgresStore<B> {
 mod tests {
     use super::{
         POSTGRES_MIGRATIONS, PgSslMode, PostgresPoolConfig, migration_checksum,
-        parse_connect_options, verify_migration_record,
+        parse_connect_options, postgres_transaction_retry_reason, verify_migration_record,
     };
-    use aequora_store::StoreErrorKind;
+    use aequora_store::{StoreErrorKind, StoreErrorReason};
 
     #[test]
     fn neon_urls_force_hostname_verified_tls_and_scale_to_zero_pooling() {
@@ -1409,5 +1502,18 @@ mod tests {
             panic!("modified migration was accepted");
         };
         assert_eq!(checksum_error.kind, StoreErrorKind::Permanent);
+    }
+
+    #[test]
+    fn only_serialization_and_deadlock_sqlstates_request_whole_transaction_retry() {
+        assert_eq!(
+            postgres_transaction_retry_reason("40001"),
+            Some(StoreErrorReason::SerializationFailure)
+        );
+        assert_eq!(
+            postgres_transaction_retry_reason("40P01"),
+            Some(StoreErrorReason::Deadlock)
+        );
+        assert_eq!(postgres_transaction_retry_reason("23505"), None);
     }
 }

@@ -18,7 +18,7 @@ postgres = ["dep:aequora-store-postgres"]
 stoolap = ["dep:aequora-store-stoolap"]
 testkit = ["dep:aequora-testkit", "dep:tokio"]
 tracing = ["aequora-observability/tracing"]
-quic = ["dep:aequora-quic"]
+quic = ["dep:aequora-quic", "aequora-config/quic"]
 
 [dependencies]
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }

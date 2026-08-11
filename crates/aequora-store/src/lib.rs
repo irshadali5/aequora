@@ -15,6 +15,146 @@ use aequora_types::{
 use async_trait::async_trait;
 use thiserror::Error;
 
+/// Persistence durability promised by an adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DurabilityMode {
+    /// State survives only for the lifetime of the current process.
+    Volatile,
+    /// A successful commit survives process and database restarts according to the database's
+    /// configured durable-commit guarantees.
+    Durable,
+}
+
+/// Highest Aequora transaction boundary implemented by an adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AcidComplianceLevel {
+    /// Deterministic reference implementation for tests; never a production durability claim.
+    Reference,
+    /// Full writable local replica: domain mutation/outbox plus reconciliation/cursor atomicity.
+    FullLocal,
+    /// Full authoritative persistence: entity/version/journal/ledger/audit atomicity.
+    FullAuthoritative,
+}
+
+/// Explicit transaction guarantees advertised by a persistence adapter.
+///
+/// This declaration is intentionally separate from the capability method traits. Implementing a
+/// Rust trait proves that methods exist; this value states which cross-record transaction and
+/// restart guarantees the implementation claims. Third-party adapters should return a production
+/// level only after passing the matching `aequora-testkit` compliance suite against their real
+/// database engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TransactionCapabilities {
+    /// Highest complete Aequora boundary implemented by this adapter.
+    pub compliance: AcidComplianceLevel,
+    /// Whether successful commits survive process/database restart.
+    pub durability: DurabilityMode,
+    /// Individual cross-record guarantees implemented by the adapter.
+    pub guarantees: TransactionGuarantees,
+}
+
+/// Compact set of cross-record ACID guarantees.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TransactionGuarantees(u16);
+
+impl TransactionGuarantees {
+    /// Optimistic local domain mutation and outbox insertion share one transaction.
+    pub const LOCAL_MUTATION_OUTBOX: Self = Self(1 << 0);
+    /// Authoritative entity/version/journal/operation-ledger/audit writes share one transaction.
+    pub const AUTHORITATIVE_COMMIT: Self = Self(1 << 1);
+    /// Changes, terminal results, conflicts, applied markers, and cursor share one transaction.
+    pub const RECONCILIATION_CURSOR: Self = Self(1 << 2);
+    /// Concurrent requests with one operation ID have exactly one logical effect.
+    pub const CONCURRENT_IDEMPOTENCY: Self = Self(1 << 3);
+    /// Snapshot contents and their journal cursor are captured from one consistent boundary.
+    pub const CONSISTENT_SNAPSHOT: Self = Self(1 << 4);
+    /// Schema migrations are ordered, checksummed, and transactionally recorded.
+    pub const TRANSACTIONAL_MIGRATIONS: Self = Self(1 << 5);
+
+    /// Combines two guarantee sets.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether every guarantee in `required` is present.
+    #[must_use]
+    pub const fn contains(self, required: Self) -> bool {
+        self.0 & required.0 == required.0
+    }
+}
+
+impl TransactionCapabilities {
+    /// Volatile local reference-store declaration used for deterministic fault and model tests.
+    pub const REFERENCE_LOCAL: Self = Self {
+        compliance: AcidComplianceLevel::Reference,
+        durability: DurabilityMode::Volatile,
+        guarantees: TransactionGuarantees::LOCAL_MUTATION_OUTBOX
+            .union(TransactionGuarantees::RECONCILIATION_CURSOR),
+    };
+
+    /// Volatile authoritative reference declaration used for deterministic concurrency tests.
+    pub const REFERENCE_AUTHORITATIVE: Self = Self {
+        compliance: AcidComplianceLevel::Reference,
+        durability: DurabilityMode::Volatile,
+        guarantees: TransactionGuarantees::AUTHORITATIVE_COMMIT
+            .union(TransactionGuarantees::CONCURRENT_IDEMPOTENCY)
+            .union(TransactionGuarantees::CONSISTENT_SNAPSHOT),
+    };
+
+    /// Required declaration for a production writable local adapter.
+    pub const FULL_LOCAL: Self = Self {
+        compliance: AcidComplianceLevel::FullLocal,
+        durability: DurabilityMode::Durable,
+        guarantees: TransactionGuarantees::LOCAL_MUTATION_OUTBOX
+            .union(TransactionGuarantees::RECONCILIATION_CURSOR)
+            .union(TransactionGuarantees::TRANSACTIONAL_MIGRATIONS),
+    };
+
+    /// Required declaration for a production authoritative adapter.
+    pub const FULL_AUTHORITATIVE: Self = Self {
+        compliance: AcidComplianceLevel::FullAuthoritative,
+        durability: DurabilityMode::Durable,
+        guarantees: TransactionGuarantees::AUTHORITATIVE_COMMIT
+            .union(TransactionGuarantees::CONCURRENT_IDEMPOTENCY)
+            .union(TransactionGuarantees::CONSISTENT_SNAPSHOT)
+            .union(TransactionGuarantees::TRANSACTIONAL_MIGRATIONS),
+    };
+
+    /// Checks that the detailed flags are internally consistent with the advertised level.
+    #[must_use]
+    pub const fn is_consistent(self) -> bool {
+        match self.compliance {
+            AcidComplianceLevel::Reference => {
+                matches!(self.durability, DurabilityMode::Volatile)
+            }
+            AcidComplianceLevel::FullLocal => {
+                matches!(self.durability, DurabilityMode::Durable)
+                    && self.guarantees.contains(
+                        TransactionGuarantees::LOCAL_MUTATION_OUTBOX
+                            .union(TransactionGuarantees::RECONCILIATION_CURSOR)
+                            .union(TransactionGuarantees::TRANSACTIONAL_MIGRATIONS),
+                    )
+            }
+            AcidComplianceLevel::FullAuthoritative => {
+                matches!(self.durability, DurabilityMode::Durable)
+                    && self.guarantees.contains(
+                        TransactionGuarantees::AUTHORITATIVE_COMMIT
+                            .union(TransactionGuarantees::CONCURRENT_IDEMPOTENCY)
+                            .union(TransactionGuarantees::CONSISTENT_SNAPSHOT)
+                            .union(TransactionGuarantees::TRANSACTIONAL_MIGRATIONS),
+                    )
+            }
+        }
+    }
+}
+
+/// Adapter capability declaration used by startup diagnostics and compliance tests.
+pub trait TransactionCapabilityProvider: Send + Sync {
+    /// Returns transaction and durability guarantees for this concrete adapter.
+    fn transaction_capabilities(&self) -> TransactionCapabilities;
+}
+
 /// Stored authoritative entity state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntitySnapshot {
@@ -55,6 +195,20 @@ pub struct CommitOperation {
     pub timestamp: HybridTimestamp,
     /// BLAKE3 digest of the command payload. The audit log never stores the command payload.
     pub command_digest: [u8; 32],
+}
+
+impl CommitOperation {
+    /// Whether the requested authoritative version is exactly the required next value.
+    #[must_use]
+    pub const fn has_valid_version_transition(&self) -> bool {
+        match self.expected_version {
+            None => self.next_version.get() == EntityVersion::INITIAL.get(),
+            Some(expected) => match expected.checked_next() {
+                Some(next) => next.get() == self.next_version.get(),
+                None => false,
+            },
+        }
+    }
 }
 
 /// Monotonic position in the immutable accountability log.
@@ -115,6 +269,8 @@ pub struct ChangePage {
     pub changes: Vec<RemoteChange>,
     /// Greatest complete sequence represented by this page.
     pub next_sequence: Sequence,
+    /// Current highest retained sequence in this tenant and scope when the page was read.
+    pub journal_head: Sequence,
     /// Whether more events remain.
     pub has_more: bool,
 }
@@ -147,6 +303,8 @@ pub struct SnapshotPage {
 pub struct StoreError {
     /// Stable failure category used to decide retry behavior.
     pub kind: StoreErrorKind,
+    /// More specific transient cause used for safe whole-transaction retry decisions.
+    pub reason: StoreErrorReason,
     /// Non-sensitive implementation explanation.
     pub message: String,
 }
@@ -157,6 +315,17 @@ impl StoreError {
     pub fn transient(message: impl Into<String>) -> Self {
         Self {
             kind: StoreErrorKind::Transient,
+            reason: StoreErrorReason::Unspecified,
+            message: message.into(),
+        }
+    }
+
+    /// Creates a transient storage failure with a stable retry reason.
+    #[must_use]
+    pub fn transient_with_reason(reason: StoreErrorReason, message: impl Into<String>) -> Self {
+        Self {
+            kind: StoreErrorKind::Transient,
+            reason,
             message: message.into(),
         }
     }
@@ -166,8 +335,18 @@ impl StoreError {
     pub fn permanent(message: impl Into<String>) -> Self {
         Self {
             kind: StoreErrorKind::Permanent,
+            reason: StoreErrorReason::Unspecified,
             message: message.into(),
         }
+    }
+
+    /// Whether retrying the complete database transaction is safe and specifically required.
+    #[must_use]
+    pub const fn requires_transaction_retry(&self) -> bool {
+        matches!(
+            self.reason,
+            StoreErrorReason::SerializationFailure | StoreErrorReason::Deadlock
+        )
     }
 }
 
@@ -178,6 +357,17 @@ pub enum StoreErrorKind {
     Transient,
     /// Operation requires intervention or repair.
     Permanent,
+}
+
+/// Stable cause for a transient persistence failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StoreErrorReason {
+    /// No narrower cause was supplied by the adapter.
+    Unspecified,
+    /// The database aborted a serializable transaction and requires a complete retry.
+    SerializationFailure,
+    /// The database selected this transaction as a deadlock victim.
+    Deadlock,
 }
 
 /// Durable lifecycle of one local outbox operation.
@@ -240,6 +430,15 @@ pub struct OutboxStats {
     pub retry: usize,
     /// Oldest replayable operation timestamp.
     pub oldest_pending_at: Option<HybridTimestamp>,
+}
+
+/// Durable retry scheduling metadata for one replayable outbox operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RetryMetadata {
+    /// Number of failed delivery/reconciliation attempts recorded for this operation.
+    pub attempt_count: u32,
+    /// Earliest Unix timestamp in milliseconds at which the operation may be selected again.
+    pub next_attempt_unix_ms: u64,
 }
 
 impl OutboxStats {
@@ -307,8 +506,9 @@ pub trait OperationLedger: Send + Sync {
         operation_id: OperationId,
     ) -> Result<Option<OperationAck>, StoreError>;
 
-    /// Atomically compares the expected version, mutates entity state, appends exactly one
-    /// journal entry, and records the operation result. A repeated ID returns `Duplicate`.
+    /// Atomically compares the expected version, requires `next_version` to advance exactly one,
+    /// mutates entity state, appends exactly one journal/audit entry, and records the operation
+    /// result. A repeated ID returns `Duplicate`.
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError>;
 }
 
@@ -373,8 +573,19 @@ pub trait OutboxStateStore: Send + Sync {
     /// Marks selected operations as in flight before network I/O begins.
     async fn mark_sending(&self, operations: &[OperationId]) -> Result<(), StoreError>;
 
-    /// Marks operations replayable after delivery or local reconciliation fails.
-    async fn mark_retry(&self, operations: &[OperationId]) -> Result<(), StoreError>;
+    /// Marks operations replayable after delivery or reconciliation fails, increments their
+    /// durable attempt count, and prevents selection before `next_attempt_unix_ms`.
+    async fn mark_retry(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError>;
+
+    /// Loads the durable retry schedule for diagnostics and restart-safe coordination.
+    async fn retry_metadata(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<RetryMetadata>, StoreError>;
 
     /// Loads the last durable state for application status and crash recovery.
     async fn operation_state(

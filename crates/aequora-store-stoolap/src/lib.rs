@@ -8,12 +8,16 @@ use aequora_protocol::{
 };
 use aequora_store::{
     ConflictInbox, ConflictRecord, ConflictResolution, CursorStore, OutboxState, OutboxStateStore,
-    OutboxStats, OutboxStore, ReconciliationStore, SnapshotProgress, StoreError,
+    OutboxStats, OutboxStore, ReconciliationStore, RetryMetadata, SnapshotProgress, StoreError,
+    TransactionCapabilities, TransactionCapabilityProvider,
 };
 use aequora_types::{Cursor, OperationId, Sequence, SnapshotId, SyncScopeId};
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use stoolap::{ApiTransaction, Database};
 
 /// Portable Stoolap DDL for the local synchronization metadata tables.
@@ -83,6 +87,18 @@ CREATE TABLE IF NOT EXISTS aequora_snapshot_staging (
 );
 ";
 
+/// Adds durable retry attempt/deadline state without rewriting published outbox rows.
+pub const MIGRATION_0002: &str = r"
+CREATE TABLE IF NOT EXISTS aequora_retry_schedule (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    operation_id TEXT NOT NULL UNIQUE,
+    attempt_count INTEGER NOT NULL CHECK (attempt_count > 0),
+    next_attempt_unix_ms INTEGER NOT NULL CHECK (next_attempt_unix_ms >= 0)
+);
+CREATE INDEX IF NOT EXISTS aequora_retry_schedule_due_idx
+    ON aequora_retry_schedule (next_attempt_unix_ms, operation_id);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -94,7 +110,7 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest Stoolap schema revision understood by this Aequora release.
-pub const STOOLAP_SCHEMA_VERSION: u32 = 1;
+pub const STOOLAP_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy)]
 struct StoolapMigration {
@@ -103,11 +119,18 @@ struct StoolapMigration {
     sql: &'static str,
 }
 
-const STOOLAP_MIGRATIONS: &[StoolapMigration] = &[StoolapMigration {
-    version: 1,
-    name: "initial_local_replica_schema",
-    sql: MIGRATION_0001,
-}];
+const STOOLAP_MIGRATIONS: &[StoolapMigration] = &[
+    StoolapMigration {
+        version: 1,
+        name: "initial_local_replica_schema",
+        sql: MIGRATION_0001,
+    },
+    StoolapMigration {
+        version: 2,
+        name: "durable_retry_schedule",
+        sql: MIGRATION_0002,
+    },
+];
 
 struct AppliedMigration {
     version: i64,
@@ -136,6 +159,12 @@ impl StoolapSchemaStatus {
 #[derive(Clone)]
 pub struct StoolapDatabase {
     database: Database,
+}
+
+impl TransactionCapabilityProvider for StoolapDatabase {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        TransactionCapabilities::FULL_LOCAL
+    }
 }
 
 impl StoolapDatabase {
@@ -197,7 +226,8 @@ impl StoolapDatabase {
         })
     }
 
-    /// Verifies both local database availability and schema compatibility.
+    /// Verifies local availability, schema compatibility, transaction start/rollback, and access
+    /// to the outbox, applied-event, and cursor metadata used by synchronization.
     ///
     /// # Errors
     ///
@@ -213,6 +243,26 @@ impl StoolapDatabase {
                 status.applied_version, status.expected_version
             )));
         }
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        transaction
+            .execute("UPDATE aequora_outbox SET state = state WHERE 1 = 0", ())
+            .map_err(stoolap_error)?;
+        transaction
+            .execute(
+                "UPDATE aequora_applied_events SET sequence = sequence WHERE 1 = 0",
+                (),
+            )
+            .map_err(stoolap_error)?;
+        transaction
+            .query("SELECT sequence FROM aequora_cursors WHERE 1 = 0", ())
+            .map_err(stoolap_error)?;
+        transaction
+            .query(
+                "SELECT attempt_count FROM aequora_retry_schedule WHERE 1 = 0",
+                (),
+            )
+            .map_err(stoolap_error)?;
+        drop(transaction);
         Ok(())
     }
 
@@ -454,7 +504,16 @@ pub trait StoolapBackend: Send + Sync {
     /// Atomically transitions selected replayable operations to `Sending`.
     async fn mark_sending(&self, operations: &[OperationId]) -> Result<(), StoreError>;
     /// Returns in-flight operations to the replayable `Retry` state.
-    async fn mark_retry(&self, operations: &[OperationId]) -> Result<(), StoreError>;
+    async fn mark_retry(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError>;
+    /// Loads durable retry scheduling metadata.
+    async fn retry_metadata(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<RetryMetadata>, StoreError>;
     /// Loads one durable outbox state.
     async fn operation_state(
         &self,
@@ -489,11 +548,12 @@ pub trait StoolapBackend: Send + Sync {
 impl StoolapBackend for StoolapDatabase {
     async fn pending_operations(&self, limit: usize) -> Result<Vec<OperationEnvelope>, StoreError> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let now = to_i64(unix_time_millis(), "current Unix timestamp")?;
         let rows = self
             .database
             .query(
-                "SELECT envelope FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') ORDER BY enqueued_order LIMIT $1",
-                (limit,),
+                "SELECT envelope FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') AND operation_id NOT IN (SELECT operation_id FROM aequora_retry_schedule WHERE next_attempt_unix_ms > $1) ORDER BY enqueued_order LIMIT $2",
+                (now, limit),
             )
             .map_err(stoolap_error)?;
         let mut operations = Vec::new();
@@ -513,8 +573,37 @@ impl StoolapBackend for StoolapDatabase {
         transition_operations(&self.database, operations, OutboxState::Sending)
     }
 
-    async fn mark_retry(&self, operations: &[OperationId]) -> Result<(), StoreError> {
-        transition_operations(&self.database, operations, OutboxState::Retry)
+    async fn mark_retry(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError> {
+        schedule_retry(&self.database, operations, next_attempt_unix_ms)
+    }
+
+    async fn retry_metadata(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<RetryMetadata>, StoreError> {
+        let mut rows = self
+            .database
+            .query(
+                "SELECT attempt_count, next_attempt_unix_ms FROM aequora_retry_schedule WHERE operation_id = $1",
+                (operation.to_string(),),
+            )
+            .map_err(stoolap_error)?;
+        let Some(row) = rows.next() else {
+            return Ok(None);
+        };
+        let row = row.map_err(stoolap_error)?;
+        let attempt_count: i64 = row.get(0).map_err(stoolap_error)?;
+        let next_attempt_unix_ms: i64 = row.get(1).map_err(stoolap_error)?;
+        Ok(Some(RetryMetadata {
+            attempt_count: u32::try_from(attempt_count)
+                .map_err(|_| StoreError::permanent("invalid Stoolap retry attempt count"))?,
+            next_attempt_unix_ms: u64::try_from(next_attempt_unix_ms)
+                .map_err(|_| StoreError::permanent("negative Stoolap retry timestamp"))?,
+        }))
     }
 
     async fn operation_state(
@@ -811,6 +900,67 @@ fn transition_operations(
     transaction.commit().map_err(stoolap_error)
 }
 
+fn schedule_retry(
+    database: &Database,
+    operations: &[OperationId],
+    next_attempt_unix_ms: u64,
+) -> Result<(), StoreError> {
+    let next_attempt = to_i64(next_attempt_unix_ms, "retry timestamp")?;
+    let mut transaction = database.begin().map_err(stoolap_error)?;
+    for operation in operations {
+        let operation = operation.to_string();
+        let state = transaction
+            .query_opt::<String, _>(
+                "SELECT state FROM aequora_outbox WHERE operation_id = $1",
+                (&operation,),
+            )
+            .map_err(stoolap_error)?
+            .ok_or_else(|| StoreError::permanent("operation is missing from the outbox"))?;
+        if !parse_state(&state)?.is_replayable() {
+            return Err(StoreError::permanent(
+                "terminal outbox operation cannot transition back to retry",
+            ));
+        }
+        transaction
+            .execute(
+                "UPDATE aequora_outbox SET state = 'retry' WHERE operation_id = $1",
+                (&operation,),
+            )
+            .map_err(stoolap_error)?;
+        if transaction
+            .query_opt::<i64, _>(
+                "SELECT attempt_count FROM aequora_retry_schedule WHERE operation_id = $1",
+                (&operation,),
+            )
+            .map_err(stoolap_error)?
+            .is_some()
+        {
+            transaction
+                .execute(
+                    "UPDATE aequora_retry_schedule SET attempt_count = attempt_count + 1, next_attempt_unix_ms = $1 WHERE operation_id = $2",
+                    (next_attempt, &operation),
+                )
+                .map_err(stoolap_error)?;
+        } else {
+            transaction
+                .execute(
+                    "INSERT INTO aequora_retry_schedule (operation_id, attempt_count, next_attempt_unix_ms) VALUES ($1, 1, $2)",
+                    (&operation, next_attempt),
+                )
+                .map_err(stoolap_error)?;
+        }
+    }
+    transaction.commit().map_err(stoolap_error)
+}
+
+fn unix_time_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 fn load_cursor_transaction(
     transaction: &mut ApiTransaction,
     scope: SyncScopeId,
@@ -1016,6 +1166,12 @@ impl<B> StoolapStore<B> {
     }
 }
 
+impl<B: TransactionCapabilityProvider> TransactionCapabilityProvider for StoolapStore<B> {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        self.backend.transaction_capabilities()
+    }
+}
+
 #[async_trait]
 impl<B: StoolapBackend> OutboxStore for StoolapStore<B> {
     async fn pending_operations(&self, limit: usize) -> Result<Vec<OperationEnvelope>, StoreError> {
@@ -1032,8 +1188,21 @@ impl<B: StoolapBackend> OutboxStateStore for StoolapStore<B> {
         self.backend.mark_sending(operations).await
     }
 
-    async fn mark_retry(&self, operations: &[OperationId]) -> Result<(), StoreError> {
-        self.backend.mark_retry(operations).await
+    async fn mark_retry(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError> {
+        self.backend
+            .mark_retry(operations, next_attempt_unix_ms)
+            .await
+    }
+
+    async fn retry_metadata(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<RetryMetadata>, StoreError> {
+        self.backend.retry_metadata(operation).await
     }
 
     async fn operation_state(
@@ -1141,6 +1310,51 @@ mod tests {
         }
     }
 
+    async fn reopen_and_release_retry(
+        dsn: &str,
+        operation: &OperationEnvelope,
+        retry_deadline: u64,
+    ) -> StoolapDatabase {
+        let backend = StoolapDatabase::open(dsn).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            backend.operation_state(operation.operation_id).await,
+            Ok(Some(OutboxState::Retry))
+        );
+        assert_eq!(
+            backend.retry_metadata(operation.operation_id).await,
+            Ok(Some(RetryMetadata {
+                attempt_count: 1,
+                next_attempt_unix_ms: retry_deadline,
+            }))
+        );
+        assert!(
+            backend
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .is_empty()
+        );
+        backend
+            .mark_retry(&[operation.operation_id], 0)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            backend.retry_metadata(operation.operation_id).await,
+            Ok(Some(RetryMetadata {
+                attempt_count: 2,
+                next_attempt_unix_ms: 0,
+            }))
+        );
+        assert_eq!(
+            backend
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            vec![operation.clone()]
+        );
+        backend
+    }
+
     #[test]
     fn migration_record_verification_rejects_name_and_checksum_drift() {
         let migration = STOOLAP_MIGRATIONS[0];
@@ -1181,7 +1395,7 @@ mod tests {
         let row = backend
             .database()
             .query(
-                "SELECT version, name, checksum, applied_at FROM aequora_schema_migrations",
+                "SELECT version, name, checksum, applied_at FROM aequora_schema_migrations ORDER BY version DESC LIMIT 1",
                 (),
             )
             .unwrap_or_else(|error| panic!("{error}"))
@@ -1195,7 +1409,9 @@ mod tests {
         assert_eq!(
             row.get::<String>(1)
                 .unwrap_or_else(|error| panic!("{error}")),
-            STOOLAP_MIGRATIONS[0].name
+            STOOLAP_MIGRATIONS
+                .last()
+                .map_or("", |migration| migration.name)
         );
         assert_eq!(
             row.get::<String>(2)
@@ -1217,7 +1433,7 @@ mod tests {
                 .database()
                 .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_schema_migrations", ())
                 .unwrap_or_else(|error| panic!("{error}")),
-            1
+            i64::from(STOOLAP_SCHEMA_VERSION)
         );
         reopened
             .health_check()
@@ -1245,7 +1461,7 @@ mod tests {
                 .database()
                 .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_schema_migrations", ())
                 .unwrap_or_else(|error| panic!("{error}")),
-            1
+            i64::from(STOOLAP_SCHEMA_VERSION)
         );
     }
 
@@ -1333,6 +1549,218 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("{error}")),
             vec![operation]
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_failure_rolls_back_entity_ack_marker_and_cursor() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let entity = entity();
+        let operation = operation(entity);
+        backend
+            .append_operation(operation.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let scope = SyncScopeId::new();
+        let response = SyncResponse {
+            protocol: ProtocolVersion::V1,
+            directive: SyncDirective::Continue,
+            acknowledged: vec![OperationAck {
+                operation_id: operation.operation_id,
+                entity_version: EntityVersion::INITIAL,
+                sequence: Sequence(1),
+                duplicate: false,
+            }],
+            rejected: Vec::new(),
+            conflicts: Vec::new(),
+            changes: vec![RemoteChange {
+                tenant_id: operation.tenant_id,
+                scope_id: scope,
+                sequence: Sequence(1),
+                operation_id: operation.operation_id,
+                entity,
+                version: EntityVersion::INITIAL,
+                change_kind: ChangeKind::Upsert,
+                payload: operation.payload.clone(),
+                timestamp: operation.created_at,
+            }],
+            next_cursor: Cursor {
+                scope,
+                sequence: Sequence(u64::MAX),
+            },
+            has_more: false,
+            server_time: operation.created_at,
+        };
+
+        assert!(backend.reconcile(&response).await.is_err());
+        assert_eq!(
+            backend.operation_state(operation.operation_id).await,
+            Ok(Some(OutboxState::Pending))
+        );
+        assert_eq!(backend.load_cursor(scope).await, Ok(None));
+        assert_eq!(
+            backend
+                .database()
+                .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_local_entities", ())
+                .unwrap_or_else(|error| panic!("{error}")),
+            0
+        );
+        assert_eq!(
+            backend
+                .database()
+                .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_applied_events", ())
+                .unwrap_or_else(|error| panic!("{error}")),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn outbox_and_reconciliation_commit_survive_restart() {
+        let (_directory, dsn) = persistent_dsn("durable-sync-boundaries");
+        let entity = entity();
+        let operation = operation(entity);
+        let scope = SyncScopeId::new();
+        let backend = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        let retry_deadline = unix_time_millis().saturating_add(60_000);
+        backend
+            .append_operation(operation.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .mark_retry(&[operation.operation_id], retry_deadline)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        drop(backend);
+
+        let backend = reopen_and_release_retry(&dsn, &operation, retry_deadline).await;
+        let response = SyncResponse {
+            protocol: ProtocolVersion::V1,
+            directive: SyncDirective::Continue,
+            acknowledged: vec![OperationAck {
+                operation_id: operation.operation_id,
+                entity_version: EntityVersion::INITIAL,
+                sequence: Sequence(1),
+                duplicate: false,
+            }],
+            rejected: Vec::new(),
+            conflicts: Vec::new(),
+            changes: vec![RemoteChange {
+                tenant_id: operation.tenant_id,
+                scope_id: scope,
+                sequence: Sequence(1),
+                operation_id: operation.operation_id,
+                entity,
+                version: EntityVersion::INITIAL,
+                change_kind: ChangeKind::Upsert,
+                payload: operation.payload.clone(),
+                timestamp: operation.created_at,
+            }],
+            next_cursor: Cursor {
+                scope,
+                sequence: Sequence(1),
+            },
+            has_more: false,
+            server_time: operation.created_at,
+        };
+        backend
+            .reconcile(&response)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        drop(backend);
+
+        let reopened = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            reopened.operation_state(operation.operation_id).await,
+            Ok(Some(OutboxState::Acknowledged))
+        );
+        assert_eq!(
+            reopened.load_cursor(scope).await,
+            Ok(Some(response.next_cursor))
+        );
+        assert_eq!(
+            reopened
+                .database()
+                .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_applied_events", ())
+                .unwrap_or_else(|error| panic!("{error}")),
+            1
+        );
+        let stored_payload = reopened
+            .database()
+            .query_one::<String, _>("SELECT payload FROM aequora_local_entities", ())
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(hex::decode(stored_payload), Ok(operation.payload));
+    }
+
+    #[tokio::test]
+    async fn failed_final_snapshot_install_preserves_previous_scope_and_cursor() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let scope = SyncScopeId::new();
+        let entity = entity();
+        let timestamp = HybridTimestamp {
+            physical_ms: 3,
+            logical: 0,
+            node: NodeId::new(),
+        };
+        let installed = BootstrapResponse {
+            protocol: ProtocolVersion::V1,
+            snapshot_id: SnapshotId::new(),
+            cursor: Cursor {
+                scope,
+                sequence: Sequence(1),
+            },
+            offset: 0,
+            entities: vec![SnapshotEntity {
+                entity,
+                version: EntityVersion::INITIAL,
+                payload: b"installed".to_vec(),
+                tombstone: false,
+            }],
+            next_offset: 1,
+            has_more: false,
+            server_time: timestamp,
+        };
+        backend
+            .stage_snapshot(&installed)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let replacement_version = EntityVersion::INITIAL
+            .checked_next()
+            .unwrap_or_else(|| panic!("initial entity version must advance"));
+        let replacement = BootstrapResponse {
+            protocol: ProtocolVersion::V1,
+            snapshot_id: SnapshotId::new(),
+            cursor: Cursor {
+                scope,
+                sequence: Sequence(u64::MAX),
+            },
+            offset: 0,
+            entities: vec![SnapshotEntity {
+                entity,
+                version: replacement_version,
+                payload: b"must-not-install".to_vec(),
+                tombstone: false,
+            }],
+            next_offset: 1,
+            has_more: false,
+            server_time: timestamp,
+        };
+        assert!(backend.stage_snapshot(&replacement).await.is_err());
+        assert_eq!(backend.load_cursor(scope).await, Ok(Some(installed.cursor)));
+        let stored_payload = backend
+            .database()
+            .query_one::<String, _>(
+                "SELECT payload FROM aequora_local_entities WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(hex::decode(stored_payload), Ok(b"installed".to_vec()));
+        assert_eq!(
+            backend
+                .database()
+                .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_snapshot_staging", ())
+                .unwrap_or_else(|error| panic!("{error}")),
+            0
         );
     }
 

@@ -8,6 +8,7 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }

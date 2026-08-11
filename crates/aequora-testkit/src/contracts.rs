@@ -9,8 +9,14 @@ use aequora_protocol::{
 use aequora_store::{
     AuditLog, AuditOffset, AuthoritativeStore, ChangeJournal, CommitOperation, CommitOutcome,
     EntityReader, LocalStore, OutboxState, OutboxStateStore, SnapshotStore, StoreError,
+    TransactionCapabilities, TransactionCapabilityProvider, TransactionGuarantees,
 };
-use aequora_types::{Cursor, HybridTimestamp, Sequence, SnapshotId, SyncScopeId};
+use aequora_types::{
+    Cursor, EntityId, EntityRef, EntityVersion, HybridTimestamp, OperationId, Sequence, SnapshotId,
+    SyncScopeId,
+};
+use futures_util::future::join;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 /// A database operation failed or violated a required Aequora storage invariant.
@@ -65,8 +71,9 @@ pub async fn verify_local_store<S>(
     server_time: HybridTimestamp,
 ) -> Result<LocalAdapterContractReport, AdapterContractError>
 where
-    S: LocalStore,
+    S: LocalStore + TransactionCapabilityProvider,
 {
+    verify_local_capabilities(store.transaction_capabilities())?;
     let operation_id = operation.operation_id;
     store.append_operation(operation.clone()).await?;
     verify_state(store, operation_id, OutboxState::Pending).await?;
@@ -84,8 +91,7 @@ where
 
     store.mark_sending(&[operation_id]).await?;
     verify_state(store, operation_id, OutboxState::Sending).await?;
-    store.mark_retry(&[operation_id]).await?;
-    verify_state(store, operation_id, OutboxState::Retry).await?;
+    verify_retry_schedule(store, operation_id).await?;
 
     let cursor = Cursor {
         scope,
@@ -144,6 +150,62 @@ where
     })
 }
 
+async fn verify_retry_schedule<S>(
+    store: &S,
+    operation_id: OperationId,
+) -> Result<(), AdapterContractError>
+where
+    S: LocalStore,
+{
+    let retry_deadline = unix_time_millis().saturating_add(60_000);
+    store.mark_retry(&[operation_id], retry_deadline).await?;
+    verify_state(store, operation_id, OutboxState::Retry).await?;
+    let retry =
+        store
+            .retry_metadata(operation_id)
+            .await?
+            .ok_or(AdapterContractError::Violation(
+                "a retry transition must persist scheduling metadata",
+            ))?;
+    if retry.attempt_count != 1 || retry.next_attempt_unix_ms != retry_deadline {
+        return Err(AdapterContractError::Violation(
+            "the first retry transition must persist its attempt count and deadline",
+        ));
+    }
+    if store
+        .pending_operations(1_024)
+        .await?
+        .iter()
+        .any(|operation| operation.operation_id == operation_id)
+    {
+        return Err(AdapterContractError::Violation(
+            "an operation must not be selected before its durable retry deadline",
+        ));
+    }
+    store.mark_retry(&[operation_id], 0).await?;
+    let retry =
+        store
+            .retry_metadata(operation_id)
+            .await?
+            .ok_or(AdapterContractError::Violation(
+                "a repeated retry must retain scheduling metadata",
+            ))?;
+    if retry.attempt_count != 2 || retry.next_attempt_unix_ms != 0 {
+        return Err(AdapterContractError::Violation(
+            "a repeated retry must increment its durable attempt count and replace its deadline",
+        ));
+    }
+    Ok(())
+}
+
+fn unix_time_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 /// Exercises authoritative atomic commit, idempotency, journal, snapshot, and audit semantics.
 ///
 /// The commit must use a fresh tenant, scope, operation ID, and entity with `expected_version` set
@@ -159,8 +221,9 @@ pub async fn verify_authoritative_store<S>(
     commit: CommitOperation,
 ) -> Result<AuthoritativeAdapterContractReport, AdapterContractError>
 where
-    S: AuthoritativeStore,
+    S: AuthoritativeStore + TransactionCapabilityProvider,
 {
+    verify_authoritative_capabilities(store.transaction_capabilities())?;
     if store
         .operation_result(commit.tenant_id, commit.operation_id)
         .await?
@@ -203,12 +266,325 @@ where
     verify_authoritative_journal(store, &commit, &acknowledgement).await?;
     let audit_offset = verify_authoritative_audit(store, &commit).await?;
     let snapshot_id = verify_authoritative_snapshot(store, &commit).await?;
+    verify_invalid_version_transition(store, &commit).await?;
+    verify_concurrent_duplicate(store, &commit).await?;
+    verify_concurrent_version_race(store, &commit).await?;
 
     Ok(AuthoritativeAdapterContractReport {
         acknowledgement,
         snapshot_id,
         audit_offset,
     })
+}
+
+async fn verify_invalid_version_transition<S>(
+    store: &S,
+    baseline: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: AuthoritativeStore,
+{
+    let invalid_next =
+        EntityVersion::INITIAL
+            .checked_next()
+            .ok_or(AdapterContractError::Violation(
+                "the conformance fixture cannot create an invalid version transition",
+            ))?;
+    let invalid = CommitOperation {
+        operation_id: OperationId::new(),
+        entity: EntityRef {
+            entity_type: baseline.entity.entity_type,
+            entity_id: EntityId::new(),
+        },
+        expected_version: None,
+        next_version: invalid_next,
+        ..baseline.clone()
+    };
+    if store.commit_operation(invalid.clone()).await.is_ok() {
+        return Err(AdapterContractError::Violation(
+            "an authoritative adapter must reject a version transition that skips the initial version",
+        ));
+    }
+    if store
+        .read_entity(invalid.tenant_id, invalid.entity)
+        .await?
+        .is_some()
+        || store
+            .operation_result(invalid.tenant_id, invalid.operation_id)
+            .await?
+            .is_some()
+    {
+        return Err(AdapterContractError::Violation(
+            "an invalid version transition must not leave entity or ledger state",
+        ));
+    }
+    verify_no_journal_event(store, &invalid).await?;
+    verify_no_audit_record(store, &invalid).await
+}
+
+fn verify_local_capabilities(
+    capabilities: TransactionCapabilities,
+) -> Result<(), AdapterContractError> {
+    if !capabilities.is_consistent() {
+        return Err(AdapterContractError::Violation(
+            "the adapter transaction capability declaration is internally inconsistent",
+        ));
+    }
+    if !capabilities.guarantees.contains(
+        TransactionGuarantees::LOCAL_MUTATION_OUTBOX
+            .union(TransactionGuarantees::RECONCILIATION_CURSOR),
+    ) {
+        return Err(AdapterContractError::Violation(
+            "a writable local adapter must declare both local/outbox and reconciliation/cursor atomicity",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_authoritative_capabilities(
+    capabilities: TransactionCapabilities,
+) -> Result<(), AdapterContractError> {
+    if !capabilities.is_consistent() {
+        return Err(AdapterContractError::Violation(
+            "the adapter transaction capability declaration is internally inconsistent",
+        ));
+    }
+    if !capabilities.guarantees.contains(
+        TransactionGuarantees::AUTHORITATIVE_COMMIT
+            .union(TransactionGuarantees::CONCURRENT_IDEMPOTENCY)
+            .union(TransactionGuarantees::CONSISTENT_SNAPSHOT),
+    ) {
+        return Err(AdapterContractError::Violation(
+            "an authoritative adapter must declare atomic commit, concurrent idempotency, and consistent snapshots",
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_concurrent_duplicate<S>(
+    store: &S,
+    baseline: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: AuthoritativeStore,
+{
+    let expected_version = baseline.next_version;
+    let next_version = expected_version
+        .checked_next()
+        .ok_or(AdapterContractError::Violation(
+            "the conformance fixture cannot advance its entity version",
+        ))?;
+    let operation_id = OperationId::new();
+    let commit = CommitOperation {
+        operation_id,
+        expected_version: Some(expected_version),
+        next_version,
+        ..baseline.clone()
+    };
+    let (left, right) = join(
+        store.commit_operation(commit.clone()),
+        store.commit_operation(commit.clone()),
+    )
+    .await;
+    let (left, right) = (left?, right?);
+    let acknowledgement = match (&left, &right) {
+        (CommitOutcome::Applied(applied), CommitOutcome::Duplicate(duplicate))
+        | (CommitOutcome::Duplicate(duplicate), CommitOutcome::Applied(applied))
+            if same_acknowledgement(applied, duplicate) =>
+        {
+            applied
+        }
+        _ => {
+            return Err(AdapterContractError::Violation(
+                "concurrent duplicate commits must yield one applied and one identical duplicate result",
+            ));
+        }
+    };
+    let stored = store
+        .operation_result(baseline.tenant_id, operation_id)
+        .await?
+        .ok_or(AdapterContractError::Violation(
+            "a concurrent duplicate race did not retain its operation result",
+        ))?;
+    if !same_acknowledgement(acknowledgement, &stored) {
+        return Err(AdapterContractError::Violation(
+            "the concurrent duplicate ledger result differs from the winning commit",
+        ));
+    }
+    verify_exactly_one_journal_event(store, &commit).await?;
+    verify_exactly_one_audit_record(store, &commit).await
+}
+
+async fn verify_concurrent_version_race<S>(
+    store: &S,
+    baseline: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: AuthoritativeStore,
+{
+    let entity = EntityRef {
+        entity_type: baseline.entity.entity_type,
+        entity_id: EntityId::new(),
+    };
+    let mut left_commit = CommitOperation {
+        operation_id: OperationId::new(),
+        entity,
+        expected_version: None,
+        next_version: EntityVersion::INITIAL,
+        payload: [baseline.payload.as_slice(), b"-race-left"].concat(),
+        ..baseline.clone()
+    };
+    left_commit.command_digest[0] ^= 1;
+    let mut right_commit = CommitOperation {
+        operation_id: OperationId::new(),
+        payload: [baseline.payload.as_slice(), b"-race-right"].concat(),
+        ..left_commit.clone()
+    };
+    right_commit.command_digest[0] ^= 2;
+
+    let (left, right) = join(
+        store.commit_operation(left_commit.clone()),
+        store.commit_operation(right_commit.clone()),
+    )
+    .await;
+    let (left, right) = (left?, right?);
+    let (winner, loser) = match (&left, &right) {
+        (
+            CommitOutcome::Applied(_),
+            CommitOutcome::VersionChanged {
+                current: Some(EntityVersion::INITIAL),
+            },
+        ) => (&left_commit, &right_commit),
+        (
+            CommitOutcome::VersionChanged {
+                current: Some(EntityVersion::INITIAL),
+            },
+            CommitOutcome::Applied(_),
+        ) => (&right_commit, &left_commit),
+        _ => {
+            return Err(AdapterContractError::Violation(
+                "concurrent creation of one entity must apply once and reject the losing version race",
+            ));
+        }
+    };
+    if store
+        .operation_result(loser.tenant_id, loser.operation_id)
+        .await?
+        .is_some()
+    {
+        return Err(AdapterContractError::Violation(
+            "the losing version race must not record an operation-ledger result",
+        ));
+    }
+    verify_authoritative_entity(store, winner).await?;
+    verify_exactly_one_journal_event(store, winner).await?;
+    verify_no_journal_event(store, loser).await?;
+    verify_exactly_one_audit_record(store, winner).await?;
+    verify_no_audit_record(store, loser).await
+}
+
+async fn verify_exactly_one_journal_event<S>(
+    store: &S,
+    commit: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: ChangeJournal,
+{
+    let page = store
+        .read_changes_after(
+            commit.tenant_id,
+            commit.scope_id,
+            Sequence(0),
+            1_024,
+            64 * 1_024 * 1_024,
+        )
+        .await?;
+    if page
+        .changes
+        .iter()
+        .filter(|change| change.operation_id == commit.operation_id)
+        .count()
+        != 1
+    {
+        return Err(AdapterContractError::Violation(
+            "a successful raced commit must append exactly one journal event",
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_no_journal_event<S>(
+    store: &S,
+    commit: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: ChangeJournal,
+{
+    let page = store
+        .read_changes_after(
+            commit.tenant_id,
+            commit.scope_id,
+            Sequence(0),
+            1_024,
+            64 * 1_024 * 1_024,
+        )
+        .await?;
+    if page
+        .changes
+        .iter()
+        .any(|change| change.operation_id == commit.operation_id)
+    {
+        return Err(AdapterContractError::Violation(
+            "the losing version race must not append a journal event",
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_exactly_one_audit_record<S>(
+    store: &S,
+    commit: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: AuditLog,
+{
+    let page = store
+        .read_audit_after(commit.tenant_id, AuditOffset(0), 1_024)
+        .await?;
+    if page
+        .records
+        .iter()
+        .filter(|record| record.operation_id == commit.operation_id)
+        .count()
+        != 1
+    {
+        return Err(AdapterContractError::Violation(
+            "a successful raced commit must append exactly one audit record",
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_no_audit_record<S>(
+    store: &S,
+    commit: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: AuditLog,
+{
+    let page = store
+        .read_audit_after(commit.tenant_id, AuditOffset(0), 1_024)
+        .await?;
+    if page
+        .records
+        .iter()
+        .any(|record| record.operation_id == commit.operation_id)
+    {
+        return Err(AdapterContractError::Violation(
+            "the losing version race must not append an audit record",
+        ));
+    }
+    Ok(())
 }
 
 async fn verify_state<S>(

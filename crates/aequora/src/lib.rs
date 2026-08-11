@@ -40,6 +40,11 @@ pub use aequora_testkit as testkit;
 
 /// Common imports needed to build client and server integrations.
 pub mod prelude {
+    #[cfg(feature = "axum")]
+    pub use aequora_axum::{
+        AxumConfig, DrainOutcome, ReadinessFn, ReadinessProbe, ServerLifecycle,
+        router_with_lifecycle, router_with_readiness,
+    };
     pub use aequora_blob::{BlobDigest, BlobManifest, BlobRef, BlobStore, InMemoryBlobStore};
     pub use aequora_client::{
         AdaptiveBatchConfig, AdaptiveBatcher, BootstrapOutcome, ClientBuildError, ClientConfig,
@@ -49,14 +54,14 @@ pub mod prelude {
     };
     pub use aequora_clock::{Clock, SystemClock};
     pub use aequora_config::{
-        AequoraConfig, CompressionAlgorithm, CompressionConfig, ComputePoolConfig, ConfigError,
-        CoordinatorConfig, ProtocolConfig, PullConfig, PushConfig, ResourceLimitsConfig,
-        RetryPolicyConfig,
+        AdaptivePushConfig, AequoraConfig, CompressionAlgorithm, CompressionConfig,
+        ComputePoolConfig, ConfigError, CoordinatorConfig, OperationalConfig, ProtocolConfig,
+        PullConfig, PushConfig, ResourceLimitsConfig, RetryPolicyConfig,
     };
     pub use aequora_conflict::{
         ConflictPolicyRegistry, ConflictResolver, FieldSet, FieldSetMerger, FieldValue,
-        FinancialOperation, FinancialPolicyError, MergeDecision, MergeError, MergeInput,
-        MergeStrategy, RejectConflicts, TypedOperation,
+        FinancialOperation, FinancialPolicyError, LastWriterWinsMerger, MergeDecision, MergeError,
+        MergeInput, MergeStrategy, RejectConflicts, TimestampedValue, TypedOperation,
     };
     pub use aequora_crdt::{Crdt, GCounter, PnCounter, PostcardCrdtMerger};
     pub use aequora_executor::{

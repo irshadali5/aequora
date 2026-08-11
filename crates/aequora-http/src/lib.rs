@@ -1,6 +1,6 @@
 //! Bounded Postcard-over-HTTP client transport for the Axum integration.
 
-use aequora_codec::{DecodeLimits, EncodeOptions, MessageKind};
+use aequora_codec::{Compression, DecodeLimits, EncodeOptions, MessageKind};
 use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, BootstrapResponse, SyncRequest, SyncResponse};
 use aequora_transport::{SyncTransport, TransportError};
@@ -68,6 +68,10 @@ pub struct HttpTransportConfig {
     pub max_response_bytes: usize,
     /// Maximum response payload bytes after zstd decompression.
     pub max_decompressed_response_bytes: usize,
+    /// Minimum serialized request bytes before negotiated zstd is attempted.
+    pub compression_threshold: usize,
+    /// Zstandard level for large outgoing requests; `None` disables request compression.
+    pub request_zstd_level: Option<i32>,
 }
 
 impl Default for HttpTransportConfig {
@@ -75,6 +79,8 @@ impl Default for HttpTransportConfig {
         Self {
             max_response_bytes: 4 * 1_024 * 1_024,
             max_decompressed_response_bytes: 4 * 1_024 * 1_024,
+            compression_threshold: 4_096,
+            request_zstd_level: Some(3),
         }
     }
 }
@@ -143,18 +149,14 @@ impl HttpTransport {
         response_kind: MessageKind,
         protocol: aequora_types::ProtocolVersion,
         request: &Request,
+        options: EncodeOptions,
     ) -> Result<Reply, TransportError>
     where
         Request: serde::Serialize + Sync,
-        Reply: serde::de::DeserializeOwned,
+        Reply: serde::de::DeserializeOwned + WireProtocol,
     {
-        let frame = aequora_codec::encode_with_options(
-            protocol,
-            request_kind,
-            request,
-            EncodeOptions::default(),
-        )
-        .map_err(permanent)?;
+        let frame = aequora_codec::encode_with_options(protocol, request_kind, request, options)
+            .map_err(permanent)?;
         let uploaded = usize_to_u64(frame.len());
         let mut headers = self.headers.headers()?;
         headers.insert(
@@ -188,7 +190,7 @@ impl HttpTransport {
             uploaded,
             downloaded: usize_to_u64(body.len()),
         });
-        let (_, reply) = aequora_codec::decode_with_limits(
+        let (frame_protocol, reply) = aequora_codec::decode_with_limits::<Reply>(
             &body,
             response_kind,
             DecodeLimits {
@@ -197,7 +199,28 @@ impl HttpTransport {
             },
         )
         .map_err(permanent)?;
+        if frame_protocol != reply.protocol() {
+            return Err(TransportError::permanent(
+                "HTTP frame and response protocol versions differ",
+            ));
+        }
         Ok(reply)
+    }
+}
+
+trait WireProtocol {
+    fn protocol(&self) -> aequora_types::ProtocolVersion;
+}
+
+impl WireProtocol for SyncResponse {
+    fn protocol(&self) -> aequora_types::ProtocolVersion {
+        self.protocol
+    }
+}
+
+impl WireProtocol for BootstrapResponse {
+    fn protocol(&self) -> aequora_types::ProtocolVersion {
+        self.protocol
     }
 }
 
@@ -208,12 +231,14 @@ fn usize_to_u64(value: usize) -> u64 {
 #[async_trait]
 impl SyncTransport for HttpTransport {
     async fn exchange(&self, request: SyncRequest) -> Result<SyncResponse, TransportError> {
+        let options = self.request_compression(&request.capabilities);
         self.post(
             self.exchange_url.clone(),
             MessageKind::SyncRequest,
             MessageKind::SyncResponse,
             request.protocol,
             &request,
+            options,
         )
         .await
     }
@@ -222,14 +247,31 @@ impl SyncTransport for HttpTransport {
         &self,
         request: BootstrapRequest,
     ) -> Result<BootstrapResponse, TransportError> {
+        let options = self.request_compression(&request.capabilities);
         self.post(
             self.bootstrap_url.clone(),
             MessageKind::BootstrapRequest,
             MessageKind::BootstrapResponse,
             request.protocol,
             &request,
+            options,
         )
         .await
+    }
+}
+
+impl HttpTransport {
+    fn request_compression(&self, capabilities: &[aequora_protocol::Capability]) -> EncodeOptions {
+        EncodeOptions {
+            compression: if capabilities.contains(&aequora_protocol::Capability::Zstd) {
+                self.config
+                    .request_zstd_level
+                    .map_or(Compression::None, |level| Compression::Zstd { level })
+            } else {
+                Compression::None
+            },
+            compression_threshold: self.config.compression_threshold,
+        }
     }
 }
 
@@ -293,6 +335,22 @@ mod tests {
 
     struct EchoService;
 
+    #[test]
+    fn ingestion_and_operational_statuses_preserve_retry_semantics() {
+        for status in [
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert_eq!(status_error(status).kind, TransportErrorKind::Transient);
+        }
+        assert_eq!(
+            status_error(StatusCode::PAYLOAD_TOO_LARGE).kind,
+            TransportErrorKind::Permanent
+        );
+    }
+
     #[async_trait]
     impl ExchangeService for EchoService {
         async fn exchange(
@@ -346,7 +404,10 @@ mod tests {
             Client::new(),
             &base_url,
             NoRequestHeaders,
-            HttpTransportConfig::default(),
+            HttpTransportConfig {
+                compression_threshold: 1,
+                ..HttpTransportConfig::default()
+            },
         )
         .unwrap_or_else(|error| panic!("{error}"));
 
@@ -364,7 +425,7 @@ mod tests {
             cursor: None,
             operations: Vec::new(),
             limits: ClientLimits::default(),
-            capabilities: Vec::new(),
+            capabilities: vec![aequora_protocol::Capability::Zstd],
         };
         let response = transport
             .exchange(request.clone())
@@ -380,6 +441,7 @@ mod tests {
             HttpTransportConfig {
                 max_response_bytes: 1,
                 max_decompressed_response_bytes: 1,
+                ..HttpTransportConfig::default()
             },
         )
         .unwrap_or_else(|error| panic!("{error}"));

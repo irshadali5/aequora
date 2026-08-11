@@ -11,12 +11,14 @@ repository.workspace = true
 default = []
 axum = ["dep:aequora-axum"]
 http-client = ["dep:aequora-http"]
+quic = ["dep:aequora-quic"]
 
 [dependencies]
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
+aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }

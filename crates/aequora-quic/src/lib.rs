@@ -38,6 +38,8 @@ pub struct QuicConfig {
     pub compression_threshold: usize,
     /// zstd level selected after capability negotiation.
     pub zstd_level: i32,
+    /// Whether this endpoint permits negotiated zstd frames.
+    pub zstd_enabled: bool,
 }
 
 impl Default for QuicConfig {
@@ -49,6 +51,7 @@ impl Default for QuicConfig {
             max_decompressed_response_bytes: 4 * 1_024 * 1_024,
             compression_threshold: 4_096,
             zstd_level: 3,
+            zstd_enabled: true,
         }
     }
 }
@@ -96,21 +99,18 @@ impl QuicTransport {
 
     async fn request_response<Request, Response>(
         &self,
+        protocol: ProtocolVersion,
         request_kind: MessageKind,
         response_kind: MessageKind,
         request: &Request,
+        options: EncodeOptions,
     ) -> Result<Response, TransportError>
     where
         Request: Serialize + Sync,
-        Response: DeserializeOwned,
+        Response: DeserializeOwned + WireProtocol,
     {
-        let frame = encode_with_options(
-            ProtocolVersion::V1,
-            request_kind,
-            request,
-            EncodeOptions::default(),
-        )
-        .map_err(permanent)?;
+        let frame =
+            encode_with_options(protocol, request_kind, request, options).map_err(permanent)?;
         let (mut send, mut recv) = self.connection.open_bi().await.map_err(transient)?;
         send.write_all(&frame).await.map_err(transient)?;
         send.finish().map_err(transient)?;
@@ -125,10 +125,13 @@ impl QuicTransport {
 #[async_trait]
 impl SyncTransport for QuicTransport {
     async fn exchange(&self, request: SyncRequest) -> Result<SyncResponse, TransportError> {
+        let options = compression_options(&request.capabilities, self.config);
         self.request_response(
+            request.protocol,
             MessageKind::SyncRequest,
             MessageKind::SyncResponse,
             &request,
+            options,
         )
         .await
     }
@@ -137,10 +140,13 @@ impl SyncTransport for QuicTransport {
         &self,
         request: BootstrapRequest,
     ) -> Result<BootstrapResponse, TransportError> {
+        let options = compression_options(&request.capabilities, self.config);
         self.request_response(
+            request.protocol,
             MessageKind::BootstrapRequest,
             MessageKind::BootstrapResponse,
             &request,
+            options,
         )
         .await
     }
@@ -181,11 +187,12 @@ impl StreamingSyncTransport for QuicTransport {
         &self,
         request: BootstrapRequest,
     ) -> Result<Box<dyn SnapshotPageStream>, TransportError> {
+        let options = compression_options(&request.capabilities, self.config);
         let frame = encode_with_options(
             request.protocol,
             MessageKind::SnapshotStreamRequest,
             &request,
-            EncodeOptions::default(),
+            options,
         )
         .map_err(permanent)?;
         let (mut send, recv) = self.connection.open_bi().await.map_err(transient)?;
@@ -275,7 +282,7 @@ impl QuicServer {
             decode_frame(&frame, self.config.max_request_bytes).map_err(QuicServerError::new)?;
         match decoded.kind {
             MessageKind::SyncRequest => {
-                let (_, request) =
+                let request =
                     decode_request::<SyncRequest>(&frame, MessageKind::SyncRequest, self.config)?;
                 let capabilities = request.capabilities.clone();
                 let reply = match self.service.exchange(auth, request).await {
@@ -292,7 +299,7 @@ impl QuicServer {
                 send.finish().map_err(QuicServerError::new)
             }
             MessageKind::BootstrapRequest => {
-                let (_, request) = decode_request::<BootstrapRequest>(
+                let request = decode_request::<BootstrapRequest>(
                     &frame,
                     MessageKind::BootstrapRequest,
                     self.config,
@@ -312,7 +319,7 @@ impl QuicServer {
                 send.finish().map_err(QuicServerError::new)
             }
             MessageKind::SnapshotStreamRequest => {
-                let (_, request) = decode_request::<BootstrapRequest>(
+                let request = decode_request::<BootstrapRequest>(
                     &frame,
                     MessageKind::SnapshotStreamRequest,
                     self.config,
@@ -360,12 +367,46 @@ impl QuicServer {
     }
 }
 
-fn decode_request<T: DeserializeOwned>(
+trait WireProtocol {
+    fn protocol(&self) -> ProtocolVersion;
+}
+
+impl WireProtocol for SyncRequest {
+    fn protocol(&self) -> ProtocolVersion {
+        self.protocol
+    }
+}
+
+impl WireProtocol for SyncResponse {
+    fn protocol(&self) -> ProtocolVersion {
+        self.protocol
+    }
+}
+
+impl WireProtocol for BootstrapRequest {
+    fn protocol(&self) -> ProtocolVersion {
+        self.protocol
+    }
+}
+
+impl WireProtocol for BootstrapResponse {
+    fn protocol(&self) -> ProtocolVersion {
+        self.protocol
+    }
+}
+
+impl WireProtocol for PushHint {
+    fn protocol(&self) -> ProtocolVersion {
+        self.protocol
+    }
+}
+
+fn decode_request<T: DeserializeOwned + WireProtocol>(
     frame: &[u8],
     kind: MessageKind,
     config: QuicConfig,
-) -> Result<(ProtocolVersion, T), QuicServerError> {
-    decode_with_limits(
+) -> Result<T, QuicServerError> {
+    let (frame_protocol, request) = decode_with_limits::<T>(
         frame,
         kind,
         DecodeLimits {
@@ -373,10 +414,16 @@ fn decode_request<T: DeserializeOwned>(
             max_decompressed_bytes: config.max_decompressed_request_bytes,
         },
     )
-    .map_err(QuicServerError::new)
+    .map_err(QuicServerError::new)?;
+    if frame_protocol != request.protocol() {
+        return Err(QuicServerError {
+            message: "QUIC frame and request protocol versions differ".to_owned(),
+        });
+    }
+    Ok(request)
 }
 
-fn decode_reply<T: DeserializeOwned>(
+fn decode_reply<T: DeserializeOwned + WireProtocol>(
     frame: &[u8],
     expected: MessageKind,
     config: QuicConfig,
@@ -398,7 +445,7 @@ fn decode_reply<T: DeserializeOwned>(
             TransportError::permanent(error.message)
         });
     }
-    let (_, value) = decode_with_limits(
+    let (frame_protocol, value) = decode_with_limits::<T>(
         frame,
         expected,
         DecodeLimits {
@@ -407,12 +454,17 @@ fn decode_reply<T: DeserializeOwned>(
         },
     )
     .map_err(permanent)?;
+    if frame_protocol != value.protocol() {
+        return Err(TransportError::permanent(
+            "QUIC frame and response protocol versions differ",
+        ));
+    }
     Ok(value)
 }
 
 fn compression_options(capabilities: &[Capability], config: QuicConfig) -> EncodeOptions {
     EncodeOptions {
-        compression: if capabilities.contains(&Capability::Zstd) {
+        compression: if config.zstd_enabled && capabilities.contains(&Capability::Zstd) {
             Compression::Zstd {
                 level: config.zstd_level,
             }
@@ -504,7 +556,7 @@ mod tests {
             request: SyncRequest,
         ) -> Result<SyncResponse, ServerError> {
             Ok(SyncResponse {
-                protocol: ProtocolVersion::V1,
+                protocol: request.protocol,
                 directive: SyncDirective::Continue,
                 acknowledged: Vec::new(),
                 rejected: Vec::new(),
@@ -530,7 +582,7 @@ mod tests {
         ) -> Result<BootstrapResponse, ServerError> {
             let snapshot_id = request.snapshot_id.unwrap_or_default();
             Ok(BootstrapResponse {
-                protocol: ProtocolVersion::V1,
+                protocol: request.protocol,
                 snapshot_id,
                 cursor: Cursor {
                     scope: request.session.scope_id,
@@ -567,6 +619,43 @@ mod tests {
             result,
             Err(TransportError {
                 kind: TransportErrorKind::Transient,
+                ..
+            })
+        ));
+
+        let response = SyncResponse {
+            protocol: ProtocolVersion(2),
+            directive: SyncDirective::Continue,
+            acknowledged: Vec::new(),
+            rejected: Vec::new(),
+            conflicts: Vec::new(),
+            changes: Vec::new(),
+            next_cursor: Cursor {
+                scope: SyncScopeId::new(),
+                sequence: Sequence(0),
+            },
+            has_more: false,
+            server_time: HybridTimestamp {
+                physical_ms: 1,
+                logical: 0,
+                node: NodeId::new(),
+            },
+        };
+        let mismatched = encode_with_options(
+            ProtocolVersion::V1,
+            MessageKind::SyncResponse,
+            &response,
+            EncodeOptions::default(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert!(matches!(
+            decode_reply::<SyncResponse>(
+                &mismatched,
+                MessageKind::SyncResponse,
+                QuicConfig::default()
+            ),
+            Err(TransportError {
+                kind: TransportErrorKind::Permanent,
                 ..
             })
         ));
@@ -615,6 +704,25 @@ mod tests {
         )
     }
 
+    async fn assert_push_hint(
+        server: &QuicServer,
+        server_connection: &Connection,
+        transport: &QuicTransport,
+        hint: PushHint,
+    ) {
+        server
+            .send_push_hint(server_connection, &hint)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            transport
+                .next_push_hint()
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            hint
+        );
+    }
+
     #[tokio::test]
     async fn loopback_quic_exchanges_and_delivers_a_bounded_hint() {
         let (server_endpoint, client_endpoint, client_connection, server_connection) =
@@ -629,13 +737,17 @@ mod tests {
             tenant_id: tenant,
             device_id: device,
         };
-        let server = QuicServer::new(Arc::new(EchoService), QuicConfig::default());
+        let quic_config = QuicConfig {
+            compression_threshold: 1,
+            ..QuicConfig::default()
+        };
+        let server = QuicServer::new(Arc::new(EchoService), quic_config);
         let server_task = tokio::spawn({
             let server = server.clone();
             let connection = server_connection.clone();
             async move { server.serve_connection(connection, auth).await }
         });
-        let transport = QuicTransport::new(client_connection.clone(), QuicConfig::default());
+        let transport = QuicTransport::new(client_connection.clone(), quic_config);
         let session = SessionMetadata {
             session_id: SessionId::new(),
             device_id: device,
@@ -646,21 +758,22 @@ mod tests {
         };
         let response = transport
             .exchange(SyncRequest {
-                protocol: ProtocolVersion::V1,
+                protocol: ProtocolVersion(2),
                 request_id: RequestId::new(),
                 session: session.clone(),
                 cursor: None,
                 operations: Vec::new(),
                 limits: ClientLimits::default(),
-                capabilities: vec![Capability::Quic],
+                capabilities: vec![Capability::Quic, Capability::Zstd],
             })
             .await
             .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(response.protocol, ProtocolVersion(2));
         assert_eq!(response.next_cursor.scope, scope);
 
         let mut snapshot = transport
             .bootstrap_stream(BootstrapRequest {
-                protocol: ProtocolVersion::V1,
+                protocol: ProtocolVersion(2),
                 request_id: RequestId::new(),
                 session,
                 snapshot_id: None,
@@ -669,7 +782,11 @@ mod tests {
                     max_entities: 1,
                     max_payload_bytes: 16 * 1_024,
                 },
-                capabilities: vec![Capability::Quic, Capability::StreamingSnapshots],
+                capabilities: vec![
+                    Capability::Quic,
+                    Capability::StreamingSnapshots,
+                    Capability::Zstd,
+                ],
             })
             .await
             .unwrap_or_else(|error| panic!("{error}"));
@@ -702,17 +819,7 @@ mod tests {
             reason: PushHintReason::JournalAdvanced,
             region_id: None,
         };
-        server
-            .send_push_hint(&server_connection, &hint)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
-        assert_eq!(
-            transport
-                .next_push_hint()
-                .await
-                .unwrap_or_else(|error| panic!("{error}")),
-            hint
-        );
+        assert_push_hint(&server, &server_connection, &transport, hint).await;
 
         client_connection.close(0_u32.into(), b"test complete");
         server_task

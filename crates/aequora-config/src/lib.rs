@@ -1,6 +1,6 @@
 //! Validated, secret-free RON configuration for Aequora runtime components.
 
-use aequora_client::{ClientConfig, RetryConfig, SyncCoordinatorConfig};
+use aequora_client::{AdaptiveBatchConfig, ClientConfig, RetryConfig, SyncCoordinatorConfig};
 use aequora_compute::ComputeConfig;
 use aequora_protocol::{Capability, ClientLimits, SessionMetadata, SnapshotLimits};
 use aequora_server::ServerConfig;
@@ -14,6 +14,8 @@ use thiserror::Error;
 use aequora_axum::AxumConfig;
 #[cfg(feature = "http-client")]
 use aequora_http::HttpTransportConfig;
+#[cfg(feature = "quic")]
+use aequora_quic::QuicConfig;
 
 /// Complete runtime tuning configuration. Authentication credentials and database URLs are
 /// deliberately owned by the host application and do not belong in this structure.
@@ -36,6 +38,8 @@ pub struct AequoraConfig {
     pub limits: ResourceLimitsConfig,
     /// Background synchronization settings.
     pub coordinator: CoordinatorConfig,
+    /// Production server admission, deadline, and readiness controls.
+    pub operational: OperationalConfig,
 }
 
 /// Wire protocol selection.
@@ -65,6 +69,10 @@ pub struct PushConfig {
     pub max_operations: usize,
     /// Maximum compressed HTTP request body.
     pub max_bytes: usize,
+    /// Maximum local-mutation batching delay in milliseconds. Zero disables debouncing.
+    pub max_wait_ms: u64,
+    /// Optional latency-driven operation-count tuning.
+    pub adaptive: Option<AdaptivePushConfig>,
 }
 
 impl Default for PushConfig {
@@ -72,8 +80,24 @@ impl Default for PushConfig {
         Self {
             max_operations: 256,
             max_bytes: 1_024 * 1_024,
+            max_wait_ms: 100,
+            adaptive: None,
         }
     }
+}
+
+/// Deterministic additive-increase/multiplicative-decrease push tuning.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdaptivePushConfig {
+    /// Smallest operation count after congestion.
+    pub minimum_operations: usize,
+    /// Hard operation-count ceiling.
+    pub maximum_operations: usize,
+    /// Additive growth after a fast successful exchange.
+    pub increase_step: usize,
+    /// Latency at or below which a complete batch grows.
+    pub target_latency_ms: u64,
 }
 
 /// Incoming authoritative journal-page controls.
@@ -236,6 +260,52 @@ impl Default for CoordinatorConfig {
     }
 }
 
+/// Production HTTP trust-boundary controls.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OperationalConfig {
+    /// Maximum admitted exchange and bootstrap handlers.
+    pub max_in_flight_requests: usize,
+    /// Maximum admitted exchange and bootstrap handlers for one authenticated tenant.
+    pub max_in_flight_per_tenant: usize,
+    /// Sustained admitted requests per second for one authenticated tenant.
+    pub tenant_requests_per_second: u32,
+    /// Maximum immediately consumable request tokens for one authenticated tenant.
+    pub tenant_request_burst: u32,
+    /// Maximum tenant rate buckets retained by one server process.
+    pub max_rate_limit_tenants: usize,
+    /// Inactive tenant bucket retention in milliseconds.
+    pub rate_limit_idle_timeout_ms: u64,
+    /// Complete compressed request-body receive deadline in milliseconds.
+    pub body_read_timeout_ms: u64,
+    /// Authoritative service execution deadline in milliseconds.
+    pub request_timeout_ms: u64,
+    /// Dependency-readiness deadline in milliseconds.
+    pub readiness_timeout_ms: u64,
+    /// Maximum graceful-drain wait in milliseconds.
+    pub drain_timeout_ms: u64,
+    /// Whole seconds advertised to clients after overload or deadline rejection.
+    pub retry_after_seconds: u64,
+}
+
+impl Default for OperationalConfig {
+    fn default() -> Self {
+        Self {
+            max_in_flight_requests: 256,
+            max_in_flight_per_tenant: 64,
+            tenant_requests_per_second: 64,
+            tenant_request_burst: 128,
+            max_rate_limit_tenants: 4_096,
+            rate_limit_idle_timeout_ms: 300_000,
+            body_read_timeout_ms: 15_000,
+            request_timeout_ms: 30_000,
+            readiness_timeout_ms: 2_000,
+            drain_timeout_ms: 30_000,
+            retry_after_seconds: 1,
+        }
+    }
+}
+
 /// Configuration parsing or validation failure.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConfigError {
@@ -277,6 +347,17 @@ impl AequoraConfig {
             return Err(ConfigError::Invalid(
                 "push limits must be greater than zero",
             ));
+        }
+        if let Some(adaptive) = self.push.adaptive {
+            if adaptive.minimum_operations == 0
+                || adaptive.maximum_operations < adaptive.minimum_operations
+                || adaptive.increase_step == 0
+                || adaptive.target_latency_ms == 0
+            {
+                return Err(ConfigError::Invalid(
+                    "adaptive push settings are inconsistent",
+                ));
+            }
         }
         if self.pull.max_events == 0 || self.pull.max_bytes == 0 {
             return Err(ConfigError::Invalid(
@@ -323,6 +404,32 @@ impl AequoraConfig {
         {
             return Err(ConfigError::Invalid("coordinator limits are inconsistent"));
         }
+        if self.operational.max_in_flight_requests == 0
+            || self.operational.max_in_flight_per_tenant == 0
+            || self.operational.tenant_requests_per_second == 0
+            || self.operational.tenant_request_burst == 0
+            || self.operational.max_rate_limit_tenants == 0
+            || self.operational.rate_limit_idle_timeout_ms == 0
+            || self.operational.body_read_timeout_ms == 0
+            || self.operational.request_timeout_ms == 0
+            || self.operational.readiness_timeout_ms == 0
+            || self.operational.drain_timeout_ms == 0
+            || self.operational.retry_after_seconds == 0
+        {
+            return Err(ConfigError::Invalid(
+                "operational limits must be greater than zero",
+            ));
+        }
+        if self.operational.max_in_flight_per_tenant > self.operational.max_in_flight_requests {
+            return Err(ConfigError::Invalid(
+                "per-tenant admission limit must not exceed the global limit",
+            ));
+        }
+        if self.operational.max_rate_limit_tenants < self.operational.max_in_flight_requests {
+            return Err(ConfigError::Invalid(
+                "rate-limit tenant capacity must cover the global in-flight limit",
+            ));
+        }
         Ok(())
     }
 
@@ -336,6 +443,13 @@ impl AequoraConfig {
         let mut config = ClientConfig::new(session);
         config.protocol = ProtocolVersion(self.protocol.version);
         config.push_batch_size = self.push.max_operations;
+        config.push_batch_bytes = self.push.max_bytes;
+        config.adaptive_batching = self.push.adaptive.map(|adaptive| AdaptiveBatchConfig {
+            minimum_operations: adaptive.minimum_operations,
+            maximum_operations: adaptive.maximum_operations,
+            increase_step: adaptive.increase_step,
+            target_latency: Duration::from_millis(adaptive.target_latency_ms),
+        });
         config.limits = ClientLimits {
             max_changes: self.pull.max_events,
             max_response_bytes: u32::try_from(self.pull.max_bytes)
@@ -392,8 +506,22 @@ impl AequoraConfig {
         Ok(AxumConfig {
             max_body_bytes: self.push.max_bytes,
             max_decompressed_bytes: self.limits.max_decompressed_bytes,
+            body_read_timeout: Duration::from_millis(self.operational.body_read_timeout_ms),
             compression_threshold: self.compression.min_bytes,
             zstd_level: self.compression.zstd_level,
+            zstd_enabled: self.compression.algorithm == CompressionAlgorithm::Zstd,
+            max_in_flight_requests: self.operational.max_in_flight_requests,
+            max_in_flight_per_tenant: self.operational.max_in_flight_per_tenant,
+            tenant_requests_per_second: self.operational.tenant_requests_per_second,
+            tenant_request_burst: self.operational.tenant_request_burst,
+            max_rate_limit_tenants: self.operational.max_rate_limit_tenants,
+            rate_limit_idle_timeout: Duration::from_millis(
+                self.operational.rate_limit_idle_timeout_ms,
+            ),
+            request_timeout: Duration::from_millis(self.operational.request_timeout_ms),
+            readiness_timeout: Duration::from_millis(self.operational.readiness_timeout_ms),
+            drain_timeout: Duration::from_millis(self.operational.drain_timeout_ms),
+            retry_after_seconds: self.operational.retry_after_seconds,
         })
     }
 
@@ -408,6 +536,28 @@ impl AequoraConfig {
         Ok(HttpTransportConfig {
             max_response_bytes: self.pull.max_bytes,
             max_decompressed_response_bytes: self.limits.max_decompressed_bytes,
+            compression_threshold: self.compression.min_bytes,
+            request_zstd_level: (self.compression.algorithm == CompressionAlgorithm::Zstd)
+                .then_some(self.compression.zstd_level),
+        })
+    }
+
+    /// Produces symmetric QUIC framing, decompression, and compression settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when this configuration is invalid.
+    #[cfg(feature = "quic")]
+    pub fn quic_config(&self) -> Result<QuicConfig, ConfigError> {
+        self.validate()?;
+        Ok(QuicConfig {
+            max_request_bytes: self.push.max_bytes,
+            max_decompressed_request_bytes: self.limits.max_decompressed_bytes,
+            max_response_bytes: self.pull.max_bytes,
+            max_decompressed_response_bytes: self.limits.max_decompressed_bytes,
+            compression_threshold: self.compression.min_bytes,
+            zstd_level: self.compression.zstd_level,
+            zstd_enabled: self.compression.algorithm == CompressionAlgorithm::Zstd,
         })
     }
 
@@ -438,6 +588,7 @@ impl AequoraConfig {
                 .periodic_interval_ms
                 .map(Duration::from_millis),
             sync_on_start: self.coordinator.sync_on_start,
+            mutation_debounce: Duration::from_millis(self.push.max_wait_ms),
         })
     }
 }
@@ -461,7 +612,7 @@ mod tests {
     #[test]
     fn partial_ron_uses_checked_defaults_and_maps_consistently() {
         let config = AequoraConfig::from_ron(
-            "(push: (max_operations: 64), coordinator: (periodic_interval_ms: None))",
+            "(push: (max_operations: 64, adaptive: Some((minimum_operations: 8, maximum_operations: 128, increase_step: 8, target_latency_ms: 100))), coordinator: (periodic_interval_ms: None))",
         )
         .unwrap_or_else(|error| panic!("{error}"));
         let client = config
@@ -471,6 +622,16 @@ mod tests {
             .server_config()
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(client.push_batch_size, 64);
+        assert_eq!(client.push_batch_bytes, 1_024 * 1_024);
+        assert_eq!(
+            client.adaptive_batching,
+            Some(AdaptiveBatchConfig {
+                minimum_operations: 8,
+                maximum_operations: 128,
+                increase_step: 8,
+                target_latency: Duration::from_millis(100),
+            })
+        );
         assert_eq!(server.limits.max_operations, 64);
         assert!(client.capabilities.contains(&Capability::Zstd));
         assert_eq!(
@@ -490,6 +651,92 @@ mod tests {
                 "(pull: (max_bytes: 8388608), limits: (max_decompressed_bytes: 4194304))"
             )
             .is_err()
+        );
+        assert!(AequoraConfig::from_ron("(operational: (max_in_flight_requests: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (max_in_flight_per_tenant: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (tenant_requests_per_second: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (tenant_request_burst: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (max_rate_limit_tenants: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (rate_limit_idle_timeout_ms: 0))").is_err());
+        assert!(AequoraConfig::from_ron("(operational: (body_read_timeout_ms: 0))").is_err());
+        assert!(
+            AequoraConfig::from_ron(
+                "(operational: (max_in_flight_requests: 4, max_in_flight_per_tenant: 5))"
+            )
+            .is_err()
+        );
+        assert!(
+            AequoraConfig::from_ron(
+                "(operational: (max_in_flight_requests: 8, max_rate_limit_tenants: 7))"
+            )
+            .is_err()
+        );
+        let mut config = AequoraConfig::default();
+        config.operational.request_timeout_ms = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.operational.readiness_timeout_ms = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.operational.retry_after_seconds = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.operational.drain_timeout_ms = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[cfg(feature = "axum")]
+    #[test]
+    fn operational_limits_reach_the_axum_boundary() {
+        let config = AequoraConfig::from_ron(
+            "(operational: (max_in_flight_requests: 7, max_in_flight_per_tenant: 3, tenant_requests_per_second: 11, tenant_request_burst: 13, max_rate_limit_tenants: 17, rate_limit_idle_timeout_ms: 19000, body_read_timeout_ms: 5000, request_timeout_ms: 9000, readiness_timeout_ms: 700, drain_timeout_ms: 12000, retry_after_seconds: 3))",
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let axum = config
+            .axum_config()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(axum.max_in_flight_requests, 7);
+        assert_eq!(axum.max_in_flight_per_tenant, 3);
+        assert_eq!(axum.tenant_requests_per_second, 11);
+        assert_eq!(axum.tenant_request_burst, 13);
+        assert_eq!(axum.max_rate_limit_tenants, 17);
+        assert_eq!(axum.rate_limit_idle_timeout, Duration::from_secs(19));
+        assert_eq!(axum.body_read_timeout, Duration::from_secs(5));
+        assert_eq!(axum.request_timeout, Duration::from_secs(9));
+        assert_eq!(axum.readiness_timeout, Duration::from_millis(700));
+        assert_eq!(axum.drain_timeout, Duration::from_secs(12));
+        assert_eq!(axum.retry_after_seconds, 3);
+    }
+
+    #[test]
+    fn disabling_compression_reaches_every_enabled_transport_boundary() {
+        let mut config = AequoraConfig::default();
+        config.compression.algorithm = CompressionAlgorithm::None;
+        let client = config
+            .client_config(session())
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(!client.capabilities.contains(&Capability::Zstd));
+        #[cfg(feature = "axum")]
+        assert!(
+            !config
+                .axum_config()
+                .unwrap_or_else(|error| panic!("{error}"))
+                .zstd_enabled
+        );
+        #[cfg(feature = "http-client")]
+        assert_eq!(
+            config
+                .http_transport_config()
+                .unwrap_or_else(|error| panic!("{error}"))
+                .request_zstd_level,
+            None
+        );
+        #[cfg(feature = "quic")]
+        assert!(
+            !config
+                .quic_config()
+                .unwrap_or_else(|error| panic!("{error}"))
+                .zstd_enabled
         );
     }
 }

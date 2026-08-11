@@ -20,6 +20,7 @@ aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 async-trait.workspace = true
+futures-util.workspace = true
 postcard.workspace = true
 thiserror.workspace = true
 

@@ -35,7 +35,10 @@ use aequora_types::{
     ProtocolVersion, RequestId, SchemaVersion, Sequence, SessionId, SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 
 struct CopyPayloadExecutor;
@@ -79,6 +82,57 @@ impl OperationExecutor for CopyPayloadExecutor {
 struct DenyScopeExecutor;
 
 struct HintOnlyTransport(PushHint);
+
+enum ResponseCorruption {
+    MissingTerminalResult,
+    CursorLeap,
+}
+
+struct CorruptingTransport {
+    inner: InProcessTransport,
+    corruption: ResponseCorruption,
+}
+
+struct CountingTransport {
+    inner: InProcessTransport,
+    exchanges: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl SyncTransport for CountingTransport {
+    async fn exchange(
+        &self,
+        request: SyncRequest,
+    ) -> Result<aequora_protocol::SyncResponse, TransportError> {
+        self.exchanges.fetch_add(1, Ordering::Relaxed);
+        self.inner.exchange(request).await
+    }
+
+    async fn bootstrap(
+        &self,
+        request: BootstrapRequest,
+    ) -> Result<aequora_protocol::BootstrapResponse, TransportError> {
+        self.inner.bootstrap(request).await
+    }
+}
+
+#[async_trait]
+impl SyncTransport for CorruptingTransport {
+    async fn exchange(
+        &self,
+        request: SyncRequest,
+    ) -> Result<aequora_protocol::SyncResponse, TransportError> {
+        let mut response = self.inner.exchange(request).await?;
+        match self.corruption {
+            ResponseCorruption::MissingTerminalResult => response.acknowledged.clear(),
+            ResponseCorruption::CursorLeap => {
+                response.next_cursor.sequence =
+                    Sequence(response.next_cursor.sequence.0.saturating_add(1));
+            }
+        }
+        Ok(response)
+    }
+}
 
 #[async_trait]
 impl SyncTransport for HintOnlyTransport {
@@ -288,6 +342,148 @@ async fn client_push_pull_reconciles_atomically() {
 }
 
 #[tokio::test]
+async fn client_rejects_incomplete_terminal_results_and_cursor_leaps() {
+    for corruption in [
+        ResponseCorruption::MissingTerminalResult,
+        ResponseCorruption::CursorLeap,
+    ] {
+        let fixture = Fixture::new();
+        let authoritative = InMemoryAuthoritativeStore::default();
+        let local = InMemoryLocalStore::default();
+        let operation = fixture.operation();
+        let operation_id = operation.operation_id;
+        local
+            .append_operation(operation)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let engine = ClientSyncEngine::new(
+            local.clone(),
+            CorruptingTransport {
+                inner: InProcessTransport::new(server(&authoritative), fixture.auth),
+                corruption,
+            },
+            ClientConfig::new(fixture.session),
+        );
+
+        let Err(error) = engine.run_once().await else {
+            panic!("corrupt response must not reconcile")
+        };
+        assert!(matches!(
+            error,
+            ClientError::OperationResults | ClientError::ChangeSequence
+        ));
+        assert_eq!(
+            local
+                .operation_state(operation_id)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            Some(OutboxState::Retry)
+        );
+        assert!(
+            local
+                .load_cursor(fixture.scope)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .is_none()
+        );
+    }
+}
+
+#[tokio::test]
+async fn outgoing_batches_stop_at_the_framed_byte_limit() {
+    let fixture = Fixture::new();
+    let authoritative = InMemoryAuthoritativeStore::default();
+    let local = InMemoryLocalStore::default();
+    let first = fixture.operation();
+    let mut second = fixture.operation();
+    second.entity.entity_id = EntityId::new();
+    local
+        .append_operation(first.clone())
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    local
+        .append_operation(second)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut config = ClientConfig::new(fixture.session);
+    config.push_batch_size = 2;
+    let one_operation_request = SyncRequest {
+        protocol: config.protocol,
+        request_id: RequestId::new(),
+        session: config.session.clone(),
+        cursor: None,
+        operations: vec![first],
+        limits: config.limits,
+        capabilities: config.capabilities.clone(),
+    };
+    let one_operation_bytes = aequora_codec::encode(
+        ProtocolVersion::V1,
+        aequora_codec::MessageKind::SyncRequest,
+        &one_operation_request,
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
+    .len();
+    config.push_batch_bytes = one_operation_bytes;
+    let engine = ClientSyncEngine::new(
+        local.clone(),
+        InProcessTransport::new(server(&authoritative), fixture.auth),
+        config,
+    );
+
+    let outcome = engine
+        .run_once()
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(outcome.acknowledged, 1);
+    assert_eq!(authoritative.applied_operation_count(), 1);
+    assert_eq!(local.pending_count(), 1);
+}
+
+#[tokio::test]
+async fn server_pages_by_the_exact_advertised_response_frame_limit() {
+    let fixture = Fixture::new();
+    let authoritative = InMemoryAuthoritativeStore::default();
+    let service = server(&authoritative);
+    for _ in 0..2 {
+        let mut operation = fixture.operation();
+        operation.entity.entity_id = EntityId::new();
+        service
+            .exchange(fixture.auth, fixture.request(operation))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+    let mut request = fixture.request(fixture.operation());
+    request.operations.clear();
+    let full = service
+        .exchange(fixture.auth, request.clone())
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(full.changes.len(), 2);
+    let mut one = full;
+    one.changes.truncate(1);
+    one.next_cursor.sequence = one.changes[0].sequence;
+    one.has_more = true;
+    request.limits.max_response_bytes = u32::try_from(
+        aequora_codec::encode(
+            ProtocolVersion::V1,
+            aequora_codec::MessageKind::SyncResponse,
+            &one,
+        )
+        .unwrap_or_else(|error| panic!("{error}"))
+        .len(),
+    )
+    .unwrap_or(u32::MAX);
+
+    let bounded = service
+        .exchange(fixture.auth, request)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(bounded.changes.len(), 1);
+    assert!(bounded.has_more);
+    assert_eq!(bounded.next_cursor.sequence, bounded.changes[0].sequence);
+}
+
+#[tokio::test]
 async fn protocol_windows_return_a_typed_upgrade_instruction() {
     let fixture = Fixture::new();
     let authoritative = InMemoryAuthoritativeStore::default();
@@ -370,6 +566,37 @@ async fn an_expired_cursor_automatically_bootstraps_before_incremental_sync() {
         .await
         .unwrap_or_else(|error| panic!("{error}"));
     assert!(local.entity(fixture.entity).is_some());
+    assert_eq!(
+        local
+            .load_cursor(fixture.scope)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"))
+            .map(|cursor| cursor.sequence),
+        Some(Sequence(1))
+    );
+}
+
+#[tokio::test]
+async fn a_new_client_bootstraps_instead_of_replaying_the_journal() {
+    let fixture = Fixture::new();
+    let authoritative = InMemoryAuthoritativeStore::default();
+    server(&authoritative)
+        .exchange(fixture.auth, fixture.request(fixture.operation()))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let local = InMemoryLocalStore::default();
+    let engine = ClientSyncEngine::new(
+        local.clone(),
+        InProcessTransport::new(server(&authoritative), fixture.auth),
+        ClientConfig::new(fixture.session),
+    );
+
+    let summary = engine
+        .sync()
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(summary.changes, 0, "state must arrive in the snapshot");
+    assert_eq!(local.entity_count(fixture.scope), 1);
     assert_eq!(
         local
             .load_cursor(fixture.scope)
@@ -618,7 +845,8 @@ async fn transient_transport_failures_retry_without_duplicate_effects() {
         multiplier: 2,
         jitter_percent: 0,
     };
-    let engine = ClientSyncEngine::new(local, transport, config);
+    let metrics = Arc::new(AtomicMetrics::default());
+    let engine = ClientSyncEngine::new(local, transport, config).with_observer(metrics.clone());
 
     let outcome = engine
         .run_with_retry()
@@ -628,6 +856,7 @@ async fn transient_transport_failures_retry_without_duplicate_effects() {
     assert_eq!(outcome.acknowledged, 1);
     assert_eq!(engine.store().pending_count(), 0);
     assert_eq!(authoritative.applied_operation_count(), 1);
+    assert_eq!(metrics.snapshot().retries, 1);
 }
 
 #[tokio::test]
@@ -952,6 +1181,12 @@ async fn journal_compaction_preserves_the_idempotency_ledger() {
 async fn observers_cover_client_server_and_compute_boundaries_without_payloads() {
     let fixture = Fixture::new();
     let authoritative = InMemoryAuthoritativeStore::default();
+    let mut existing = fixture.operation();
+    existing.entity.entity_id = EntityId::new();
+    server(&authoritative)
+        .exchange(fixture.auth, fixture.request(existing))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
     let local = InMemoryLocalStore::default();
     local
         .append_operation(fixture.operation())
@@ -977,8 +1212,10 @@ async fn observers_cover_client_server_and_compute_boundaries_without_payloads()
         .with_observer(server_metrics.clone()),
     );
     let transport = InProcessTransport::new(service, fixture.auth);
-    let engine = ClientSyncEngine::new(local, transport, ClientConfig::new(fixture.session))
-        .with_observer(client_metrics.clone());
+    let mut config = ClientConfig::new(fixture.session);
+    config.limits.max_changes = 1;
+    let engine =
+        ClientSyncEngine::new(local, transport, config).with_observer(client_metrics.clone());
 
     engine
         .run_once()
@@ -995,6 +1232,7 @@ async fn observers_cover_client_server_and_compute_boundaries_without_payloads()
     assert_eq!(server.operations, 1);
     assert_eq!(server.changes, 1);
     assert_eq!(server.compute_offloads, 1);
+    assert_eq!(server.journal_lag, 1);
     assert_eq!(server.failures, 0);
 }
 
@@ -1047,9 +1285,13 @@ async fn coordinator_reports_status_without_a_ui_framework_dependency() {
         .append_operation(fixture.operation())
         .await
         .unwrap_or_else(|error| panic!("{error}"));
+    let exchanges = Arc::new(AtomicUsize::new(0));
     let engine = Arc::new(ClientSyncEngine::new(
         local.clone(),
-        InProcessTransport::new(server(&authoritative), fixture.auth),
+        CountingTransport {
+            inner: InProcessTransport::new(server(&authoritative), fixture.auth),
+            exchanges: exchanges.clone(),
+        },
         ClientConfig::new(fixture.session),
     ));
     let (coordinator, handle) = SyncCoordinator::new(
@@ -1058,11 +1300,20 @@ async fn coordinator_reports_status_without_a_ui_framework_dependency() {
             channel_capacity: 4,
             periodic_interval: None,
             sync_on_start: false,
+            mutation_debounce: Duration::from_millis(10),
         },
     );
     let mut status = handle.subscribe();
     let task = tokio::spawn(coordinator.run());
 
+    handle
+        .trigger(SyncTrigger::LocalMutation)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    handle
+        .trigger(SyncTrigger::LocalMutation)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
     handle
         .trigger(SyncTrigger::LocalMutation)
         .await
@@ -1077,6 +1328,7 @@ async fn coordinator_reports_status_without_a_ui_framework_dependency() {
         }
     }
     assert_eq!(local.pending_count(), 0);
+    assert_eq!(exchanges.load(Ordering::Relaxed), 1);
     handle
         .trigger(SyncTrigger::Shutdown)
         .await

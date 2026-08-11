@@ -388,6 +388,8 @@ pub enum ConflictPolicy {
     CommutativeOperation,
     /// Merge an application-defined convergent replicated data type.
     Crdt,
+    /// Deterministically keep the newest application-timestamped whole value.
+    LastWriterWins,
 }
 
 /// A stale-base conflict surfaced to the client.
@@ -605,4 +607,30 @@ pub struct PushHint {
     pub reason: PushHintReason,
     /// Serving region that emitted the hint, when region routing is enabled.
     pub region_id: Option<RegionId>,
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn conflict_policy_wire_discriminants_remain_append_only() {
+        let policies = [
+            ConflictPolicy::Reject,
+            ConflictPolicy::ServerWins,
+            ConflictPolicy::ClientWins,
+            ConflictPolicy::CustomMerge,
+            ConflictPolicy::ManualResolution,
+            ConflictPolicy::FieldMerge,
+            ConflictPolicy::CommutativeOperation,
+            ConflictPolicy::Crdt,
+            ConflictPolicy::LastWriterWins,
+        ];
+        for (discriminant, policy) in policies.into_iter().enumerate() {
+            assert_eq!(
+                postcard::to_stdvec(&policy).unwrap_or_else(|error| panic!("{error}")),
+                vec![u8::try_from(discriminant).unwrap_or(u8::MAX)]
+            );
+        }
+    }
 }

@@ -10,6 +10,21 @@ One important correction to the stack: Tokio handles asynchronous network/databa
 
 > A reusable, strongly typed, database-independent synchronization engine written in pure Rust for synchronizing local application state with an authoritative server through an Axum validation and execution boundary.
 
+## Implementation Status
+
+**Implementation complete as of 2026-08-11.** Sections 0–170 are mapped to code and direct
+test/build evidence in [`docs/plan-completion.md`](docs/plan-completion.md). The audit includes the
+four database-neutral composition profiles, snapshot-first onboarding, byte/count/wait bounded
+batching, all conflict policies including explicit LWW, HTTP and QUIC transport negotiation,
+Guppy dependency enforcement, dedicated Rayon work, observability, adapters, examples, the
+Phase 1–4 protocol roadmap, Phase 5 production operational resilience, Phase 6 graceful
+draining/zero-downtime lifecycle, Phase 7 multi-tenant fair admission, Phase 8 authenticated
+tenant request-rate limiting, and Phase 9 bounded HTTP body ingestion. Live PostgreSQL 18
+execution is verified on the current revision.
+Neon remains
+an environment-conditional release gate and is reported separately from unconditional
+verification rather than being silently treated as passed.
+
 ---
 
 # 0. Non-Negotiable Project Direction
@@ -5628,4 +5643,235 @@ If you replace Axum, the core Aequora protocol does not change.
 
 If you replace Dioxus, Aequora does not change.
 
+---
+
+# 166. Phase 5 — Production Operational Resilience
+
+After protocol and adapter completeness, the next phase hardens the network trust boundary for
+real deployments. A valid request must not be allowed to consume unbounded server concurrency or
+run indefinitely, and a process being alive must not be confused with its dependencies being
+ready.
+
+Build:
+
+```text
+bounded in-flight HTTP exchanges and bootstrap requests
+immediate overload rejection with Retry-After guidance
+per-request execution deadlines
+separate liveness and dependency-aware readiness endpoints
+bounded readiness checks
+payload-free overload, timeout, and readiness metrics
+strict RON configuration for every operational limit
+deterministic adversarial tests for saturation, deadlines, and unhealthy dependencies
+```
+
+The host application still owns authentication and infrastructure-specific health checks. Aequora
+provides an object-safe readiness boundary so PostgreSQL, Neon, a custom authoritative store, or a
+composite application probe can be connected without importing a database adapter into the Axum
+crate.
+
+Compatibility requirements:
+
+```text
+/sync/v1/health remains a liveness alias
+/sync/v1/health/live reports process liveness without touching dependencies
+/sync/v1/health/ready runs the configured bounded readiness probe
+existing router constructors remain source-compatible and use an always-ready probe
+HTTP overload and deadline responses remain transient to Aequora clients
+```
+
+Phase 5 is complete only when concurrency permits are released after success, failure, and
+deadline cancellation; readiness checks cannot consume an exchange permit; configuration rejects
+zero or inconsistent bounds; and metrics make every rejected or timed-out request visible without
+recording operation payloads or credentials.
+
 That is the architectural boundary worth protecting.
+
+---
+
+# 167. Phase 6 — Graceful Draining and Zero-Downtime Lifecycle
+
+Production shutdown must preserve the same transactional guarantees as normal operation. A
+process receiving a deployment or termination signal must become unready, reject new sync work,
+allow already admitted exchanges to finish, and stop waiting at a configured deadline. Killing
+arbitrary request futures without a visible lifecycle boundary makes rollout behavior difficult to
+reason about even when database transactions themselves are atomic.
+
+Build:
+
+```text
+cloneable server lifecycle handle
+race-free accepting-to-draining transition
+exact in-flight request tracking
+automatic readiness failure while draining
+distinct transient rejection for new work during drain
+bounded asynchronous wait for admitted work
+typed drained versus timed-out outcome with remaining request count
+payload-free lifecycle gauges and drain outcome metrics
+strict RON drain deadline
+Axum graceful-shutdown integration example
+deterministic concurrency tests for drain races, completion, and timeout
+```
+
+The lifecycle is an HTTP/application boundary, not a database identity. It must wrap any
+`ExchangeService` and any readiness probe without importing PostgreSQL, Stoolap, Neon, or another
+adapter. Beginning a drain is irreversible for that router instance; deployments that need to
+serve again construct a new service lifecycle instead of reopening a partially shut-down one.
+
+Required ordering:
+
+```text
+receive shutdown signal
+    ↓
+atomically mark lifecycle draining
+    ↓
+readiness immediately becomes unavailable
+    ↓
+new exchange/bootstrap admission returns transient 503 + Retry-After
+    ↓
+wait for the exact admitted count to reach zero
+    ↓
+return Drained, or TimedOut { remaining } at the configured deadline
+    ↓
+allow the host server/runtime to finish shutdown
+```
+
+Phase 6 is complete only when admission and drain transition share one synchronization boundary,
+so no request can enter after a drain observes zero in flight; permits/counts are released on
+success, error, cancellation, and deadline; dependency readiness is not invoked after draining;
+and existing router constructors remain source-compatible.
+
+---
+
+# 168. Phase 7 — Multi-Tenant Fair Admission
+
+A global concurrency ceiling protects the process, but it does not isolate tenants from one
+another. One noisy tenant can occupy every exchange slot and prevent unrelated tenants from
+making progress while the server is otherwise healthy. Production admission therefore needs a
+second, tenant-scoped ceiling inside the same lifecycle synchronization boundary.
+
+Build:
+
+```text
+global and per-tenant in-flight ceilings
+authenticated tenant admission before request-body decoding
+atomic global and tenant count updates
+automatic removal of idle tenant counters
+distinct transient tenant-overload response with Retry-After guidance
+payload-free tenant-overload metrics without tenant labels
+strict RON validation for consistent global and tenant limits
+deterministic noisy-neighbor isolation tests
+```
+
+Admission uses the authenticated `AuthContext` already placed in request extensions by the host
+application. Tenant identity must never come from an untrusted request header or body field. The
+global limit remains the final process-wide bound, while the per-tenant limit ensures that one
+tenant cannot reserve all capacity. A tenant-scoped rejection returns `429 Too Many Requests`;
+global saturation and draining keep their existing `503 Service Unavailable` semantics.
+
+Required invariants:
+
+```text
+0 < max_in_flight_per_tenant <= max_in_flight_requests
+sum(active tenant counts) == global in-flight count
+tenant counters are removed when their count reaches zero
+tenant identity never appears in metric labels or payloads
+draining rejects all new tenants before either count changes
+permit cancellation releases both counts exactly once
+```
+
+Phase 7 is complete only when tenant and global admission happen under the same lock as draining;
+an admitted request holds both counts until its permit drops; idle tenants cannot accumulate in
+memory; and a deterministic test proves tenant B is admitted while tenant A is at its own ceiling
+and the global server still has capacity.
+
+---
+
+# 169. Phase 8 — Authenticated Tenant Request-Rate Limiting
+
+Concurrency limits bound simultaneous work, but they do not bound how quickly a tenant can cycle
+short requests through released permits. A malicious or malfunctioning authenticated client can
+therefore monopolize execution time without ever reaching its tenant in-flight ceiling. The Axum
+boundary needs a tenant-scoped token bucket before body decoding and authoritative execution.
+
+Build:
+
+```text
+authenticated per-tenant token buckets
+configurable sustained requests per second and burst capacity
+rate checks inside the lifecycle admission synchronization boundary
+distinct transient 429 response with Retry-After guidance
+payload-free rate-limit metrics without tenant labels
+bounded tracked-tenant state with idle and oldest-inactive eviction
+strict RON validation for rate, burst, retention, and capacity bounds
+deterministic burst, refill, isolation, and eviction tests
+```
+
+The rate limiter uses only the `TenantId` from host-provided `AuthContext`; request bodies and
+headers cannot choose a bucket. Tokens are consumed only after draining, global concurrency, and
+per-tenant concurrency checks pass. A rate-limited request never acquires an in-flight permit and
+never reaches body decoding. One tenant exhausting its bucket must not affect another tenant's
+bucket.
+
+Memory requirements:
+
+```text
+tracked tenant buckets have an explicit maximum
+the maximum is at least the global in-flight ceiling
+idle buckets are evicted after a configured duration
+when still full, the oldest inactive bucket is evicted
+an active tenant bucket is never selected for eviction
+tenant identifiers never appear in rate-limit metric payloads or labels
+```
+
+Phase 8 is complete only when sustained rate and burst are independently configurable; refill is
+monotonic and capped at burst capacity; a deterministic test proves tenant A receives `429` while
+tenant B still succeeds; expired or oldest inactive state cannot grow without bound; and Aequora's
+HTTP client classifies the response as transient.
+
+---
+
+# 170. Phase 9 — Bounded HTTP Body Ingestion
+
+An authoritative execution timeout begins too late to protect request ingestion. Axum extracts the
+body before the handler runs, so an authenticated slow client can acquire admission and then drip
+bytes indefinitely. That request can occupy tenant/global capacity and prevent graceful draining
+without ever reaching protocol decoding or authoritative execution.
+
+Build:
+
+```text
+custom bounded sync-body extractor
+body-read deadline covering the complete compressed request frame
+explicit wire-byte enforcement independent of Content-Length
+admission before ingestion and automatic permit release on extraction failure
+transient 408 response with Retry-After for body-read timeout
+permanent 413 response for a body beyond the configured wire limit
+payload-free body-timeout and oversized-body metrics
+strict non-zero RON body-read deadline
+deterministic slow-stream, oversized-stream, permit-release, and drain tests
+```
+
+Required ordering:
+
+```text
+host authentication
+    ↓
+drain, global, tenant, and rate admission
+    ↓
+bounded body read with a dedicated deadline
+    ↓
+frame/decompression decoding and validation
+    ↓
+bounded authoritative execution
+```
+
+The ingestion deadline is distinct from the authoritative execution deadline so hosts can tune
+slow-network tolerance without allowing slow clients to extend database work. Size enforcement
+must count received bytes and cannot trust `Content-Length`. A timeout is transient and remains
+retryable by the HTTP client; an oversized frame is permanent until the client reduces its batch.
+
+Phase 9 is complete only when a never-ending authenticated body receives bounded `408` without
+reaching the service; its admission permit releases so draining and a following valid request can
+complete; an oversized streamed body receives `413`; and both outcomes are observable without
+capturing tenant identity, credentials, or body bytes.

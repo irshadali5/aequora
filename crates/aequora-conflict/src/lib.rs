@@ -347,10 +347,81 @@ impl MergeStrategy for FieldSetMerger {
     }
 }
 
+/// Application value carrying the causal timestamp required for explicit whole-value LWW.
+///
+/// Aequora deliberately does not use transport arrival time or database timestamps for this
+/// policy. Applications that opt in encode both current and candidate state with this wrapper.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TimestampedValue {
+    /// Application-maintained HLC used for deterministic ordering.
+    pub timestamp: HybridTimestamp,
+    /// Application-owned encoded value.
+    pub value: Vec<u8>,
+}
+
+/// Postcard whole-value last-writer-wins merger with a stable value tie-breaker.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LastWriterWinsMerger;
+
+impl MergeStrategy for LastWriterWinsMerger {
+    fn merge(&self, input: MergeInput<'_>) -> Result<MergeDecision, MergeError> {
+        if input.current_tombstone || input.candidate_kind == ChangeKind::Tombstone {
+            return Ok(MergeDecision::Unresolved {
+                message: "last-writer-wins does not implicitly resolve deletion conflicts"
+                    .to_owned(),
+            });
+        }
+        let current: TimestampedValue = postcard::from_bytes(input.current_payload)
+            .map_err(|_| MergeError::new("current timestamped value is malformed"))?;
+        let candidate: TimestampedValue = postcard::from_bytes(input.candidate_payload)
+            .map_err(|_| MergeError::new("candidate timestamped value is malformed"))?;
+        let selected =
+            if (candidate.timestamp, &candidate.value) > (current.timestamp, &current.value) {
+                candidate
+            } else {
+                current
+            };
+        let payload = postcard::to_stdvec(&selected)
+            .map_err(|_| MergeError::new("selected timestamped value could not be encoded"))?;
+        Ok(MergeDecision::Merged {
+            payload,
+            change_kind: ChangeKind::Upsert,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aequora_types::NodeId;
+    use aequora_protocol::{OperationKind, OperationMetadata};
+    use aequora_types::{
+        ActorId, DeviceId, EntityId, EntityRef, EntityType, NodeId, OperationId, ProtocolVersion,
+        SchemaVersion, TenantId,
+    };
+
+    fn operation(payload: Vec<u8>) -> OperationEnvelope {
+        OperationEnvelope {
+            protocol_version: ProtocolVersion::V1,
+            operation_id: OperationId::new(),
+            tenant_id: TenantId::new(),
+            actor_id: ActorId::new(),
+            device_id: DeviceId::new(),
+            entity: EntityRef {
+                entity_type: EntityType::new(1).unwrap_or_else(|error| panic!("{error}")),
+                entity_id: EntityId::new(),
+            },
+            base_version: None,
+            created_at: HybridTimestamp {
+                physical_ms: 1,
+                logical: 0,
+                node: NodeId::new(),
+            },
+            schema_version: SchemaVersion(1),
+            operation_kind: OperationKind(1),
+            payload,
+            metadata: OperationMetadata::default(),
+        }
+    }
 
     struct ProfileUpdate;
     impl TypedOperation for ProfileUpdate {
@@ -377,6 +448,7 @@ mod tests {
         for policy in [
             ConflictPolicy::ServerWins,
             ConflictPolicy::ClientWins,
+            ConflictPolicy::LastWriterWins,
             ConflictPolicy::FieldMerge,
             ConflictPolicy::Crdt,
             ConflictPolicy::CustomMerge,
@@ -431,5 +503,43 @@ mod tests {
         assert_eq!(merged.fields.len(), 2);
         assert_eq!(merged.fields[0].value, b"server-name");
         assert_eq!(merged.fields[1].value, b"new-email");
+    }
+
+    #[test]
+    fn last_writer_wins_is_explicit_and_deterministic() {
+        let node = NodeId::new();
+        let current = TimestampedValue {
+            timestamp: HybridTimestamp {
+                physical_ms: 10,
+                logical: 0,
+                node,
+            },
+            value: b"old".to_vec(),
+        };
+        let candidate = TimestampedValue {
+            timestamp: HybridTimestamp {
+                physical_ms: 11,
+                logical: 0,
+                node,
+            },
+            value: b"new".to_vec(),
+        };
+        let operation = operation(postcard::to_stdvec(&candidate).unwrap_or_default());
+        let current_payload = postcard::to_stdvec(&current).unwrap_or_default();
+        let decision = LastWriterWinsMerger
+            .merge(MergeInput {
+                operation: &operation,
+                current_payload: &current_payload,
+                current_tombstone: false,
+                candidate_payload: &operation.payload,
+                candidate_kind: ChangeKind::Upsert,
+            })
+            .unwrap_or_else(|error| panic!("{error}"));
+        let MergeDecision::Merged { payload, .. } = decision else {
+            panic!("expected deterministic merge")
+        };
+        let selected: TimestampedValue =
+            postcard::from_bytes(&payload).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(selected, candidate);
     }
 }

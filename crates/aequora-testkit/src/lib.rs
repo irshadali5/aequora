@@ -16,8 +16,9 @@ use aequora_store::{
     AuditLog, AuditOffset, AuditPage, AuditRecord, ChangeJournal, ChangePage, CommitOperation,
     CommitOutcome, ConflictInbox, ConflictRecord, ConflictResolution, CursorStore, EntityReader,
     EntitySnapshot, JournalCompactor, OperationLedger, OutboxState, OutboxStateStore, OutboxStats,
-    OutboxStore, ReconciliationStore, SnapshotDescriptor, SnapshotPage, SnapshotProgress,
-    SnapshotStore, StoreError, StoreErrorKind,
+    OutboxStore, ReconciliationStore, RetryMetadata, SnapshotDescriptor, SnapshotPage,
+    SnapshotProgress, SnapshotStore, StoreError, StoreErrorKind, TransactionCapabilities,
+    TransactionCapabilityProvider,
 };
 use aequora_transport::{
     SnapshotPageStream, StreamingSyncTransport, SyncTransport, TransportError,
@@ -30,6 +31,7 @@ use std::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 type EntityKey = (TenantId, EntityRef);
@@ -175,6 +177,12 @@ pub struct InMemoryAuthoritativeStore {
     commit_failures: Arc<Mutex<VecDeque<CommitFailPoint>>>,
 }
 
+impl TransactionCapabilityProvider for InMemoryAuthoritativeStore {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        TransactionCapabilities::REFERENCE_AUTHORITATIVE
+    }
+}
+
 impl InMemoryAuthoritativeStore {
     fn state(&self) -> MutexGuard<'_, AuthoritativeState> {
         self.state
@@ -237,6 +245,11 @@ impl OperationLedger for InMemoryAuthoritativeStore {
     }
 
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError> {
+        if !commit.has_valid_version_transition() {
+            return Err(StoreError::permanent(
+                "authoritative entity version must advance by exactly one",
+            ));
+        }
         let mut state = self.state();
         let operation_key = (commit.tenant_id, commit.operation_id);
         if let Some(previous) = state.ledger.get(&operation_key) {
@@ -479,6 +492,14 @@ impl ChangeJournal for InMemoryAuthoritativeStore {
         max_payload_bytes: usize,
     ) -> Result<ChangePage, StoreError> {
         let state = self.state();
+        let journal_head = state
+            .journal
+            .iter()
+            .filter(|change| change.tenant_id == tenant && change.scope_id == scope)
+            .map(|change| change.sequence)
+            .max()
+            .unwrap_or(sequence)
+            .max(sequence);
         let mut matching = state
             .journal
             .iter()
@@ -503,6 +524,7 @@ impl ChangeJournal for InMemoryAuthoritativeStore {
         Ok(ChangePage {
             changes,
             next_sequence,
+            journal_head,
             has_more,
         })
     }
@@ -535,6 +557,7 @@ struct LocalState {
     pending: Vec<OperationEnvelope>,
     original: HashMap<OperationId, OperationEnvelope>,
     outbox_states: HashMap<OperationId, OutboxState>,
+    retry_metadata: HashMap<OperationId, RetryMetadata>,
     cursors: HashMap<SyncScopeId, Cursor>,
     entities: HashMap<(SyncScopeId, EntityRef), SnapshotEntity>,
     processed: HashSet<(SyncScopeId, Sequence)>,
@@ -553,6 +576,12 @@ struct StagedSnapshot {
 #[derive(Clone, Default)]
 pub struct InMemoryLocalStore {
     state: Arc<Mutex<LocalState>>,
+}
+
+impl TransactionCapabilityProvider for InMemoryLocalStore {
+    fn transaction_capabilities(&self) -> TransactionCapabilities {
+        TransactionCapabilities::REFERENCE_LOCAL
+    }
 }
 
 impl InMemoryLocalStore {
@@ -604,6 +633,7 @@ impl InMemoryLocalStore {
 impl OutboxStore for InMemoryLocalStore {
     async fn pending_operations(&self, limit: usize) -> Result<Vec<OperationEnvelope>, StoreError> {
         let state = self.state();
+        let now = unix_time_millis();
         Ok(state
             .pending
             .iter()
@@ -612,6 +642,10 @@ impl OutboxStore for InMemoryLocalStore {
                     .outbox_states
                     .get(&operation.operation_id)
                     .is_some_and(|status| status.is_replayable())
+                    && state
+                        .retry_metadata
+                        .get(&operation.operation_id)
+                        .is_none_or(|retry| retry.next_attempt_unix_ms <= now)
             })
             .take(limit)
             .cloned()
@@ -643,9 +677,34 @@ impl OutboxStateStore for InMemoryLocalStore {
         transition_replayable(&mut state, operations, OutboxState::Sending)
     }
 
-    async fn mark_retry(&self, operations: &[OperationId]) -> Result<(), StoreError> {
+    async fn mark_retry(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError> {
         let mut state = self.state();
-        transition_replayable(&mut state, operations, OutboxState::Retry)
+        transition_replayable(&mut state, operations, OutboxState::Retry)?;
+        for operation in operations {
+            let attempt_count = state
+                .retry_metadata
+                .get(operation)
+                .map_or(1, |retry| retry.attempt_count.saturating_add(1));
+            state.retry_metadata.insert(
+                *operation,
+                RetryMetadata {
+                    attempt_count,
+                    next_attempt_unix_ms,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    async fn retry_metadata(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<RetryMetadata>, StoreError> {
+        Ok(self.state().retry_metadata.get(&operation).copied())
     }
 
     async fn operation_state(
@@ -685,6 +744,14 @@ impl OutboxStateStore for InMemoryLocalStore {
         }
         Ok(queue_stats)
     }
+}
+
+fn unix_time_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 #[async_trait]

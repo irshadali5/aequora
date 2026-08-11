@@ -10,8 +10,9 @@ use aequora_store::{LocalStore, StoreError};
 use aequora_transport::{
     StreamingSyncTransport, SyncTransport, TransportError, TransportErrorKind,
 };
-use aequora_types::{Cursor, ProtocolVersion, RequestId, SnapshotId};
+use aequora_types::{Cursor, OperationId, ProtocolVersion, RequestId, SnapshotId};
 use std::{
+    collections::HashSet,
     sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -140,6 +141,8 @@ pub struct ClientConfig {
     pub session: SessionMetadata,
     /// Maximum pending operations submitted in one exchange.
     pub push_batch_size: usize,
+    /// Maximum uncompressed framed Postcard bytes sent in one exchange.
+    pub push_batch_bytes: usize,
     /// Response limits advertised to the server.
     pub limits: ClientLimits,
     /// Supported protocol features.
@@ -162,6 +165,7 @@ impl ClientConfig {
             protocol: ProtocolVersion::V1,
             session,
             push_batch_size: 256,
+            push_batch_bytes: 1_024 * 1_024,
             limits: ClientLimits::default(),
             capabilities: vec![Capability::PostcardV1, Capability::Tombstones],
             retry: RetryConfig::default(),
@@ -283,6 +287,8 @@ pub struct SyncCoordinatorConfig {
     pub periodic_interval: Option<Duration>,
     /// Whether to drain immediately before waiting for the first trigger.
     pub sync_on_start: bool,
+    /// Maximum time spent coalescing a burst of local-mutation wakes.
+    pub mutation_debounce: Duration,
 }
 
 impl Default for SyncCoordinatorConfig {
@@ -291,6 +297,7 @@ impl Default for SyncCoordinatorConfig {
             channel_capacity: 32,
             periodic_interval: Some(Duration::from_secs(30)),
             sync_on_start: false,
+            mutation_debounce: Duration::from_millis(200),
         }
     }
 }
@@ -433,14 +440,41 @@ where
                     self.set_status(SyncStatus::Shutdown);
                     return;
                 }
-                SyncTrigger::LocalMutation | SyncTrigger::Manual | SyncTrigger::PushHint
-                    if self.online =>
-                {
+                SyncTrigger::Manual | SyncTrigger::PushHint if self.online => {
                     self.synchronize().await;
+                }
+                SyncTrigger::LocalMutation if self.online => {
+                    if !self.debounce_local_mutations().await {
+                        return;
+                    }
                 }
                 SyncTrigger::LocalMutation | SyncTrigger::Manual | SyncTrigger::PushHint => {}
             }
         }
+    }
+
+    async fn debounce_local_mutations(&mut self) -> bool {
+        if !self.config.mutation_debounce.is_zero() {
+            tokio::time::sleep(self.config.mutation_debounce).await;
+        }
+        while let Ok(trigger) = self.triggers.try_recv() {
+            match trigger {
+                SyncTrigger::NetworkUnavailable => {
+                    self.online = false;
+                    self.set_status(SyncStatus::Offline);
+                }
+                SyncTrigger::NetworkAvailable => self.online = true,
+                SyncTrigger::Shutdown => {
+                    self.set_status(SyncStatus::Shutdown);
+                    return false;
+                }
+                SyncTrigger::LocalMutation | SyncTrigger::Manual | SyncTrigger::PushHint => {}
+            }
+        }
+        if self.online {
+            self.synchronize().await;
+        }
+        true
     }
 
     async fn synchronize(&mut self) {
@@ -551,6 +585,18 @@ pub enum ClientError {
     /// Returned journal changes were not strictly increasing or exceeded the response cursor.
     #[error("server returned invalid journal sequence ordering")]
     ChangeSequence,
+    /// Server operation results were missing, duplicated, or referred to an unsubmitted command.
+    #[error("server returned invalid terminal operation results")]
+    OperationResults,
+    /// Server exceeded the response limits advertised by this client.
+    #[error("server response exceeded advertised client limits")]
+    ResponseLimits,
+    /// A locally constructed request could not be encoded with the production wire codec.
+    #[error("outgoing synchronization request could not be encoded: {0}")]
+    Codec(#[from] aequora_codec::CodecError),
+    /// Even one pending operation cannot fit inside the configured outgoing frame limit.
+    #[error("outgoing synchronization frame is {actual} bytes, exceeding limit {maximum}")]
+    PushBatchTooLarge { actual: usize, maximum: usize },
     /// Server reported another page without returning or acknowledging any progress.
     #[error("sync exchange reported more data but made no progress")]
     NoProgress,
@@ -735,6 +781,12 @@ impl<L, T> ClientSyncEngine<L, T> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+
+    fn record_retry(&self, delay: Duration) {
+        self.observer.record(MetricEvent::ClientRetry {
+            delay_millis: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+        });
+    }
 }
 
 impl<L, T> ClientSyncEngine<L, T>
@@ -749,24 +801,52 @@ where
     /// Returns [`ClientError`] for local storage or transport failures and for any response
     /// that violates protocol, tenant, scope, cursor, or sequence invariants.
     pub async fn run_once(&self) -> Result<SyncOutcome, ClientError> {
+        let retry_delay = self.config.retry.delay(0, system_entropy());
+        self.run_once_with_retry_delay(retry_delay).await
+    }
+
+    async fn run_once_with_retry_delay(
+        &self,
+        retry_delay: Duration,
+    ) -> Result<SyncOutcome, ClientError> {
         let cursor = self.store.load_cursor(self.config.session.scope_id).await?;
         let batch_limit = self.current_batch_limit();
         let operations = self.store.pending_operations(batch_limit).await?;
-        let submitted = operations.len();
-        let operation_ids: Vec<_> = operations
-            .iter()
-            .map(|operation| operation.operation_id)
-            .collect();
-        self.store.mark_sending(&operation_ids).await?;
-        let request = SyncRequest {
+        let request_id = RequestId::new();
+        let mut request = SyncRequest {
             protocol: self.config.protocol,
-            request_id: RequestId::new(),
+            request_id,
             session: self.config.session.clone(),
             cursor,
             operations,
             limits: self.config.limits,
             capabilities: self.config.capabilities.clone(),
         };
+        loop {
+            let encoded = aequora_codec::encode(
+                self.config.protocol,
+                aequora_codec::MessageKind::SyncRequest,
+                &request,
+            )?;
+            if encoded.len() <= self.config.push_batch_bytes {
+                break;
+            }
+            if request.operations.len() <= 1 {
+                return Err(ClientError::PushBatchTooLarge {
+                    actual: encoded.len(),
+                    maximum: self.config.push_batch_bytes,
+                });
+            }
+            let next_len = request.operations.len().div_ceil(2);
+            request.operations.truncate(next_len);
+        }
+        let submitted = request.operations.len();
+        let operation_ids: Vec<_> = request
+            .operations
+            .iter()
+            .map(|operation| operation.operation_id)
+            .collect();
+        self.store.mark_sending(&operation_ids).await?;
         let trace = trace_context(request.request_id, &request.session);
         let started = Instant::now();
         let response = match self.transport.exchange(request).await {
@@ -775,7 +855,9 @@ where
                 if error.kind == TransportErrorKind::Transient {
                     self.batcher().record_failure();
                 }
-                self.store.mark_retry(&operation_ids).await?;
+                self.store
+                    .mark_retry(&operation_ids, retry_not_before(retry_delay))
+                    .await?;
                 self.observer.record_with_context(
                     trace,
                     MetricEvent::ClientExchange {
@@ -795,10 +877,12 @@ where
         let conflicts = response.conflicts.len();
         let rejections = response.rejected.len();
         let result = self
-            .reconcile_exchange(cursor, response, submitted, latency)
+            .reconcile_exchange(cursor, response, &operation_ids, latency)
             .await;
         if result.is_err() {
-            self.store.mark_retry(&operation_ids).await?;
+            self.store
+                .mark_retry(&operation_ids, retry_not_before(retry_delay))
+                .await?;
         }
         self.observer.record_with_context(
             trace,
@@ -818,7 +902,7 @@ where
         &self,
         cursor: Option<Cursor>,
         response: SyncResponse,
-        submitted: usize,
+        submitted_operations: &[OperationId],
         latency: Duration,
     ) -> Result<SyncOutcome, ClientError> {
         match response.directive {
@@ -833,12 +917,26 @@ where
         if response.protocol != self.config.protocol {
             return Err(ClientError::Protocol);
         }
+        let response_bytes = aequora_codec::encode(
+            self.config.protocol,
+            aequora_codec::MessageKind::SyncResponse,
+            &response,
+        )?
+        .len();
+        if response.changes.len()
+            > usize::try_from(self.config.limits.max_changes).unwrap_or(usize::MAX)
+            || response_bytes
+                > usize::try_from(self.config.limits.max_response_bytes).unwrap_or(usize::MAX)
+        {
+            return Err(ClientError::ResponseLimits);
+        }
         if response.next_cursor.scope != self.config.session.scope_id {
             return Err(ClientError::CursorScope);
         }
         if cursor.is_some_and(|old| response.next_cursor.sequence < old.sequence) {
             return Err(ClientError::CursorRegression);
         }
+        validate_operation_results(&response, submitted_operations)?;
         let mut previous = cursor.map_or(aequora_types::Sequence(0), |old| old.sequence);
         for change in &response.changes {
             if change.tenant_id != self.config.session.tenant_id
@@ -850,6 +948,9 @@ where
                 return Err(ClientError::ChangeSequence);
             }
             previous = change.sequence;
+        }
+        if response.next_cursor.sequence != previous {
+            return Err(ClientError::ChangeSequence);
         }
         let outcome = SyncOutcome {
             acknowledged: response.acknowledged.len(),
@@ -871,7 +972,7 @@ where
         self.store.reconcile(&response).await?;
         self.batcher().record_success(
             latency,
-            submitted,
+            submitted_operations.len(),
             outcome
                 .acknowledged
                 .saturating_add(outcome.rejected)
@@ -889,11 +990,13 @@ where
         let max_attempts = self.config.retry.max_attempts.max(1);
         let mut attempt = 0_u32;
         loop {
-            match self.run_once().await {
+            let entropy = system_entropy() ^ u64::from(attempt);
+            let delay = self.config.retry.delay(attempt, entropy);
+            match self.run_once_with_retry_delay(delay).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if error.is_transient() && attempt + 1 < max_attempts => {
-                    let entropy = system_entropy() ^ u64::from(attempt);
-                    tokio::time::sleep(self.config.retry.delay(attempt, entropy)).await;
+                    self.record_retry(delay);
+                    tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
                 }
                 Err(error) => return Err(error),
@@ -909,6 +1012,14 @@ where
     /// local state cannot be read, or the configured exchange safety bound is reached.
     pub async fn sync(&self) -> Result<SyncSummary, ClientError> {
         let mut summary = SyncSummary::default();
+        if self
+            .store
+            .load_cursor(self.config.session.scope_id)
+            .await?
+            .is_none()
+        {
+            self.bootstrap().await?;
+        }
         for _ in 0..self.config.max_exchanges_per_sync {
             let outcome = match self.run_with_retry().await {
                 Ok(outcome) => outcome,
@@ -961,6 +1072,7 @@ where
                 cursor,
                 offset,
                 &self.config.session,
+                self.config.snapshot_limits,
             )?;
             if response.has_more
                 && response.entities.is_empty()
@@ -1040,7 +1152,9 @@ where
                         },
                     );
                     let entropy = system_entropy() ^ u64::from(attempt);
-                    tokio::time::sleep(self.config.retry.delay(attempt, entropy)).await;
+                    let delay = self.config.retry.delay(attempt, entropy);
+                    self.record_retry(delay);
+                    tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
                 }
                 Err(error) => {
@@ -1106,7 +1220,9 @@ where
                     if error.kind == TransportErrorKind::Transient
                         && attempt + 1 < max_attempts =>
                 {
-                    tokio::time::sleep(self.config.retry.delay(attempt, system_entropy())).await;
+                    let delay = self.config.retry.delay(attempt, system_entropy());
+                    self.record_retry(delay);
+                    tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
                     continue;
                 }
@@ -1130,8 +1246,9 @@ where
                                 outcome: OutcomeKind::TransientFailure,
                             },
                         );
-                        tokio::time::sleep(self.config.retry.delay(attempt, system_entropy()))
-                            .await;
+                        let delay = self.config.retry.delay(attempt, system_entropy());
+                        self.record_retry(delay);
+                        tokio::time::sleep(delay).await;
                         attempt = attempt.saturating_add(1);
                         break;
                     }
@@ -1144,6 +1261,7 @@ where
                     cursor,
                     offset,
                     &self.config.session,
+                    self.config.snapshot_limits,
                 )?;
                 if response.has_more
                     && response.entities.is_empty()
@@ -1181,6 +1299,32 @@ where
         }
         Err(ClientError::ExchangeLimit)
     }
+}
+
+fn validate_operation_results(
+    response: &SyncResponse,
+    submitted_operations: &[OperationId],
+) -> Result<(), ClientError> {
+    let submitted: HashSet<_> = submitted_operations.iter().copied().collect();
+    if submitted.len() != submitted_operations.len() {
+        return Err(ClientError::OperationResults);
+    }
+    let mut terminal = HashSet::with_capacity(submitted.len());
+    for operation_id in response
+        .acknowledged
+        .iter()
+        .map(|result| result.operation_id)
+        .chain(response.rejected.iter().map(|result| result.operation_id))
+        .chain(response.conflicts.iter().map(|result| result.operation_id))
+    {
+        if !submitted.contains(&operation_id) || !terminal.insert(operation_id) {
+            return Err(ClientError::OperationResults);
+        }
+    }
+    if terminal != submitted {
+        return Err(ClientError::OperationResults);
+    }
+    Ok(())
 }
 
 fn trace_context(request_id: RequestId, session: &SessionMetadata) -> TraceContext {
@@ -1222,6 +1366,7 @@ fn validate_snapshot_page(
     expected_cursor: Option<Cursor>,
     expected_offset: u64,
     session: &SessionMetadata,
+    limits: SnapshotLimits,
 ) -> Result<(), ClientError> {
     if response.protocol != expected_protocol
         || response.cursor.scope != session.scope_id
@@ -1235,6 +1380,16 @@ fn validate_snapshot_page(
     {
         return Err(ClientError::SnapshotMismatch);
     }
+    let payload_bytes = response
+        .entities
+        .iter()
+        .map(|entity| entity.payload.len())
+        .fold(0_usize, usize::saturating_add);
+    if response.entities.len() > usize::try_from(limits.max_entities).unwrap_or(usize::MAX)
+        || payload_bytes > usize::try_from(limits.max_payload_bytes).unwrap_or(usize::MAX)
+    {
+        return Err(ClientError::ResponseLimits);
+    }
     Ok(())
 }
 
@@ -1247,6 +1402,10 @@ fn system_entropy() -> u64 {
         let low = u64::try_from(nanos & u128::from(u64::MAX)).unwrap_or(0);
         high ^ low
     })
+}
+
+fn retry_not_before(delay: Duration) -> u64 {
+    unix_time_ms().saturating_add(u64::try_from(delay.as_millis()).unwrap_or(u64::MAX))
 }
 
 fn unix_time_ms() -> u64 {

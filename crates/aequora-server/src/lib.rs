@@ -11,6 +11,7 @@ use aequora_executor::{
 };
 use aequora_observability::{
     MetricEvent, NoopObserver, Observer, OutcomeKind, ServerPhaseKind, TraceContext,
+    TransactionOutcomeKind,
 };
 use aequora_protocol::{
     BootstrapRequest, BootstrapResponse, ClientLimits, Conflict, ConflictPolicy, OperationAck,
@@ -27,6 +28,7 @@ use aequora_validator::{
     ProtocolLimits, ValidationError, validate_bootstrap_request, validate_request,
 };
 use async_trait::async_trait;
+use rayon::prelude::*;
 use std::{collections::HashSet, sync::Arc, time::Instant};
 use thiserror::Error;
 
@@ -78,6 +80,12 @@ pub enum ServerError {
     /// Dedicated CPU work could not complete.
     #[error("sync compute work failed: {0}")]
     Compute(#[from] ComputeError),
+    /// The client advertised a response ceiling too small for mandatory progress.
+    #[error("client response limit is too small to make synchronization progress")]
+    ResponseLimit,
+    /// A response could not be measured with the production wire codec.
+    #[error("sync response encoding failed: {0}")]
+    Codec(#[from] aequora_codec::CodecError),
     /// An application-registered deterministic merger failed.
     #[error("sync conflict merge failed: {0}")]
     Merge(#[from] MergeError),
@@ -375,7 +383,13 @@ where
             .await
             .map_err(ServerError::ScopeAuthorization)?;
         let outcome = self
-            .process_operation(&auth, &operation, &HashSet::new(), scope_id)
+            .process_operation(
+                &auth,
+                &operation,
+                &HashSet::new(),
+                scope_id,
+                *blake3::hash(&operation.payload).as_bytes(),
+            )
             .await?;
         Ok(match outcome {
             ProcessResult::Acknowledged(acknowledgement) => {
@@ -393,6 +407,7 @@ where
         operation: &OperationEnvelope,
         completed: &HashSet<OperationId>,
         scope_id: SyncScopeId,
+        command_digest: [u8; 32],
     ) -> Result<ProcessResult, ServerError> {
         let authenticated = match IncomingOperation::new(operation).authenticate(auth) {
             Ok(authenticated) => authenticated,
@@ -412,6 +427,9 @@ where
             .await?;
         self.record_phase(ServerPhaseKind::Database, database_started);
         if let Some(mut previous) = previous {
+            self.observer.record(MetricEvent::ServerTransaction {
+                outcome: TransactionOutcomeKind::Duplicate,
+            });
             previous.duplicate = true;
             return Ok(ProcessResult::Acknowledged(previous));
         }
@@ -472,6 +490,7 @@ where
                 match policy {
                     ConflictPolicy::ClientWins | ConflictPolicy::CommutativeOperation => None,
                     ConflictPolicy::FieldMerge
+                    | ConflictPolicy::LastWriterWins
                     | ConflictPolicy::CustomMerge
                     | ConflictPolicy::Crdt => Some(policy),
                     _ => {
@@ -550,23 +569,45 @@ where
             payload: mutation.payload,
             change_kind: mutation.change_kind,
             timestamp: self.clock.now(),
-            command_digest: *blake3::hash(&operation.payload).as_bytes(),
+            command_digest,
         };
         let database_started = Instant::now();
-        let outcome = self.store.commit_operation(commit).await?;
+        let outcome = self.store.commit_operation(commit).await;
         self.record_phase(ServerPhaseKind::Database, database_started);
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.observer.record(MetricEvent::ServerTransaction {
+                    outcome: TransactionOutcomeKind::Failed,
+                });
+                return Err(ServerError::Store(error));
+            }
+        };
         match outcome {
-            CommitOutcome::Applied(ack) => Ok(ProcessResult::Acknowledged(ack)),
+            CommitOutcome::Applied(ack) => {
+                self.observer.record(MetricEvent::ServerTransaction {
+                    outcome: TransactionOutcomeKind::Applied,
+                });
+                Ok(ProcessResult::Acknowledged(ack))
+            }
             CommitOutcome::Duplicate(mut ack) => {
+                self.observer.record(MetricEvent::ServerTransaction {
+                    outcome: TransactionOutcomeKind::Duplicate,
+                });
                 ack.duplicate = true;
                 Ok(ProcessResult::Acknowledged(ack))
             }
-            CommitOutcome::VersionChanged { current } => Ok(ProcessResult::Conflict(conflict(
-                operation,
-                current,
-                self.conflicts.policy(operation.operation_kind.0),
-                "the entity changed while this operation was being committed",
-            ))),
+            CommitOutcome::VersionChanged { current } => {
+                self.observer.record(MetricEvent::ServerTransaction {
+                    outcome: TransactionOutcomeKind::VersionChanged,
+                });
+                Ok(ProcessResult::Conflict(conflict(
+                    operation,
+                    current,
+                    self.conflicts.policy(operation.operation_kind.0),
+                    "the entity changed while this operation was being committed",
+                )))
+            }
         }
     }
 
@@ -600,7 +641,7 @@ where
         let validation_started = Instant::now();
         let validation = validate_request(request, self.config.limits);
         self.record_phase(ServerPhaseKind::Validation, validation_started);
-        let request = validation?.into_inner();
+        let mut request = validation?.into_inner();
         if request.session.tenant_id != auth.tenant_id
             || request.session.actor_id != auth.actor_id
             || request.session.device_id != auth.device_id
@@ -638,15 +679,23 @@ where
             });
         }
 
-        let mut acknowledged = Vec::with_capacity(request.operations.len());
+        let operations = std::mem::take(&mut request.operations);
+        let (operations, dependency_plan, command_digests) =
+            self.prepare_operations(operations).await?;
+        let mut acknowledged = Vec::with_capacity(operations.len());
         let mut rejected = Vec::new();
         let mut conflicts = Vec::new();
         let mut completed = HashSet::new();
-        let dependency_plan = self.plan_dependencies(&request.operations).await?;
         for &operation_index in dependency_plan.ordered_indices() {
-            let operation = &request.operations[operation_index];
+            let operation = &operations[operation_index];
             match self
-                .process_operation(&auth, operation, &completed, request.session.scope_id)
+                .process_operation(
+                    &auth,
+                    operation,
+                    &completed,
+                    request.session.scope_id,
+                    command_digests[operation_index],
+                )
                 .await?
             {
                 ProcessResult::Acknowledged(ack) => {
@@ -671,7 +720,8 @@ where
             )
             .await?;
         self.record_phase(ServerPhaseKind::Database, database_started);
-        Ok(SyncResponse {
+        let journal_head = page.journal_head;
+        let mut response = SyncResponse {
             protocol: request.protocol,
             directive: SyncDirective::Continue,
             acknowledged,
@@ -684,25 +734,81 @@ where
             },
             has_more: page.has_more,
             server_time: self.clock.now(),
-        })
+        };
+        Self::fit_response(&mut response, start, request.limits.max_response_bytes)?;
+        self.observer.record(MetricEvent::ServerJournalLag {
+            sequences: journal_head
+                .0
+                .saturating_sub(response.next_cursor.sequence.0),
+        });
+        Ok(response)
     }
 
-    async fn plan_dependencies(
+    fn fit_response(
+        response: &mut SyncResponse,
+        start: Sequence,
+        maximum_bytes: u32,
+    ) -> Result<(), ServerError> {
+        let maximum = usize::try_from(maximum_bytes).unwrap_or(usize::MAX);
+        loop {
+            let encoded = aequora_codec::encode(
+                response.protocol,
+                aequora_codec::MessageKind::SyncResponse,
+                response,
+            )?;
+            if encoded.len() <= maximum {
+                return Ok(());
+            }
+            if response.changes.pop().is_none() {
+                return Err(ServerError::ResponseLimit);
+            }
+            response.has_more = true;
+            response.next_cursor.sequence = response
+                .changes
+                .last()
+                .map_or(start, |change| change.sequence);
+            if response.changes.is_empty()
+                && response.acknowledged.is_empty()
+                && response.rejected.is_empty()
+                && response.conflicts.is_empty()
+            {
+                return Err(ServerError::ResponseLimit);
+            }
+        }
+    }
+
+    async fn prepare_operations(
         &self,
-        operations: &[OperationEnvelope],
-    ) -> Result<DependencyPlan, ServerError> {
+        operations: Vec<OperationEnvelope>,
+    ) -> Result<(Vec<OperationEnvelope>, DependencyPlan, Vec<[u8; 32]>), ServerError> {
         let Some(compute) = &self.compute else {
-            return Ok(plan_dependencies(operations)?);
+            let plan = plan_dependencies(&operations)?;
+            let digests = operations
+                .iter()
+                .map(|operation| *blake3::hash(&operation.payload).as_bytes())
+                .collect();
+            return Ok((operations, plan, digests));
         };
         if !compute.should_parallelize(operations.len()) {
-            return Ok(plan_dependencies(operations)?);
+            let plan = plan_dependencies(&operations)?;
+            let digests = operations
+                .iter()
+                .map(|operation| *blake3::hash(&operation.payload).as_bytes())
+                .collect();
+            return Ok((operations, plan, digests));
         }
         self.observer.record(MetricEvent::ComputeOffload {
             items: usize_to_u64(operations.len()),
         });
-        let operations = operations.to_vec();
         Ok(compute
-            .run(move || plan_dependencies(&operations))
+            .run(move || {
+                let plan = plan_dependencies(&operations)?;
+                let digests = operations
+                    .par_iter()
+                    .map(|operation| *blake3::hash(&operation.payload).as_bytes())
+                    .collect();
+                Ok::<_, DependencyError>((operations, plan, digests))
+            })
             .await??)
     }
 

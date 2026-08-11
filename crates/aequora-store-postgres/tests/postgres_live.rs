@@ -77,6 +77,73 @@ async fn exercise_backend(backend: &SqlxPostgresBackend) {
     assert_eq!(report.acknowledgement.operation_id, operation_id);
 
     verify_data_path(backend, tenant, scope, operation_id, entity, payload).await;
+    verify_mid_transaction_failure_rolls_back(backend, tenant, scope).await;
+}
+
+async fn verify_mid_transaction_failure_rolls_back(
+    backend: &SqlxPostgresBackend,
+    tenant: TenantId,
+    scope: SyncScopeId,
+) {
+    let operation_id = OperationId::new();
+    let entity = EntityRef {
+        entity_type: EntityType::new(8).unwrap_or_else(|error| panic!("{error}")),
+        entity_id: EntityId::new(),
+    };
+    let payload = b"must roll back".to_vec();
+    let commit = CommitOperation {
+        operation_id,
+        actor_id: ActorId::new(),
+        device_id: DeviceId::new(),
+        operation_kind: 10,
+        tenant_id: tenant,
+        scope_id: scope,
+        entity,
+        expected_version: None,
+        next_version: EntityVersion::INITIAL,
+        payload: payload.clone(),
+        change_kind: ChangeKind::Upsert,
+        timestamp: HybridTimestamp {
+            physical_ms: 124,
+            logical: u32::MAX,
+            node: NodeId::new(),
+        },
+        command_digest: *blake3::hash(&payload).as_bytes(),
+    };
+
+    assert!(backend.commit_operation(commit).await.is_err());
+    assert_eq!(
+        backend
+            .read_entity(tenant, entity)
+            .await
+            .unwrap_or_else(|error| panic!("{error}")),
+        None
+    );
+    assert_eq!(
+        backend
+            .operation_result(tenant, operation_id)
+            .await
+            .unwrap_or_else(|error| panic!("{error}")),
+        None
+    );
+    assert!(
+        !backend
+            .read_changes_after(tenant, scope, Sequence(0), 1_024, 16 * 1_024 * 1_024)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"))
+            .changes
+            .iter()
+            .any(|change| change.operation_id == operation_id)
+    );
+    assert!(
+        !backend
+            .read_audit_after(tenant, AuditOffset(0), 1_024)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"))
+            .records
+            .iter()
+            .any(|record| record.operation_id == operation_id)
+    );
 }
 
 async fn verify_schema(backend: &SqlxPostgresBackend) {

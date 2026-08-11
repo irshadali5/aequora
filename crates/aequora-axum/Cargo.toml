@@ -14,15 +14,17 @@ aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
 axum.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
 http.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
-async-trait.workspace = true
-tokio.workspace = true
+futures-util.workspace = true
 tower.workspace = true

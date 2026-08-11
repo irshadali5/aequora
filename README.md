@@ -1,256 +1,456 @@
 # Aequora Sync
 
-[![Rust Version](https://img.shields.io/badge/MSRV-1.87.0-blue.svg)](https://www.rust-lang.org)
-[![Edition](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
-[![Crates](https://img.shields.io/badge/workspace-26%20crates-purple.svg)](crates/)
+[![CI](https://github.com/irshadali5/aequora/actions/workflows/ci.yml/badge.svg)](https://github.com/irshadali5/aequora/actions/workflows/ci.yml)
+[![Rust 1.87+](https://img.shields.io/badge/MSRV-1.87.0-blue.svg)](https://www.rust-lang.org)
+[![Edition 2024](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
+[![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
+[![Workspace](https://img.shields.io/badge/workspace-26%20libraries%20%2B%201%20dev%20tool-purple.svg)](crates/)
 
-**Aequora** is a high-performance, database-agnostic, server-authoritative local-first synchronization engine written in pure Rust.
+Aequora is a database-neutral, server-authoritative, local-first synchronization engine written in
+Rust. It synchronizes typed domain operations and authoritative state transitions—not SQL,
+database pages, or vendor-specific write-ahead logs.
 
-Instead of replicating raw SQL statements, database pages, or vendor-specific write-ahead logs (WAL), Aequora synchronizes **strongly typed domain operations** and **authoritative state transitions**. This guarantees data integrity, multi-tenant isolation, rich business logic enforcement, and seamless offline-first application capabilities.
+Use it to build software that accepts writes offline, reconciles safely after reconnecting, and
+keeps application authorization and business rules at the authoritative server.
 
----
+> Current release line: `0.1.0` · MSRV: Rust `1.87` · Edition: `2024`
 
-## Key Principles & Architectural Design
+## Why Aequora?
 
-Aequora separates concerns into three completely independent, decoupled composition axes:
+Offline mutation is easy. Correct recovery is not.
+
+A synchronization system must survive the client crashing after a local write, the server
+committing before its response is lost, two devices updating the same entity version, interrupted
+snapshot installation, schema upgrades, journal compaction, and transient network failure.
+
+Aequora makes those failure boundaries explicit:
 
 ```text
-┌────────────────────────────────┐     ┌────────────────────────────────┐     ┌────────────────────────────────┐
-│       Local Persistence        │     │     Network Transport Layer    │     │     Authoritative Storage      │
-│      (trait LocalStore)        │ ──► │      (trait SyncTransport)     │ ──► │   (trait AuthoritativeStore)   │
-│ e.g., Stoolap, Redb, In-Memory │     │ e.g., Axum/HTTP, QUIC, In-Proc │     │ e.g., PostgreSQL, Neon, Custom │
-└────────────────────────────────┘     └────────────────────────────────┘     └────────────────────────────────┘
+1. client transaction
+   optimistic local state + durable outbox operation
+
+2. at-least-once delivery
+   stable OperationId across retries
+
+3. authoritative transaction
+   entity + version + journal + operation result + audit
+
+4. client reconciliation transaction
+   changes + applied markers + terminal outbox state + conflicts + cursor
 ```
 
-1. **Database Neutrality**: The core synchronization protocol, framed codecs, conflict resolution engine, and operation execution pipeline operate exclusively against capability traits (`LocalStore` and `AuthoritativeStore`). Client databases and server databases are completely independent adapters at the outer edge.
-2. **Server-Authoritative Local-First Sync**: Local client mutations are executed immediately in local storage and staged into a durable outbox transactionally. When connectivity is restored, the `ClientSyncEngine` streams Postcard-encoded envelopes to the server, where registered application handlers validate authorization, check tenant boundaries, enforce optimistic concurrency, and commit state transitions atomically.
-3. **Optimistic Concurrency & HLC Metadata**: Every domain mutation carries a strongly typed `EntityRef`, `EntityVersion`, `OperationId`, `TenantId`, `DeviceId`, and a Hybrid Logical Clock (`HybridTimestamp`) timestamp ensuring strict deterministic ordering across distributed nodes without requiring central lock coordination.
-4. **Framed Postcard Binary Protocol**: Wire DTOs use compact Postcard serialization framed by a 16-byte header (`AEQ1` magic identifier, protocol version, payload length, and BLAKE3 checksum). Bounded visitor allocations protect servers against malicious memory exhaustion attacks.
-5. **Rayon Compute Offloading**: CPU-intensive operations—such as batch dependency analysis, BLAKE3 content hashing, zstd payload decompression, and topological sorting—are automatically offloaded to a dedicated Rayon thread pool, ensuring Tokio async I/O worker threads remain unblocked.
+The result is local ACID plus durable eventual convergence. Aequora does not pretend an offline
+client and a remote authority share a distributed transaction.
 
----
+## Architecture
 
-## Architectural Dataflow
+Local persistence, authoritative persistence, and transport are independent composition axes:
 
-The following sequence diagram illustrates the lifecycle of an offline client mutation synchronized to an authoritative server:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User / App Code
-    participant LocalDB as Client Local Storage<br/>(e.g., Stoolap)
-    participant ClientEngine as Client Sync Engine<br/>(ClientSyncEngine)
-    participant Gateway as Sync Transport / HTTP<br/>(Axum Gateway)
-    participant Server as Sync Server<br/>(SyncServer)
-    participant AuthorityDB as Authoritative Storage<br/>(e.g., PostgreSQL / Neon)
-
-    User->>LocalDB: Transact Domain Mutation & Outbox Append
-    Note over LocalDB: Local state updated<br/>Outbox entry staged offline
-    
-    loop Background Sync Loop
-        ClientEngine->>LocalDB: Fetch Unacknowledged Outbox Operations
-        ClientEngine->>Gateway: POST /sync/v1/exchange (AEQ1 Postcard Envelopes)
-        Gateway->>Server: Forward Framed Protocol Request
-        
-        Note over Server: 1. Validate AEQ1 Header & BLAKE3 Checksum<br/>2. Authenticate Session & Tenant ID<br/>3. Authorize Scope & Operation Permissions<br/>4. Construct Dependency DAG (Rayon)<br/>5. Apply Business Logic & OCC Checks
-        
-        Server->>AuthorityDB: Commit Mutated State + Scope Sequence + Journal + Idempotency Ledger (Atomic Tx)
-        AuthorityDB-->>Server: Tx Success + New Scope Cursor Watermark
-        
-        Server-->>Gateway: Construct SyncResponse (Acks + Downstream Changes)
-        Gateway-->>ClientEngine: Stream Response
-        
-        ClientEngine->>LocalDB: Apply Downstream Changes + Advance Cursor + Prune Outbox (Atomic Tx)
-    end
+```text
+┌──────────────────────────┐
+│ Application domain       │
+│ typed commands + policy  │
+└────────────┬─────────────┘
+             │
+     ┌───────▼────────┐      ┌──────────────────┐      ┌────────────────────┐
+     │ LocalStore     │      │ SyncTransport    │      │ AuthoritativeStore │
+     │                │─────▶│                  │─────▶│                    │
+     │ Stoolap/custom │◀─────│ HTTP/QUIC/custom │◀─────│ PostgreSQL/custom  │
+     └────────────────┘      └──────────────────┘      └────────────────────┘
 ```
 
----
+The built-in production acceptance topology is:
 
-## Workspace Crates Architecture
-
-The workspace consists of 26 focused crates, structured into foundational types, execution layers, storage backends, and networking facades:
-
-| Crate | Responsibility / Description | Key Types & Exports |
-|---|---|---|
-| [`aequora`](crates/aequora) | Top-level workspace facade re-exporting prelude & feature-gated subsystems | `prelude::*`, `stoolap`, `postgres`, `axum`, `quic` |
-| [`aequora-types`](crates/aequora-types) | Strongly typed UUIDv7 identifiers, versions, sequences, and timestamps | `EntityId`, `TenantId`, `DeviceId`, `ActorId`, `OperationId`, `HybridTimestamp` |
-| [`aequora-clock`](crates/aequora-clock) | Hybrid Logical Clock (HLC) for physical/logical timestamping & drift enforcement | `HlcClock`, `SystemClock`, `Clock` |
-| [`aequora-codec`](crates/aequora-codec) | `AEQ1` framed binary codec, BLAKE3 checksum verification, zstd compression | `FramedCodec`, `FrameHeader`, `BoundedVisitor` |
-| [`aequora-crdt`](crates/aequora-crdt) | Conflict-Free Replicated Data Types & state-based CRDT merging | `GCounter`, `PnCounter`, `PostcardCrdtMerger` |
-| [`aequora-conflict`](crates/aequora-conflict) | Operational & state-based conflict detection, optimistic concurrency policies | `ConflictPolicyRegistry`, `FieldSetMerger`, `FinancialOperation` |
-| [`aequora-journal`](crates/aequora-journal) | Log-structured sync journal, compaction planner, idempotency ledger, audit log | `CompactionPlanner`, `CursorWatermarks`, `TombstoneRetention` |
-| [`aequora-blob`](crates/aequora-blob) | BLAKE3 content-addressed blob storage, chunk manifests, atomic reference store | `BlobStore`, `BlobDigest`, `BlobManifest`, `InMemoryBlobStore` |
-| [`aequora-partition`](crates/aequora-partition) | Multi-tenant partition rules, boolean/hierarchical partial-sync authorization | `PartitionPolicy`, `PartitionExpression`, `PartitionHierarchy` |
-| [`aequora-routing`](crates/aequora-routing) | Multi-region routing, read-replica dispatch, write-safety enforcement | `RegionRouter`, `RegionHealth`, `RouteDecision` |
-| [`aequora-store`](crates/aequora-store) | Core storage abstraction traits for local and authoritative databases | `LocalStore`, `AuthoritativeStore`, `OutboxStore`, `AuditLog` |
-| [`aequora-store-stoolap`](crates/aequora-store-stoolap) | Local MVCC database adapter using Stoolap (checksummed DDL migrations) | `StoolapDatabase`, `StoolapStore`, `STOOLAP_SCHEMA_VERSION` |
-| [`aequora-store-postgres`](crates/aequora-store-postgres) | Authoritative server adapter for PostgreSQL & Neon (pooled & direct modes) | `SqlxPostgresBackend`, `PostgresStore`, `POSTGRES_SCHEMA_VERSION` |
-| [`aequora-protocol`](crates/aequora-protocol) | Protocol DTOs for sync requests, responses, push hints, and streaming snapshots | `SyncRequest`, `SyncResponse`, `OperationEnvelope`, `SnapshotPage` |
-| [`aequora-transport`](crates/aequora-transport) | Network transport traits and deterministic in-process channel transport | `SyncTransport`, `StreamingSyncTransport`, `InProcessTransport` |
-| [`aequora-quic`](crates/aequora-quic) | High-performance QUIC transport implementation using Quinn & Rustls | `QuicClientTransport`, `QuicServerListener` |
-| [`aequora-axum`](crates/aequora-axum) | Axum HTTP server integration handling `POST /sync/v1/exchange` | `SyncExchangeHandler`, `axum_sync_router` |
-| [`aequora-http`](crates/aequora-http) | Reqwest Postcard-over-HTTP client transport | `HttpSyncTransport`, `HttpTransportConfig` |
-| [`aequora-executor`](crates/aequora-executor) | Operation execution pipeline, dependency DAG planning, Rayon execution | `OperationExecutor`, `OperationRegistry`, `OperationHandler` |
-| [`aequora-validator`](crates/aequora-validator) | Schema migration validator, payload inspector, scope authorization rules | `PayloadMigrator`, `ScopeAuthorizer`, `ValidatedOperation` |
-| [`aequora-compute`](crates/aequora-compute) | Dedicated Rayon compute pool offloader for heavy hashing/compression | `ComputePool`, `OffloadTask` |
-| [`aequora-config`](crates/aequora-config) | Strictly typed RON configuration parser with cross-limit validation | `AequoraConfig`, `ClientConfig`, `ServerConfig` |
-| [`aequora-observability`](crates/aequora-observability) | Zero-allocation payload-free observers, atomic metrics counters, trace contexts | `Observer`, `AtomicMetrics`, `TraceContext` |
-| [`aequora-client`](crates/aequora-client) | `ClientSyncEngine`, background sync coordinator, exponential backoff engine | `ClientSyncEngine`, `ClientSyncEngineBuilder`, `SyncCoordinator` |
-| [`aequora-server`](crates/aequora-server) | `SyncServer`, server transaction coordinator, command execution gateway | `SyncServer`, `SyncServerBuilder`, `ExchangeService` |
-| [`aequora-testkit`](crates/aequora-testkit) | Deterministic in-memory stores, in-process network, behavioral conformance suite | `InMemoryLocalStore`, `InMemoryAuthoritativeStore`, `ConformanceSuite` |
-
----
-
-## Quickstart & Usage
-
-### 1. Minimal In-Process Synchronization
-
-The example below demonstrates setting up an in-memory client and server using `aequora-testkit`:
-
-```rust,no_run
-use aequora::prelude::*;
-use std::sync::Arc;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let tenant_id = TenantId::new();
-    let actor_id = ActorId::new();
-    let device_id = DeviceId::new();
-    let scope_id = SyncScopeId::new();
-
-    let session = SessionMetadata {
-        session_id: SessionId::new(),
-        device_id,
-        actor_id,
-        tenant_id,
-        scope_id,
-        partitions: vec![],
-    };
-
-    let auth_context = AuthContext {
-        actor_id,
-        tenant_id,
-        device_id,
-    };
-
-    // 1. Authoritative Server Setup
-    let authoritative_store = Arc::new(aequora::testkit::InMemoryAuthoritativeStore::default());
-    let server: Arc<dyn ExchangeService> = Arc::new(SyncServer::new(
-        authoritative_store,
-        Arc::new(aequora::testkit::AllowAllExecutor),
-        Arc::new(RejectConflicts),
-        Arc::new(SystemClock::new(NodeId::new())),
-    ));
-
-    // 2. Client Local Store & Transport Setup
-    let local_store = aequora::testkit::InMemoryLocalStore::default();
-    let transport = aequora::testkit::InProcessTransport::new(server, auth_context);
-
-    // 3. Client Sync Engine
-    let engine = ClientSyncEngine::new(
-        local_store,
-        transport,
-        ClientConfig::new(session),
-    );
-
-    // 4. Run Sync Cycle
-    let outcome = engine.run_once().await?;
-    println!("Sync outcome: acknowledged={}, changes={}", outcome.acknowledged, outcome.changes);
-
-    Ok(())
-}
+```text
+Stoolap client
+    │
+    │ AEQ1 framed Postcard over HTTPS
+    ▼
+Axum gateway
+    │
+    ▼
+Neon pooled PostgreSQL authority
+    └── direct Neon endpoint for migrations
 ```
 
----
+That topology is an integration profile, not a protocol dependency. A custom adapter can replace
+either database without rewriting the client/server engine or wire protocol.
 
-## Database Adapters & Feature Flags
+## Core guarantees
 
-Selection of client storage, authority storage, and transport backends is configured independently via Cargo features:
+- Atomic local application mutation and outbox insertion in compliant local adapters.
+- Stable `OperationId` idempotency across response loss and retry.
+- Atomic authoritative entity, version, sequence, journal, result-ledger, and audit commit.
+- Exact optimistic version transitions and deterministic conflict policy selection.
+- Atomic local reconciliation with cursor advancement last.
+- Durable retry attempt/deadline state and replayable `Sending` recovery.
+- Consistent, resumable snapshot bootstrap with atomic final installation.
+- Monotonic scoped cursors, retained-floor resynchronization, and safe compaction watermarks.
+- Bounded operation count, frame bytes, decompressed bytes, snapshots, dependencies, and scopes.
+- Authenticated pre-body global/per-tenant admission, rate limiting, and execution deadlines.
+- Database capability declarations and reusable local/authority compliance contracts.
+- Payload-free metrics and tracing across client, transport, server, and transaction boundaries.
 
-| Integration Target | Feature Flag | Struct / Backend | Role |
-|---|---|---|---|
-| Stoolap Local Storage | `stoolap` | `StoolapDatabase`, `StoolapStore` | Embedded MVCC client store with transactional outbox |
-| PostgreSQL / Neon Authority | `postgres` | `SqlxPostgresBackend`, `PostgresStore` | Server authoritative backend (supports pooled & direct migration URLs) |
-| Axum HTTP Gateway | `axum` | `ExchangeService`, Axum Router | Server-side HTTP synchronization endpoint |
-| Reqwest HTTP Client | `http-client` | `HttpSyncTransport` | Client-side Postcard-over-HTTP transport |
-| Quinn QUIC Transport | `quic` | `QuicClientTransport`, `QuicServerListener` | Ultra-low latency UDP/QUIC transport |
-| In-Memory Test Kit | `testkit` | `InMemoryLocalStore`, `InProcessTransport` | Deterministic simulation & behavioral test suite |
+## Deliberate boundaries
 
-### Neon PostgreSQL Configuration Example
+- A request batch is not one atomic business transaction; each operation is independently atomic.
+- Dependency ordering does not imply group rollback.
+- Cross-client/server two-phase commit is neither implemented nor claimed.
+- HTTP success is not the source of truth; the durable operation ledger is.
+- Authentication credentials, TLS, database secrets, backup policy, and restoration remain owned by
+  the host application.
+- Finance balancing and external-effect outboxes must be enforced in the application's own domain
+  transaction and tests.
+- SQLite, Redb, document stores, and other databases require a real custom adapter and compliance
+  proof; they are not built-in merely because the protocol is database-neutral.
 
-For Neon cloud deployments, `SqlxPostgresBackend::connect_neon` configures transaction-pooled endpoints for runtime traffic alongside direct migration endpoints for schema installation:
+## Quick start
 
-```rust,no_run
-use aequora::postgres::SqlxPostgresBackend;
-
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-let backend = SqlxPostgresBackend::connect_neon(
-    "postgres://user:pass@ep-pooled.neon.tech/main",  // Transaction pooled URL
-    "postgres://user:pass@ep-direct.neon.tech/main",  // Direct migration URL
-    10,                                                // Max pool connections
-).await?;
-
-backend.health_check().await?;
-# Ok(())
-# }
-```
-
----
-
-## Configuration
-
-Aequora uses RON (Rusty Object Notation) for type-safe, strict runtime configuration parsing:
-
-```rust,no_run
-use aequora::prelude::*;
-
-# fn configure() -> Result<(), Box<dyn std::error::Error>> {
-let ron_config = r#"
-(
-    protocol: (max_frame_bytes: 4194304),
-    push: (max_operations: 256),
-    coordinator: (sync_on_start: true, interval_secs: 30)
-)
-"#;
-
-let config = AequoraConfig::from_ron(ron_config)?;
-# Ok(())
-# }
-```
-
----
-
-## Verification & Testing Suite
-
-Execute the full workspace quality gate commands:
+### Requirements
 
 ```bash
-# Code formatting check
-cargo fmt --all -- --check
-
-# Offline compilation check for exact MSRV 1.87.0
-cargo +1.87.0 check --workspace --all-targets --all-features --offline
-
-# Workspace Clippy lint check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-# Execute all workspace tests
-cargo test --workspace --all-features
-
-# Documentation build with warnings treated as errors
-RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
-
-# Check fuzz binaries & benchmarks
-cargo check --manifest-path fuzz/Cargo.toml --bins
-cargo bench -p aequora-testkit --bench core_pipeline --no-run
-
-# Run the full School ERP example
-cargo run -p aequora --example school_erp --features stoolap,testkit
+rustup toolchain install 1.87.0 --profile minimal
+rustup override set 1.87.0
 ```
 
----
+Use the GitHub source directly:
+
+```toml
+[dependencies]
+aequora = { git = "https://github.com/irshadali5/aequora", features = ["stoolap", "http-client"] }
+```
+
+When consuming a published `0.1.x` release, replace `git` with `version = "0.1"`.
+
+### Run the verified examples
+
+The minimum deterministic flow uses an in-memory client, authority, and transport:
+
+```bash
+cargo run -p aequora --example in_process --features testkit --locked
+```
+
+The ERP example performs an optimistic offline write and outbox append in one real Stoolap
+transaction, then executes and reconciles it through a typed server handler:
+
+```bash
+cargo run -p aequora --example school_erp --features stoolap,testkit --locked
+```
+
+Expected output:
+
+```text
+offline attendance accepted and reconciled at sequence 1
+```
+
+Read the [complete tutorial](TUTORIAL.md) to build the same vertical slice step by step.
+
+### Minimal in-process assembly
+
+```rust,no_run
+use aequora::{
+    client::{ClientConfig, ClientSyncEngine},
+    clock::TestClock,
+    conflict::RejectConflicts,
+    executor::AuthContext,
+    protocol::SessionMetadata,
+    server::{ExchangeService, SyncServer},
+    testkit::{
+        AllowAllExecutor, InMemoryAuthoritativeStore, InMemoryLocalStore,
+        InProcessTransport,
+    },
+    types::{ActorId, DeviceId, NodeId, SessionId, SyncScopeId, TenantId},
+};
+use std::sync::Arc;
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let tenant = TenantId::new();
+let actor = ActorId::new();
+let device = DeviceId::new();
+let scope = SyncScopeId::new();
+let session = SessionMetadata {
+    session_id: SessionId::new(),
+    device_id: device,
+    actor_id: actor,
+    tenant_id: tenant,
+    scope_id: scope,
+    partitions: Vec::new(),
+};
+let auth = AuthContext {
+    actor_id: actor,
+    tenant_id: tenant,
+    device_id: device,
+};
+
+let authority = InMemoryAuthoritativeStore::default();
+let service: Arc<dyn ExchangeService> = Arc::new(SyncServer::new(
+    Arc::new(authority),
+    Arc::new(AllowAllExecutor),
+    Arc::new(RejectConflicts),
+    Arc::new(TestClock::new(NodeId::new(), 1_000)),
+));
+let engine = ClientSyncEngine::new(
+    InMemoryLocalStore::default(),
+    InProcessTransport::new(service, auth),
+    ClientConfig::new(session),
+);
+
+let outcome = engine.run_once().await?;
+assert_eq!(outcome.acknowledged, 0);
+# Ok(())
+# }
+```
+
+This demonstrates assembly. The runnable examples also create and synchronize a real operation.
+
+## Feature profiles
+
+Select each deployment axis independently:
+
+| Feature | Integration | Primary types |
+|---|---|---|
+| default `postcard` | AEQ1 framed binary protocol | codec and wire DTOs |
+| `stoolap` | Embedded local/client persistence | `StoolapDatabase`, `StoolapStore` |
+| `postgres` | PostgreSQL or Neon authority | `SqlxPostgresBackend`, `PostgresStore` |
+| `axum` | HTTP server gateway | `router_with_lifecycle`, `ServerLifecycle` |
+| `http-client` | Bounded Reqwest transport | `HttpTransport`, `RequestHeaders` |
+| `quic` | Quinn request/snapshot/hint transport | `QuicTransport`, `QuicServer` |
+| `testkit` | Deterministic reference components | in-memory stores and adapter contracts |
+| `ron` / `json` | Diagnostic codecs | optional human-readable encodings |
+| `tracing` | Structured payload-free tracing | `TracingObserver` |
+
+Recommended dependencies:
+
+```toml
+# Native client
+aequora = { version = "0.1", features = ["stoolap", "http-client", "tracing"] }
+
+# Authority server
+aequora = { version = "0.1", features = ["postgres", "axum", "tracing"] }
+
+# End-to-end integration tests
+aequora = { version = "0.1", features = ["stoolap", "postgres", "axum", "http-client", "testkit"] }
+```
+
+The database-neutrality gate compiles custom/custom, Stoolap/custom, custom/PostgreSQL, and
+Stoolap/PostgreSQL profiles to prevent cross-adapter leakage.
+
+## Production components
+
+### Stoolap client
+
+`StoolapDatabase` owns checksummed local migrations, the durable outbox/retry schedule,
+reconciliation, conflict inbox, cursors, and staged snapshot installation. Application repositories
+use its native transaction to commit optimistic state and the outbox operation together.
+
+```rust,no_run
+use aequora::stoolap::{StoolapDatabase, StoolapStore};
+
+# fn open() -> Result<(), Box<dyn std::error::Error>> {
+let backend = StoolapDatabase::open("file:///var/lib/my-app/client")?;
+backend.health_check()?;
+let local_store = StoolapStore::new(backend);
+# Ok(())
+# }
+```
+
+### PostgreSQL and Neon authority
+
+```rust,no_run
+use aequora::postgres::{PostgresPoolConfig, PostgresStore, SqlxPostgresBackend};
+
+# async fn connect() -> Result<(), Box<dyn std::error::Error>> {
+let url = std::env::var("DATABASE_URL")?;
+let backend = SqlxPostgresBackend::connect_with_config(
+    &url,
+    PostgresPoolConfig::new(10),
+)
+.await?;
+backend.health_check().await?;
+let authority = PostgresStore::new(backend);
+# Ok(())
+# }
+```
+
+For Neon, use a pooled runtime endpoint and a direct migration endpoint:
+
+```rust,no_run
+# use aequora::postgres::SqlxPostgresBackend;
+# async fn connect() -> Result<(), Box<dyn std::error::Error>> {
+let backend = SqlxPostgresBackend::connect_neon(
+    &std::env::var("NEON_POOLED_DATABASE_URL")?,
+    &std::env::var("NEON_DIRECT_DATABASE_URL")?,
+    10,
+)
+.await?;
+# Ok(())
+# }
+```
+
+The Neon constructor enforces certificate/hostname verification and scale-to-zero-friendly pooling.
+
+### Axum/HTTP boundary
+
+The Axum integration exposes:
+
+```text
+POST /sync/v1/exchange       bounded incremental push/pull
+POST /sync/v1/bootstrap      resumable snapshot bootstrap
+GET  /sync/v1/health         compatibility liveness alias
+GET  /sync/v1/health/live    process liveness
+GET  /sync/v1/health/ready   bounded dependency readiness
+```
+
+The host application must authenticate JWT/session/mTLS credentials and insert a verified
+`AuthContext` before these routes. Aequora then enforces tenant admission, rate limits, body and
+decompression bounds, request deadlines, readiness, and graceful draining.
+
+## Strict runtime configuration
+
+`AequoraConfig` parses secret-free RON with `deny_unknown_fields`, non-zero bounds, and cross-field
+validation. The same configuration maps into client, server, HTTP, QUIC, compute, and coordinator
+settings.
+
+```ron
+(
+    protocol: (minimum_version: 1, version: 1),
+    push: (
+        max_operations: 128,
+        max_bytes: 1048576,
+        max_wait_ms: 150,
+    ),
+    pull: (max_events: 1024, max_bytes: 4194304),
+    retry: (
+        max_attempts: 5,
+        initial_ms: 500,
+        max_ms: 30000,
+        multiplier: 2,
+        jitter_percent: 20,
+        max_exchanges_per_sync: 1024,
+    ),
+    coordinator: (
+        channel_capacity: 32,
+        periodic_interval_ms: Some(30000),
+        sync_on_start: true,
+    ),
+    operational: (
+        max_in_flight_requests: 256,
+        max_in_flight_per_tenant: 64,
+        tenant_requests_per_second: 64,
+        tenant_request_burst: 128,
+        max_rate_limit_tenants: 4096,
+        rate_limit_idle_timeout_ms: 300000,
+        body_read_timeout_ms: 15000,
+        request_timeout_ms: 30000,
+        readiness_timeout_ms: 2000,
+        drain_timeout_ms: 30000,
+        retry_after_seconds: 1,
+    ),
+)
+```
+
+Database URLs, access tokens, and TLS keys do not belong in this object.
+
+## Workspace map
+
+The workspace contains 26 publishable libraries plus one non-publishable developer utility:
+
+| Area | Crates |
+|---|---|
+| Facade | `aequora` |
+| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec` |
+| Client/server kernel | `aequora-client`, `aequora-server`, `aequora-executor`, `aequora-validator` |
+| Storage contracts/adapters | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
+| Network boundaries | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic` |
+| Domain policies | `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal` |
+| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-config`, `aequora-observability` |
+| Verification/tooling | `aequora-testkit`, `aequora-dev` |
+
+Run `cargo run -q -p aequora-dev -- summary` for the live workspace graph or
+`cargo run -q -p aequora-dev -- graph aequora-client` for one crate's dependency direction.
+
+## Verification
+
+The normal release gates are:
+
+```bash
+cargo fmt --all -- --check
+cargo +1.87.0 check --workspace --all-targets --all-features --locked
+cargo run -q -p aequora-dev --locked -- check
+bash scripts/check-database-neutrality.sh
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --locked
+cargo check --manifest-path fuzz/Cargo.toml --bins --locked
+cargo bench -p aequora-testkit --bench core_pipeline --no-run --locked
+cargo package --workspace --no-verify --locked
+git diff --check
+```
+
+The live PostgreSQL/Neon suites run only when their URLs are configured:
+
+```bash
+AEQUORA_TEST_POSTGRES_URL='postgres://...' \
+    cargo test -p aequora-store-postgres --test postgres_live --locked
+
+AEQUORA_TEST_POSTGRES_URL='postgres://...' \
+    cargo test -p aequora --test database_neutrality_live --all-features --locked
+```
+
+Neon requires both `AEQUORA_TEST_NEON_POOLED_URL` and `AEQUORA_TEST_NEON_DIRECT_URL`. A test that
+skips because these variables are absent is not a current live-database proof.
+
+CI also builds all fuzz targets, the Criterion harness, both runnable examples, and every
+publishable package.
+
+## Local retrieval-first developer workflow
+
+The repository includes RTK, semantic RAG, Octocode configuration, and Guppy dependency checks to
+keep automated development context bounded:
+
+```bash
+# Index after material refactors
+scripts/rag index
+
+# Retrieve architectural or semantic context
+scripts/rag query "authoritative transaction idempotency"
+
+# Find exact identifiers or policy strings
+rtk rg "TransactionCapabilityProvider" crates
+
+# Inspect dependency direction
+cargo run -q -p aequora-dev -- graph aequora-store-postgres
+
+# Enforce architecture
+cargo run -q -p aequora-dev -- check
+```
+
+See [Local AI context](docs/local-ai-context.md), [AGENTS.md](AGENTS.md), and [RTK.md](RTK.md).
+The local RAG index and Octocode cache are ignored; only their portable scripts/configuration are
+versioned.
+
+## Documentation
+
+- [Complete developer tutorial](TUTORIAL.md)
+- [Governing implementation plan](plan.md)
+- [Detailed synchronization architecture](next.md)
+- [ACID architecture](ACID.md)
+- [ACID compliance evidence](docs/acid-compliance.md)
+- [Architecture implementation matrix](docs/next-completion.md)
+- [Plan completion evidence](docs/plan-completion.md)
+- [Custom database adapter guide](docs/custom-database-adapters.md)
+- [Local retrieval and tooling guide](docs/local-ai-context.md)
+
+## Project status
+
+The repository-owned implementation described by `plan.md`, `next.md`, and `ACID.md` is present in
+code, migrations, public contracts, real Stoolap tests, deterministic simulations, model/property
+tests, HTTP/QUIC integration tests, and environment-gated PostgreSQL/Neon suites.
+
+Production acceptance remains deployment-specific. Before calling a deployment complete, run the
+live database suites with real credentials and prove TLS, backup restoration, capacity, monitoring,
+and graceful rollout/drain against the actual infrastructure.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE-MIT).
+Licensed under the [MIT License](LICENSE-MIT).

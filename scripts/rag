@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v octocode >/dev/null 2>&1; then
+    echo "octocode is not installed; see docs/local-ai-context.md" >&2
+    exit 127
+fi
+
+case "${1:-help}" in
+    index)
+        shift
+        exec octocode index --no-git "$@"
+        ;;
+    query)
+        shift
+        if [[ $# -eq 0 ]]; then
+            echo "usage: scripts/rag query <natural-language query>" >&2
+            exit 2
+        fi
+        exec octocode search --threshold 0.25 --format text --detail-level partial "$@"
+        ;;
+    code)
+        shift
+        if [[ $# -eq 0 ]]; then
+            echo "usage: scripts/rag code <natural-language query>" >&2
+            exit 2
+        fi
+        exec octocode search --mode code --threshold 0.25 --format text --detail-level partial "$@"
+        ;;
+    docs)
+        shift
+        if [[ $# -eq 0 ]]; then
+            echo "usage: scripts/rag docs <natural-language query>" >&2
+            exit 2
+        fi
+        exec octocode search --mode docs --threshold 0.25 --format text --detail-level partial "$@"
+        ;;
+    stats)
+        shift
+        exec octocode stats "$@"
+        ;;
+    serve)
+        shift
+        exec octocode mcp --path . --with-lsp rust-analyzer "$@"
+        ;;
+    help | --help | -h)
+        echo "usage: scripts/rag {index|query|code|docs|stats|serve} [arguments]"
+        ;;
+    *)
+        echo "unknown RAG command: $1" >&2
+        exit 2
+        ;;
+esac
