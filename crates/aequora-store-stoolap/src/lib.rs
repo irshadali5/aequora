@@ -281,6 +281,40 @@ impl StoolapDatabase {
         &self.database
     }
 
+    /// Reads the installed authoritative version for one scoped entity.
+    ///
+    /// Applications use this when constructing a new optimistic operation after bootstrap or
+    /// reconciliation. Tombstones remain versioned entities and are therefore returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the stored version is invalid or cannot be read.
+    pub fn entity_version(
+        &self,
+        scope: SyncScopeId,
+        entity: EntityRef,
+    ) -> Result<Option<EntityVersion>, StoreError> {
+        self.database
+            .query_opt::<i64, _>(
+                "SELECT version FROM aequora_local_entities
+                  WHERE scope_id=$1 AND entity_type=$2 AND entity_id=$3",
+                (
+                    scope.to_string(),
+                    i64::from(entity.entity_type.get()),
+                    entity.entity_id.to_string(),
+                ),
+            )
+            .map_err(stoolap_error)?
+            .map(|version| {
+                EntityVersion::new(
+                    u64::try_from(version)
+                        .map_err(|_| StoreError::permanent("invalid local entity version"))?,
+                )
+                .map_err(|_| StoreError::permanent("invalid local entity version"))
+            })
+            .transpose()
+    }
+
     /// Installs an application-owned projection hook before the backend begins synchronizing.
     #[must_use]
     pub fn with_projection_hook(mut self, hook: impl StoolapProjectionHook + 'static) -> Self {
