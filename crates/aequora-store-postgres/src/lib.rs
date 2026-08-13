@@ -180,7 +180,7 @@ impl PostgresSchemaStatus {
     }
 }
 
-/// Authoritative projection produced by an application-owned PostgreSQL commit hook.
+/// Authoritative projection produced by an application-owned `PostgreSQL` commit hook.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostgresCommitHookOutcome {
     authoritative_payload: Vec<u8>,
@@ -221,10 +221,10 @@ impl PostgresCommitHookOutcome {
 /// The hook runs only for a new operation, after operation/entity locks and version validation,
 /// and before any Aequora entity, journal, ledger, or audit write. Returning an error rolls back
 /// the complete transaction. Implementations must therefore be deterministic and safe to invoke
-/// again when PostgreSQL requests a whole-transaction retry.
+/// again when `PostgreSQL` requests a whole-transaction retry.
 ///
-/// The hook deliberately lives in the PostgreSQL edge adapter: Aequora's protocol and store traits
-/// remain independent of SQLx and of application domain tables.
+/// The hook deliberately lives in the `PostgreSQL` edge adapter: Aequora's protocol and store
+/// traits remain independent of `SQLx` and of application domain tables.
 #[async_trait]
 pub trait PostgresCommitHook: Send + Sync {
     /// Applies and validates the application-owned effect in `transaction`.
@@ -233,6 +233,24 @@ pub trait PostgresCommitHook: Send + Sync {
         transaction: &mut Transaction<'_, Postgres>,
         commit: &CommitOperation,
     ) -> Result<PostgresCommitHookOutcome, PostgresCommitHookError>;
+}
+
+/// Application-owned bootstrap materialization joined to Aequora's repeatable-read snapshot.
+///
+/// The hook may project authoritative application tables into Aequora by calling
+/// [`materialize_snapshot_entity`]. It runs after snapshot isolation is established and before
+/// the journal cursor and entity view are captured, so the resulting snapshot cannot miss a
+/// concurrent change while claiming a later cursor.
+#[async_trait]
+pub trait PostgresSnapshotHook: Send + Sync {
+    /// Materializes every entity visible in the requested tenant, scope, and partitions.
+    async fn materialize(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        partitions: &[Partition],
+    ) -> Result<(), StoreError>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -249,11 +267,28 @@ impl PostgresCommitHook for NoopPostgresCommitHook {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct NoopPostgresSnapshotHook;
+
+#[async_trait]
+impl PostgresSnapshotHook for NoopPostgresSnapshotHook {
+    async fn materialize(
+        &self,
+        _transaction: &mut Transaction<'_, Postgres>,
+        _tenant: TenantId,
+        _scope: SyncScopeId,
+        _partitions: &[Partition],
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
 /// Concrete `SQLx` `PostgreSQL` backend implementing every authoritative storage capability.
 #[derive(Clone)]
 pub struct SqlxPostgresBackend {
     pool: PgPool,
     commit_hook: Arc<dyn PostgresCommitHook>,
+    snapshot_hook: Arc<dyn PostgresSnapshotHook>,
 }
 
 impl fmt::Debug for SqlxPostgresBackend {
@@ -262,6 +297,7 @@ impl fmt::Debug for SqlxPostgresBackend {
             .debug_struct("SqlxPostgresBackend")
             .field("pool", &self.pool)
             .field("commit_hook", &"application-owned")
+            .field("snapshot_hook", &"application-owned")
             .finish()
     }
 }
@@ -415,6 +451,7 @@ impl SqlxPostgresBackend {
         Self {
             pool,
             commit_hook: Arc::new(NoopPostgresCommitHook),
+            snapshot_hook: Arc::new(NoopPostgresSnapshotHook),
         }
     }
 
@@ -429,10 +466,49 @@ impl SqlxPostgresBackend {
         self
     }
 
+    /// Installs an application-owned materializer for consistent bootstrap snapshots.
+    ///
+    /// This consumes the backend so the hook cannot be changed while it is serving traffic.
+    #[must_use]
+    pub fn with_snapshot_hook(mut self, hook: impl PostgresSnapshotHook + 'static) -> Self {
+        self.snapshot_hook = Arc::new(hook);
+        self
+    }
+
     /// Borrows the application-owned `SQLx` pool.
     #[must_use]
     pub const fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// Publishes an application/server-originated authoritative change inside an existing
+    /// application transaction.
+    ///
+    /// This is the write-side counterpart to [`PostgresCommitHook`]: use it when the application
+    /// already owns the domain transaction instead of receiving a client operation through
+    /// Aequora. Entity comparison, journal append, idempotency evidence, and audit evidence are
+    /// still atomic with the caller's domain writes. The caller remains responsible for committing
+    /// or rolling back `transaction`; the configured client-operation hook is not invoked.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error for invalid version transitions or rejected `PostgreSQL` writes.
+    pub async fn publish_in_transaction(
+        transaction: &mut Transaction<'_, Postgres>,
+        commit: &CommitOperation,
+        authoritative_payload: &[u8],
+    ) -> Result<CommitOutcome, StoreError> {
+        if !commit.has_valid_version_transition() {
+            return Err(corrupt(
+                "authoritative entity version must advance by exactly one",
+            ));
+        }
+        if let Some(outcome) = prepare_commit_in_transaction(transaction, commit).await? {
+            return Ok(outcome);
+        }
+        persist_commit_in_transaction(transaction, commit, authoritative_payload)
+            .await
+            .map(CommitOutcome::Applied)
     }
 
     /// Verifies that the runtime pool can acquire a healthy connection, the schema is current,
@@ -739,6 +815,215 @@ const fn change_kind_code(value: ChangeKind) -> i16 {
     }
 }
 
+/// Materializes one application-owned entity for a consistent snapshot.
+///
+/// Call this only from [`PostgresSnapshotHook::materialize`] using the transaction supplied to
+/// that hook. Existing values are replaced because the application tables are authoritative.
+/// No journal entry is appended: the entity is delivered by the snapshot whose boundary is
+/// captured after materialization.
+///
+/// # Errors
+///
+/// Returns a storage error if `PostgreSQL` rejects either the entity or scope write.
+pub async fn materialize_snapshot_entity(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant: TenantId,
+    scope: SyncScopeId,
+    entity: &SnapshotEntity,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO aequora_entities
+            (tenant_id, entity_type, entity_id, version, payload, tombstone)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET
+            version = EXCLUDED.version,
+            payload = EXCLUDED.payload,
+            tombstone = EXCLUDED.tombstone",
+    )
+    .bind(tenant.as_uuid())
+    .bind(i32::from(entity.entity.entity_type.get()))
+    .bind(entity.entity.entity_id.as_uuid())
+    .bind(to_i64(entity.version.get(), "snapshot entity version")?)
+    .bind(&entity.payload)
+    .bind(entity.tombstone)
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_entity_scopes
+            (tenant_id, scope_id, entity_type, entity_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(tenant.as_uuid())
+    .bind(scope.as_uuid())
+    .bind(i32::from(entity.entity.entity_type.get()))
+    .bind(entity.entity.entity_id.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    Ok(())
+}
+
+async fn prepare_commit_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    commit: &CommitOperation,
+) -> Result<Option<CommitOutcome>, StoreError> {
+    let operation_lock_key = format!("operation:{}:{}", commit.tenant_id, commit.operation_id);
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(operation_lock_key)
+        .execute(&mut **transaction)
+        .await
+        .map_err(postgres_error)?;
+    let entity_lock_key = format!(
+        "entity:{}:{}:{}",
+        commit.tenant_id,
+        commit.entity.entity_type.get(),
+        commit.entity.entity_id
+    );
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(entity_lock_key)
+        .execute(&mut **transaction)
+        .await
+        .map_err(postgres_error)?;
+    if let Some(row) = sqlx::query(
+        "SELECT entity_version, server_sequence
+           FROM aequora_applied_operations
+          WHERE tenant_id = $1 AND operation_id = $2",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.operation_id.as_uuid())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(postgres_error)?
+    {
+        return Ok(Some(CommitOutcome::Duplicate(ack_from_row(
+            commit.operation_id,
+            &row,
+            true,
+        )?)));
+    }
+    let current = sqlx::query(
+        "SELECT version FROM aequora_entities
+          WHERE tenant_id = $1 AND entity_type = $2 AND entity_id = $3
+          FOR UPDATE",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(postgres_error)?
+    .map(|row| {
+        row.try_get::<i64, _>("version")
+            .map_err(postgres_error)
+            .and_then(entity_version)
+    })
+    .transpose()?;
+    if current != commit.expected_version {
+        return Ok(Some(CommitOutcome::VersionChanged { current }));
+    }
+    Ok(None)
+}
+
+#[allow(clippy::too_many_lines)]
+async fn persist_commit_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    commit: &CommitOperation,
+    authoritative_payload: &[u8],
+) -> Result<OperationAck, StoreError> {
+    let next_version = to_i64(commit.next_version.get(), "next entity version")?;
+    sqlx::query(
+        "INSERT INTO aequora_entities (tenant_id, entity_type, entity_id, version, payload, tombstone) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload, tombstone = EXCLUDED.tombstone",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .bind(next_version)
+    .bind(authoritative_payload)
+    .bind(matches!(commit.change_kind, ChangeKind::Tombstone))
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_entity_scopes (tenant_id, scope_id, entity_type, entity_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.scope_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    let sequence: i64 = sqlx::query_scalar(
+        "INSERT INTO aequora_scope_sequences (tenant_id, scope_id, sequence) VALUES ($1, $2, 1) ON CONFLICT (tenant_id, scope_id) DO UPDATE SET sequence = aequora_scope_sequences.sequence + 1 RETURNING sequence",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.scope_id.as_uuid())
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.scope_id.as_uuid())
+    .bind(sequence)
+    .bind(commit.operation_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .bind(next_version)
+    .bind(change_kind_code(commit.change_kind))
+    .bind(authoritative_payload)
+    .bind(commit.timestamp.physical_ms)
+    .bind(
+        i32::try_from(commit.timestamp.logical)
+            .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
+    )
+    .bind(commit.timestamp.node.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, entity_version, scope_id, server_sequence) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.operation_id.as_uuid())
+    .bind(next_version)
+    .bind(commit.scope_id.as_uuid())
+    .bind(sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_audit_log (tenant_id, operation_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(commit.operation_id.as_uuid())
+    .bind(commit.actor_id.as_uuid())
+    .bind(commit.device_id.as_uuid())
+    .bind(i32::from(commit.operation_kind))
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .bind(next_version)
+    .bind(commit.command_digest.as_slice())
+    .bind(commit.timestamp.physical_ms)
+    .bind(
+        i32::try_from(commit.timestamp.logical)
+            .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
+    )
+    .bind(commit.timestamp.node.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    Ok(OperationAck {
+        operation_id: commit.operation_id,
+        entity_version: commit.next_version,
+        sequence: Sequence(from_i64(sequence, "server sequence")?),
+        duplicate: false,
+    })
+}
+
 /// Database-specific implementation point. `commit_operation` must run version comparison,
 /// entity mutation, scoped sequence allocation, journal append, and ledger insert in one
 /// `PostgreSQL` transaction. It should serialize concurrent retries by operation ID.
@@ -869,153 +1154,30 @@ impl PostgresBackend for SqlxPostgresBackend {
         let mut attempt = 1_u32;
         loop {
             let result: Result<CommitOutcome, StoreError> = async {
-        let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
-        // Operation identity is locked first so concurrent replays serialize even if a malformed
-        // retry changes its entity fields. Every transaction then takes the entity lock in the
-        // same operation-then-entity order, preventing an insert race for an absent entity without
-        // introducing lock-order cycles.
-        let operation_lock_key = format!("operation:{}:{}", commit.tenant_id, commit.operation_id);
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(operation_lock_key)
-            .execute(&mut *transaction)
-            .await
-            .map_err(postgres_error)?;
-        let entity_lock_key = format!(
-            "entity:{}:{}:{}",
-            commit.tenant_id,
-            commit.entity.entity_type.get(),
-            commit.entity.entity_id
-        );
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(entity_lock_key)
-            .execute(&mut *transaction)
-            .await
-            .map_err(postgres_error)?;
-        if let Some(row) = sqlx::query(
-            "SELECT entity_version, server_sequence FROM aequora_applied_operations WHERE tenant_id = $1 AND operation_id = $2",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.operation_id.as_uuid())
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(postgres_error)?
-        {
-            let acknowledgement = ack_from_row(commit.operation_id, &row, false)?;
-            transaction.commit().await.map_err(postgres_error)?;
-            return Ok(CommitOutcome::Duplicate(acknowledgement));
-        }
-        let current = sqlx::query(
-            "SELECT version FROM aequora_entities WHERE tenant_id = $1 AND entity_type = $2 AND entity_id = $3 FOR UPDATE",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(i32::from(commit.entity.entity_type.get()))
-        .bind(commit.entity.entity_id.as_uuid())
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(postgres_error)?
-        .map(|row| {
-            row.try_get::<i64, _>("version")
-                .map_err(postgres_error)
-                .and_then(entity_version)
-        })
-        .transpose()?;
-        if current != commit.expected_version {
-            transaction.rollback().await.map_err(postgres_error)?;
-            return Ok(CommitOutcome::VersionChanged { current });
-        }
-        let authoritative_payload = match self.commit_hook.apply(&mut transaction, &commit).await {
-            Ok(outcome) => outcome.into_authoritative_payload(),
-            Err(PostgresCommitHookError::Rejected(rejection)) => {
-                transaction.rollback().await.map_err(postgres_error)?;
-                return Ok(CommitOutcome::Rejected(rejection));
-            }
-            Err(PostgresCommitHookError::Store(error)) => return Err(error),
-        };
-        let next_version = to_i64(commit.next_version.get(), "next entity version")?;
-        sqlx::query(
-            "INSERT INTO aequora_entities (tenant_id, entity_type, entity_id, version, payload, tombstone) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload, tombstone = EXCLUDED.tombstone",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(i32::from(commit.entity.entity_type.get()))
-        .bind(commit.entity.entity_id.as_uuid())
-        .bind(next_version)
-        .bind(&authoritative_payload)
-        .bind(matches!(commit.change_kind, ChangeKind::Tombstone))
-        .execute(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        sqlx::query(
-            "INSERT INTO aequora_entity_scopes (tenant_id, scope_id, entity_type, entity_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.scope_id.as_uuid())
-        .bind(i32::from(commit.entity.entity_type.get()))
-        .bind(commit.entity.entity_id.as_uuid())
-        .execute(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        let sequence: i64 = sqlx::query_scalar(
-            "INSERT INTO aequora_scope_sequences (tenant_id, scope_id, sequence) VALUES ($1, $2, 1) ON CONFLICT (tenant_id, scope_id) DO UPDATE SET sequence = aequora_scope_sequences.sequence + 1 RETURNING sequence",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.scope_id.as_uuid())
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        sqlx::query(
-            "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.scope_id.as_uuid())
-        .bind(sequence)
-        .bind(commit.operation_id.as_uuid())
-        .bind(i32::from(commit.entity.entity_type.get()))
-        .bind(commit.entity.entity_id.as_uuid())
-        .bind(next_version)
-        .bind(change_kind_code(commit.change_kind))
-        .bind(&authoritative_payload)
-        .bind(commit.timestamp.physical_ms)
-        .bind(i32::try_from(commit.timestamp.logical).map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?)
-        .bind(commit.timestamp.node.as_uuid())
-        .execute(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        sqlx::query(
-            "INSERT INTO aequora_applied_operations (tenant_id, operation_id, entity_version, scope_id, server_sequence) VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.operation_id.as_uuid())
-        .bind(next_version)
-        .bind(commit.scope_id.as_uuid())
-        .bind(sequence)
-        .execute(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        sqlx::query(
-            "INSERT INTO aequora_audit_log (tenant_id, operation_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-        )
-        .bind(commit.tenant_id.as_uuid())
-        .bind(commit.operation_id.as_uuid())
-        .bind(commit.actor_id.as_uuid())
-        .bind(commit.device_id.as_uuid())
-        .bind(i32::from(commit.operation_kind))
-        .bind(i32::from(commit.entity.entity_type.get()))
-        .bind(commit.entity.entity_id.as_uuid())
-        .bind(next_version)
-        .bind(commit.command_digest.as_slice())
-        .bind(commit.timestamp.physical_ms)
-        .bind(i32::try_from(commit.timestamp.logical).map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?)
-        .bind(commit.timestamp.node.as_uuid())
-        .execute(&mut *transaction)
-        .await
-        .map_err(postgres_error)?;
-        transaction.commit().await.map_err(postgres_error)?;
-        Ok(CommitOutcome::Applied(OperationAck {
-            operation_id: commit.operation_id,
-            entity_version: commit.next_version,
-            sequence: Sequence(from_i64(sequence, "server sequence")?),
-            duplicate: false,
-        }))
+                let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+                if let Some(outcome) =
+                    prepare_commit_in_transaction(&mut transaction, &commit).await?
+                {
+                    transaction.commit().await.map_err(postgres_error)?;
+                    return Ok(outcome);
+                }
+                let authoritative_payload =
+                    match self.commit_hook.apply(&mut transaction, &commit).await {
+                        Ok(outcome) => outcome.into_authoritative_payload(),
+                        Err(PostgresCommitHookError::Rejected(rejection)) => {
+                            transaction.rollback().await.map_err(postgres_error)?;
+                            return Ok(CommitOutcome::Rejected(rejection));
+                        }
+                        Err(PostgresCommitHookError::Store(error)) => return Err(error),
+                    };
+                let acknowledgement = persist_commit_in_transaction(
+                    &mut transaction,
+                    &commit,
+                    &authoritative_payload,
+                )
+                .await?;
+                transaction.commit().await.map_err(postgres_error)?;
+                Ok(CommitOutcome::Applied(acknowledgement))
             }
             .await;
             match result {
@@ -1103,13 +1265,16 @@ impl PostgresBackend for SqlxPostgresBackend {
         &self,
         tenant: TenantId,
         scope: SyncScopeId,
-        _partitions: &[Partition],
+        partitions: &[Partition],
     ) -> Result<SnapshotDescriptor, StoreError> {
         let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             .execute(&mut *transaction)
             .await
             .map_err(postgres_error)?;
+        self.snapshot_hook
+            .materialize(&mut transaction, tenant, scope, partitions)
+            .await?;
         let sequence = sqlx::query_scalar::<_, i64>(
             "SELECT sequence FROM aequora_scope_sequences WHERE tenant_id = $1 AND scope_id = $2",
         )

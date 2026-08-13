@@ -11,7 +11,10 @@ use aequora_store::{
     OutboxStats, OutboxStore, ReconciliationStore, RetryMetadata, SnapshotProgress, StoreError,
     TransactionCapabilities, TransactionCapabilityProvider,
 };
-use aequora_types::{Cursor, OperationId, Sequence, SnapshotId, SyncScopeId};
+use aequora_types::{
+    Cursor, EntityId, EntityRef, EntityType, EntityVersion, OperationId, Sequence, SnapshotId,
+    SyncScopeId,
+};
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
@@ -167,12 +170,58 @@ pub struct StoolapDatabase {
 pub trait StoolapProjectionHook: Send + Sync {
     /// Applies one previously unseen authoritative change to application-owned local tables.
     /// Returning an error rolls back the entity, applied-event marker, cursor, and outbox state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the application projection cannot be updated.
     fn apply_change(
         &self,
         transaction: &mut ApiTransaction,
         scope: SyncScopeId,
         change: &aequora_protocol::RemoteChange,
     ) -> Result<(), StoreError>;
+
+    /// Starts replacement of application-owned projections from a complete authoritative
+    /// snapshot. Implementations should remove only rows owned by `scope`. The call is part of
+    /// the same transaction that installs Aequora's staged entities and cursor.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the existing scoped projection cannot be prepared.
+    fn begin_snapshot(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _scope: SyncScopeId,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Applies one entity from a complete authoritative snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the snapshot entity cannot be projected.
+    fn apply_snapshot_entity(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _scope: SyncScopeId,
+        _entity: &SnapshotEntity,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Finishes application projection replacement before the snapshot transaction commits.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when application snapshot finalization fails.
+    fn finish_snapshot(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _scope: SyncScopeId,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -892,6 +941,15 @@ impl StoolapBackend for StoolapDatabase {
                     (scope.to_string(),),
                 )
                 .map_err(stoolap_error)?;
+            self.projection_hook
+                .begin_snapshot(&mut transaction, scope)?;
+            let snapshot_entities = load_staged_snapshot_entities(&mut transaction, scope)?;
+            for entity in &snapshot_entities {
+                self.projection_hook
+                    .apply_snapshot_entity(&mut transaction, scope, entity)?;
+            }
+            self.projection_hook
+                .finish_snapshot(&mut transaction, scope)?;
             transaction
                 .execute(
                     "INSERT INTO aequora_local_entities (scope_id, entity_type, entity_id, version, payload, tombstone, provisional) SELECT scope_id, entity_type, entity_id, version, payload, tombstone, 0 FROM aequora_snapshot_staging WHERE scope_id = $1",
@@ -924,6 +982,49 @@ impl StoolapBackend for StoolapDatabase {
         transaction.commit().map_err(stoolap_error)?;
         Ok(progress)
     }
+}
+
+fn load_staged_snapshot_entities(
+    transaction: &mut ApiTransaction,
+    scope: SyncScopeId,
+) -> Result<Vec<SnapshotEntity>, StoreError> {
+    let rows = transaction
+        .query(
+            "SELECT entity_type, entity_id, version, payload, tombstone
+               FROM aequora_snapshot_staging
+              WHERE scope_id = $1
+              ORDER BY entity_type, entity_id",
+            (scope.to_string(),),
+        )
+        .map_err(stoolap_error)?;
+    let mut entities = Vec::new();
+    for row in rows {
+        let row = row.map_err(stoolap_error)?;
+        let entity_type = row.get::<i64>(0).map_err(stoolap_error)?;
+        let entity_id = row.get::<String>(1).map_err(stoolap_error)?;
+        let version = row.get::<i64>(2).map_err(stoolap_error)?;
+        let payload = row.get::<String>(3).map_err(stoolap_error)?;
+        entities.push(SnapshotEntity {
+            entity: EntityRef {
+                entity_type: EntityType::new(
+                    u16::try_from(entity_type)
+                        .map_err(|_| StoreError::permanent("invalid staged entity type"))?,
+                )
+                .map_err(|_| StoreError::permanent("invalid staged entity type"))?,
+                entity_id: EntityId::from_str(&entity_id)
+                    .map_err(|_| StoreError::permanent("invalid staged entity ID"))?,
+            },
+            version: EntityVersion::new(
+                u64::try_from(version)
+                    .map_err(|_| StoreError::permanent("invalid staged entity version"))?,
+            )
+            .map_err(|_| StoreError::permanent("invalid staged entity version"))?,
+            payload: hex::decode(payload)
+                .map_err(|_| StoreError::permanent("invalid staged entity payload"))?,
+            tombstone: row.get::<bool>(4).map_err(stoolap_error)?,
+        });
+    }
+    Ok(entities)
 }
 
 fn transition_operations(
@@ -1350,6 +1451,54 @@ mod tests {
         EntityRef {
             entity_type: EntityType::new(1).unwrap_or_else(|error| panic!("{error}")),
             entity_id: EntityId::new(),
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct SnapshotProjectionHook;
+
+    impl StoolapProjectionHook for SnapshotProjectionHook {
+        fn apply_change(
+            &self,
+            _transaction: &mut ApiTransaction,
+            _scope: SyncScopeId,
+            _change: &RemoteChange,
+        ) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn begin_snapshot(
+            &self,
+            transaction: &mut ApiTransaction,
+            scope: SyncScopeId,
+        ) -> Result<(), StoreError> {
+            transaction
+                .execute(
+                    "DELETE FROM application_projection WHERE scope_id = $1",
+                    (scope.to_string(),),
+                )
+                .map_err(stoolap_error)?;
+            Ok(())
+        }
+
+        fn apply_snapshot_entity(
+            &self,
+            transaction: &mut ApiTransaction,
+            scope: SyncScopeId,
+            entity: &SnapshotEntity,
+        ) -> Result<(), StoreError> {
+            transaction
+                .execute(
+                    "INSERT INTO application_projection (scope_id, entity_id, payload)
+                     VALUES ($1, $2, $3)",
+                    (
+                        scope.to_string(),
+                        entity.entity.entity_id.to_string(),
+                        String::from_utf8_lossy(&entity.payload).into_owned(),
+                    ),
+                )
+                .map_err(stoolap_error)?;
+            Ok(())
         }
     }
 
@@ -1804,6 +1953,73 @@ mod tests {
                 .query_one::<i64, _>("SELECT COUNT(*) FROM aequora_snapshot_staging", ())
                 .unwrap_or_else(|error| panic!("{error}")),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn final_snapshot_replaces_application_projection_in_same_transaction() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .database()
+            .execute(
+                "CREATE TABLE application_projection (
+                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                    scope_id TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                )",
+                (),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        let backend = backend.with_projection_hook(SnapshotProjectionHook);
+        let scope = SyncScopeId::new();
+        backend
+            .database()
+            .execute(
+                "INSERT INTO application_projection (scope_id, entity_id, payload)
+                 VALUES ($1, $2, $3)",
+                (scope.to_string(), EntityId::new().to_string(), "stale"),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        let replacement = BootstrapResponse {
+            protocol: ProtocolVersion::V1,
+            snapshot_id: SnapshotId::new(),
+            cursor: Cursor {
+                scope,
+                sequence: Sequence(4),
+            },
+            offset: 0,
+            entities: vec![SnapshotEntity {
+                entity: entity(),
+                version: EntityVersion::INITIAL,
+                payload: b"authoritative".to_vec(),
+                tombstone: false,
+            }],
+            next_offset: 1,
+            has_more: false,
+            server_time: HybridTimestamp {
+                physical_ms: 4,
+                logical: 0,
+                node: NodeId::new(),
+            },
+        };
+
+        backend
+            .stage_snapshot(&replacement)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let payload = backend
+            .database()
+            .query_one::<String, _>(
+                "SELECT payload FROM application_projection WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(payload, "authoritative");
+        assert_eq!(
+            backend.load_cursor(scope).await,
+            Ok(Some(replacement.cursor))
         );
     }
 
