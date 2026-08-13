@@ -1200,6 +1200,12 @@ create for you:
 1. application optimistic mutation plus outbox insertion;
 2. authoritative reconciliation plus cursor advancement.
 
+When application-owned local projection tables accompany `aequora_local_entities`, install a
+`StoolapProjectionHook` with `StoolapDatabase::with_projection_hook`. A previously unseen remote
+change is applied through the hook in the exact transaction that stores the generic entity, marks
+the journal sequence applied, advances the cursor, and terminally updates the outbox. Hook failure
+rolls the complete reconciliation back. The hook is not invoked for an already-applied sequence.
+
 ### 18.2 Authority adapter capabilities
 
 Implement the capabilities combined by `AuthoritativeStore`:
@@ -1213,6 +1219,21 @@ Implement the capabilities combined by `AuthoritativeStore`:
 `OperationLedger::commit_operation` is the critical atomic boundary. The adapter must commit the
 entity transition, exact next version, journal sequence/event, stable operation result, and audit
 record together.
+
+If the application keeps authoritative domain rows outside `aequora_entities`, install a
+`PostgresCommitHook` with `SqlxPostgresBackend::with_commit_hook`. The hook receives the same SQLx
+transaction after operation/entity locking and version validation. It must decode the registered
+application effect from `CommitOperation::payload`, re-check transaction-sensitive domain
+preconditions, mutate the application tables, append the application's domain outbox event, and
+return `PostgresCommitHookOutcome` containing the resulting authoritative projection. Aequora
+persists and journals that returned projection rather than the incoming effect bytes. Hook failure
+rolls back all domain and Aequora writes. Expected transaction-time authorization or business-rule
+failures return `PostgresCommitHookError::Rejected` and become typed operation rejections; storage
+failures use `PostgresCommitHookError::Store`. Duplicate deliveries never invoke the hook;
+PostgreSQL serialization/deadlock retries may invoke it again in a fresh transaction.
+
+Do not mutate application tables inside `OperationHandler::execute`: that handler runs before the
+authoritative store transaction and cannot provide atomicity with Aequora's ledger and journal.
 
 ### 18.3 Run the public compliance contracts
 

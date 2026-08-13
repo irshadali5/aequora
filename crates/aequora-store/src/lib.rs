@@ -5,8 +5,8 @@
 
 use aequora_executor::CurrentEntity;
 use aequora_protocol::{
-    BootstrapResponse, OperationAck, OperationEnvelope, Partition, RemoteChange, SnapshotEntity,
-    SyncResponse,
+    BootstrapResponse, OperationAck, OperationEnvelope, OperationRejection, Partition,
+    RemoteChange, SnapshotEntity, SyncResponse,
 };
 use aequora_types::{
     ActorId, Cursor, DeviceId, EntityRef, EntityVersion, HybridTimestamp, OperationId, Sequence,
@@ -260,6 +260,8 @@ pub enum CommitOutcome {
     Duplicate(OperationAck),
     /// State changed after validation. Nothing was committed.
     VersionChanged { current: Option<EntityVersion> },
+    /// Transaction-time application validation rejected the operation. Nothing was committed.
+    Rejected(OperationRejection),
 }
 
 /// One bounded page of authoritative journal entries.

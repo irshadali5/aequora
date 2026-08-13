@@ -28,12 +28,14 @@ pub use aequora_http as http_client;
 pub use aequora_quic as quic;
 #[cfg(feature = "postgres")]
 pub use aequora_store_postgres::{
-    self as postgres, POSTGRES_SCHEMA_VERSION, PostgresPoolConfig, PostgresSchemaStatus,
-    PostgresStore, SqlxPostgresBackend,
+    self as postgres, POSTGRES_SCHEMA_VERSION, PostgresCommitHook, PostgresCommitHookError,
+    PostgresCommitHookOutcome, PostgresPoolConfig, PostgresSchemaStatus, PostgresStore,
+    SqlxPostgresBackend,
 };
 #[cfg(feature = "stoolap")]
 pub use aequora_store_stoolap::{
-    self as stoolap, STOOLAP_SCHEMA_VERSION, StoolapDatabase, StoolapSchemaStatus, StoolapStore,
+    self as stoolap, STOOLAP_SCHEMA_VERSION, StoolapDatabase, StoolapProjectionHook,
+    StoolapSchemaStatus, StoolapStore,
 };
 #[cfg(feature = "testkit")]
 pub use aequora_testkit as testkit;

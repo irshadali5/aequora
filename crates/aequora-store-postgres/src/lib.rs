@@ -4,7 +4,9 @@
 //! satisfy it without exposing `sqlx::Transaction` to the rest of Aequora.
 
 use aequora_executor::CurrentEntity;
-use aequora_protocol::{ChangeKind, OperationAck, Partition, RemoteChange, SnapshotEntity};
+use aequora_protocol::{
+    ChangeKind, OperationAck, OperationRejection, Partition, RemoteChange, SnapshotEntity,
+};
 use aequora_store::{
     AuditLog, AuditOffset, AuditPage, ChangeJournal, ChangePage, CommitOperation, CommitOutcome,
     EntityReader, EntitySnapshot, JournalCompactor, OperationLedger, SnapshotDescriptor,
@@ -17,10 +19,10 @@ use aequora_types::{
 };
 use async_trait::async_trait;
 use sqlx::{
-    PgPool, Row,
+    PgPool, Postgres, Row, Transaction,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
-use std::{str::FromStr, time::Duration};
+use std::{fmt, str::FromStr, sync::Arc, time::Duration};
 
 /// `PostgreSQL` schema for opaque authoritative snapshots, scoped journals, and operation ledger.
 /// Applications may include this migration in their own migration runner.
@@ -178,10 +180,90 @@ impl PostgresSchemaStatus {
     }
 }
 
+/// Authoritative projection produced by an application-owned PostgreSQL commit hook.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostgresCommitHookOutcome {
+    authoritative_payload: Vec<u8>,
+}
+
+/// Failure returned by an application-owned commit hook.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PostgresCommitHookError {
+    /// Expected authorization/business validation failure that must be returned to the client.
+    Rejected(OperationRejection),
+    /// Storage failure that follows the ordinary adapter retry/permanence rules.
+    Store(StoreError),
+}
+
+impl From<StoreError> for PostgresCommitHookError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl PostgresCommitHookOutcome {
+    /// Wraps the application projection that Aequora must persist and journal after the hook's
+    /// domain mutation succeeds.
+    #[must_use]
+    pub fn new(authoritative_payload: Vec<u8>) -> Self {
+        Self {
+            authoritative_payload,
+        }
+    }
+
+    fn into_authoritative_payload(self) -> Vec<u8> {
+        self.authoritative_payload
+    }
+}
+
+/// Application-owned domain mutation joined to Aequora's authoritative transaction.
+///
+/// The hook runs only for a new operation, after operation/entity locks and version validation,
+/// and before any Aequora entity, journal, ledger, or audit write. Returning an error rolls back
+/// the complete transaction. Implementations must therefore be deterministic and safe to invoke
+/// again when PostgreSQL requests a whole-transaction retry.
+///
+/// The hook deliberately lives in the PostgreSQL edge adapter: Aequora's protocol and store traits
+/// remain independent of SQLx and of application domain tables.
+#[async_trait]
+pub trait PostgresCommitHook: Send + Sync {
+    /// Applies and validates the application-owned effect in `transaction`.
+    async fn apply(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        commit: &CommitOperation,
+    ) -> Result<PostgresCommitHookOutcome, PostgresCommitHookError>;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct NoopPostgresCommitHook;
+
+#[async_trait]
+impl PostgresCommitHook for NoopPostgresCommitHook {
+    async fn apply(
+        &self,
+        _transaction: &mut Transaction<'_, Postgres>,
+        commit: &CommitOperation,
+    ) -> Result<PostgresCommitHookOutcome, PostgresCommitHookError> {
+        Ok(PostgresCommitHookOutcome::new(commit.payload.clone()))
+    }
+}
+
 /// Concrete `SQLx` `PostgreSQL` backend implementing every authoritative storage capability.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SqlxPostgresBackend {
     pool: PgPool,
+    commit_hook: Arc<dyn PostgresCommitHook>,
+}
+
+impl fmt::Debug for SqlxPostgresBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SqlxPostgresBackend")
+            .field("pool", &self.pool)
+            .field("commit_hook", &"application-owned")
+            .finish()
+    }
 }
 
 impl TransactionCapabilityProvider for SqlxPostgresBackend {
@@ -329,8 +411,22 @@ impl SqlxPostgresBackend {
 
     /// Wraps an application-owned pool. Call [`Self::migrate`] before serving traffic.
     #[must_use]
-    pub const fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self {
+            pool,
+            commit_hook: Arc::new(NoopPostgresCommitHook),
+        }
+    }
+
+    /// Installs an application-owned domain hook for authoritative commits.
+    ///
+    /// This consumes the backend so the hook cannot be changed while it is serving traffic.
+    /// Duplicate operation deliveries return their original acknowledgement without invoking the
+    /// hook again.
+    #[must_use]
+    pub fn with_commit_hook(mut self, hook: impl PostgresCommitHook + 'static) -> Self {
+        self.commit_hook = Arc::new(hook);
+        self
     }
 
     /// Borrows the application-owned `SQLx` pool.
@@ -452,7 +548,7 @@ async fn connect_separate(
         .connect_with(runtime)
         .await
         .map_err(postgres_error)?;
-    Ok(SqlxPostgresBackend { pool })
+    Ok(SqlxPostgresBackend::from_pool(pool))
 }
 
 async fn migrate_pool(pool: &PgPool) -> Result<(), StoreError> {
@@ -827,6 +923,14 @@ impl PostgresBackend for SqlxPostgresBackend {
             transaction.rollback().await.map_err(postgres_error)?;
             return Ok(CommitOutcome::VersionChanged { current });
         }
+        let authoritative_payload = match self.commit_hook.apply(&mut transaction, &commit).await {
+            Ok(outcome) => outcome.into_authoritative_payload(),
+            Err(PostgresCommitHookError::Rejected(rejection)) => {
+                transaction.rollback().await.map_err(postgres_error)?;
+                return Ok(CommitOutcome::Rejected(rejection));
+            }
+            Err(PostgresCommitHookError::Store(error)) => return Err(error),
+        };
         let next_version = to_i64(commit.next_version.get(), "next entity version")?;
         sqlx::query(
             "INSERT INTO aequora_entities (tenant_id, entity_type, entity_id, version, payload, tombstone) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload, tombstone = EXCLUDED.tombstone",
@@ -835,7 +939,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         .bind(i32::from(commit.entity.entity_type.get()))
         .bind(commit.entity.entity_id.as_uuid())
         .bind(next_version)
-        .bind(&commit.payload)
+        .bind(&authoritative_payload)
         .bind(matches!(commit.change_kind, ChangeKind::Tombstone))
         .execute(&mut *transaction)
         .await
@@ -869,7 +973,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         .bind(commit.entity.entity_id.as_uuid())
         .bind(next_version)
         .bind(change_kind_code(commit.change_kind))
-        .bind(&commit.payload)
+        .bind(&authoritative_payload)
         .bind(commit.timestamp.physical_ms)
         .bind(i32::try_from(commit.timestamp.logical).map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?)
         .bind(commit.timestamp.node.as_uuid())

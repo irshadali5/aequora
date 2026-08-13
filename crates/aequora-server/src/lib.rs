@@ -608,6 +608,7 @@ where
                     "the entity changed while this operation was being committed",
                 )))
             }
+            CommitOutcome::Rejected(rejection) => Ok(ProcessResult::Rejected(rejection)),
         }
     }
 

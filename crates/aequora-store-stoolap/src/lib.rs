@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     str::FromStr,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use stoolap::{ApiTransaction, Database};
@@ -159,6 +160,33 @@ impl StoolapSchemaStatus {
 #[derive(Clone)]
 pub struct StoolapDatabase {
     database: Database,
+    projection_hook: Arc<dyn StoolapProjectionHook>,
+}
+
+/// Application-owned projection updates joined to Aequora's reconciliation transaction.
+pub trait StoolapProjectionHook: Send + Sync {
+    /// Applies one previously unseen authoritative change to application-owned local tables.
+    /// Returning an error rolls back the entity, applied-event marker, cursor, and outbox state.
+    fn apply_change(
+        &self,
+        transaction: &mut ApiTransaction,
+        scope: SyncScopeId,
+        change: &aequora_protocol::RemoteChange,
+    ) -> Result<(), StoreError>;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct NoopStoolapProjectionHook;
+
+impl StoolapProjectionHook for NoopStoolapProjectionHook {
+    fn apply_change(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _scope: SyncScopeId,
+        _change: &aequora_protocol::RemoteChange,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 impl TransactionCapabilityProvider for StoolapDatabase {
@@ -175,7 +203,10 @@ impl StoolapDatabase {
     /// Returns [`StoreError`] when the database cannot open or migration SQL fails.
     pub fn open(dsn: &str) -> Result<Self, StoreError> {
         let database = Database::open(dsn).map_err(stoolap_error)?;
-        let backend = Self { database };
+        let backend = Self {
+            database,
+            projection_hook: Arc::new(NoopStoolapProjectionHook),
+        };
         backend.migrate()?;
         Ok(backend)
     }
@@ -187,7 +218,10 @@ impl StoolapDatabase {
     /// Returns [`StoreError`] when Stoolap initialization or migration fails.
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let database = Database::open_in_memory().map_err(stoolap_error)?;
-        let backend = Self { database };
+        let backend = Self {
+            database,
+            projection_hook: Arc::new(NoopStoolapProjectionHook),
+        };
         backend.migrate()?;
         Ok(backend)
     }
@@ -196,6 +230,13 @@ impl StoolapDatabase {
     #[must_use]
     pub const fn database(&self) -> &Database {
         &self.database
+    }
+
+    /// Installs an application-owned projection hook before the backend begins synchronizing.
+    #[must_use]
+    pub fn with_projection_hook(mut self, hook: impl StoolapProjectionHook + 'static) -> Self {
+        self.projection_hook = Arc::new(hook);
+        self
     }
 
     /// Installs all missing local schema migrations and verifies recorded checksums.
@@ -765,6 +806,8 @@ impl StoolapBackend for StoolapDatabase {
                     },
                     "aequora_local_entities",
                 )?;
+                self.projection_hook
+                    .apply_change(&mut transaction, scope, change)?;
                 transaction
                     .execute(
                         "INSERT INTO aequora_applied_events (scope_id, sequence) VALUES ($1, $2)",

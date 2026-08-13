@@ -937,6 +937,18 @@ pub trait AuthoritativeStore:
 {}
 ```
 
+An application that keeps authoritative domain rows beside Aequora metadata must be able to join
+its domain mutation to the adapter's authoritative commit. The PostgreSQL edge adapter therefore
+exposes an optional application-owned commit hook that runs after operation/entity serialization
+locks and version validation, but before Aequora entity, journal, ledger and audit writes. The hook
+receives the same SQLx transaction and opaque application effect bytes. Hook failure rolls back the
+whole commit; duplicate operation delivery never invokes the hook again.
+
+This is an edge-adapter composition point, not a dependency of the protocol or core store traits.
+It must not make Aequora aware of an application's tables, framework, permissions, or domain
+objects. Applications that use Aequora's generic entity record as their complete authority retain
+the no-op hook.
+
 And:
 
 ```rust
