@@ -871,9 +871,10 @@ const fn change_kind_code(value: ChangeKind) -> i16 {
 /// Materializes one application-owned entity for a consistent snapshot.
 ///
 /// Call this only from [`PostgresSnapshotHook::materialize`] using the transaction supplied to
-/// that hook. Existing values are replaced because the application tables are authoritative.
-/// No journal entry is appended: the entity is delivered by the snapshot whose boundary is
-/// captured after materialization.
+/// that hook. Existing payloads are replaced because the application tables are authoritative,
+/// while an existing Aequora version is never regressed by a lower application row version. No
+/// journal entry is appended: the entity is delivered by the snapshot whose boundary is captured
+/// after materialization.
 ///
 /// # Errors
 ///
@@ -889,7 +890,7 @@ pub async fn materialize_snapshot_entity(
             (tenant_id, entity_type, entity_id, version, payload, tombstone)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET
-            version = EXCLUDED.version,
+            version = GREATEST(aequora_entities.version, EXCLUDED.version),
             payload = EXCLUDED.payload,
             tombstone = EXCLUDED.tombstone",
     )
