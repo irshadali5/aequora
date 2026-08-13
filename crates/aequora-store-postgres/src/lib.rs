@@ -253,6 +253,15 @@ pub trait PostgresSnapshotHook: Send + Sync {
     ) -> Result<(), StoreError>;
 }
 
+/// One additional authorized scope delivery for a server-originated projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresFanoutDelivery {
+    /// Scope whose journal receives the projection.
+    pub scope_id: SyncScopeId,
+    /// Unique event identity for this delivery.
+    pub operation_id: OperationId,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct NoopPostgresCommitHook;
 
@@ -509,6 +518,50 @@ impl SqlxPostgresBackend {
         persist_commit_in_transaction(transaction, commit, authoritative_payload)
             .await
             .map(CommitOutcome::Applied)
+    }
+
+    /// Publishes one server-originated entity change to every authorized scope atomically.
+    ///
+    /// `commit.scope_id` is the primary delivery. Additional deliveries allocate independent
+    /// monotonic sequences and event IDs without mutating the entity or command ledger again.
+    /// A duplicate primary operation proves the earlier transaction, including all deliveries,
+    /// committed and therefore returns without appending regenerated fan-out IDs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error for repeated scopes/event IDs, invalid versions, or rejected
+    /// `PostgreSQL` writes. The caller owns the surrounding commit/rollback.
+    pub async fn publish_to_scopes_in_transaction(
+        transaction: &mut Transaction<'_, Postgres>,
+        commit: &CommitOperation,
+        authoritative_payload: &[u8],
+        additional_deliveries: &[PostgresFanoutDelivery],
+    ) -> Result<CommitOutcome, StoreError> {
+        let mut scopes = std::collections::BTreeSet::new();
+        scopes.insert(commit.scope_id);
+        let mut operation_ids = std::collections::BTreeSet::new();
+        operation_ids.insert(commit.operation_id);
+        for delivery in additional_deliveries {
+            if !scopes.insert(delivery.scope_id) || !operation_ids.insert(delivery.operation_id) {
+                return Err(corrupt(
+                    "fan-out deliveries must have unique scopes and event IDs",
+                ));
+            }
+        }
+        let outcome =
+            Self::publish_in_transaction(transaction, commit, authoritative_payload).await?;
+        if matches!(outcome, CommitOutcome::Applied(_)) {
+            for delivery in additional_deliveries {
+                append_fanout_event_in_transaction(
+                    transaction,
+                    commit,
+                    authoritative_payload,
+                    *delivery,
+                )
+                .await?;
+            }
+        }
+        Ok(outcome)
     }
 
     /// Verifies that the runtime pool can acquire a healthy connection, the schema is current,
@@ -1022,6 +1075,62 @@ async fn persist_commit_in_transaction(
         sequence: Sequence(from_i64(sequence, "server sequence")?),
         duplicate: false,
     })
+}
+
+async fn append_fanout_event_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    commit: &CommitOperation,
+    authoritative_payload: &[u8],
+    delivery: PostgresFanoutDelivery,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO aequora_entity_scopes (tenant_id,scope_id,entity_type,entity_id)
+         VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(delivery.scope_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    let sequence: i64 = sqlx::query_scalar(
+        "INSERT INTO aequora_scope_sequences (tenant_id,scope_id,sequence)
+         VALUES ($1,$2,1)
+         ON CONFLICT (tenant_id,scope_id) DO UPDATE
+             SET sequence=aequora_scope_sequences.sequence+1
+         RETURNING sequence",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(delivery.scope_id.as_uuid())
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    sqlx::query(
+        "INSERT INTO aequora_sync_events
+            (tenant_id,scope_id,sequence,operation_id,entity_type,entity_id,entity_version,
+             change_kind,payload,physical_ms,logical_clock,clock_node)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    )
+    .bind(commit.tenant_id.as_uuid())
+    .bind(delivery.scope_id.as_uuid())
+    .bind(sequence)
+    .bind(delivery.operation_id.as_uuid())
+    .bind(i32::from(commit.entity.entity_type.get()))
+    .bind(commit.entity.entity_id.as_uuid())
+    .bind(to_i64(commit.next_version.get(), "fan-out entity version")?)
+    .bind(change_kind_code(commit.change_kind))
+    .bind(authoritative_payload)
+    .bind(commit.timestamp.physical_ms)
+    .bind(
+        i32::try_from(commit.timestamp.logical)
+            .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
+    )
+    .bind(commit.timestamp.node.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(postgres_error)?;
+    Ok(())
 }
 
 /// Database-specific implementation point. `commit_operation` must run version comparison,
