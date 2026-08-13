@@ -430,6 +430,8 @@ pub struct OutboxStats {
     pub sending: usize,
     /// Operations awaiting replay after a failed attempt.
     pub retry: usize,
+    /// Operations permanently rejected by authority and awaiting product inspection.
+    pub rejected: usize,
     /// Oldest replayable operation timestamp.
     pub oldest_pending_at: Option<HybridTimestamp>,
 }

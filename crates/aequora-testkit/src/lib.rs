@@ -732,7 +732,11 @@ impl OutboxStateStore for InMemoryLocalStore {
                 Some(OutboxState::Retry) => {
                     queue_stats.retry = queue_stats.retry.saturating_add(1);
                 }
-                _ => continue,
+                Some(OutboxState::Rejected) => {
+                    queue_stats.rejected = queue_stats.rejected.saturating_add(1);
+                    continue;
+                }
+                Some(OutboxState::Acknowledged | OutboxState::Conflict) | None => continue,
             }
             queue_stats.oldest_pending_at = Some(
                 queue_stats

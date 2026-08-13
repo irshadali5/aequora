@@ -814,7 +814,9 @@ impl StoolapBackend for StoolapDatabase {
         let rows = self
             .database
             .query(
-                "SELECT state, envelope FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') ORDER BY enqueued_order",
+                "SELECT state, envelope FROM aequora_outbox
+                  WHERE state IN ('pending', 'sending', 'retry', 'rejected')
+                  ORDER BY enqueued_order",
                 (),
             )
             .map_err(stoolap_error)?;
@@ -827,7 +829,11 @@ impl StoolapBackend for StoolapDatabase {
                 OutboxState::Pending => queue.pending = queue.pending.saturating_add(1),
                 OutboxState::Sending => queue.sending = queue.sending.saturating_add(1),
                 OutboxState::Retry => queue.retry = queue.retry.saturating_add(1),
-                _ => continue,
+                OutboxState::Rejected => {
+                    queue.rejected = queue.rejected.saturating_add(1);
+                    continue;
+                }
+                OutboxState::Acknowledged | OutboxState::Conflict => continue,
             }
             let operation: OperationEnvelope = decode(&envelope)?;
             queue.oldest_pending_at = Some(
@@ -1509,7 +1515,8 @@ impl<B: StoolapBackend> ReconciliationStore for StoolapStore<B> {
 mod tests {
     use super::*;
     use aequora_protocol::{
-        ChangeKind, OperationAck, OperationKind, OperationMetadata, RemoteChange, SyncDirective,
+        ChangeKind, Conflict, ConflictPolicy, OperationAck, OperationKind, OperationMetadata,
+        OperationRejection, RejectionCode, RemoteChange, SyncDirective,
     };
     use aequora_store::StoreErrorKind;
     use aequora_testkit::contracts::verify_local_store;
@@ -1788,6 +1795,65 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(report.operation_id, operation.operation_id);
         assert_eq!(report.cursor.scope, scope);
+    }
+
+    #[tokio::test]
+    async fn durable_stats_include_terminal_work_needing_attention() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let store = StoolapStore::new(backend);
+        let rejected = operation(entity());
+        let conflicted = operation(entity());
+        store
+            .append_operation(rejected.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        store
+            .append_operation(conflicted.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let scope = SyncScopeId::new();
+        store
+            .reconcile(&SyncResponse {
+                protocol: ProtocolVersion::V1,
+                directive: SyncDirective::Continue,
+                acknowledged: Vec::new(),
+                rejected: vec![OperationRejection {
+                    operation_id: rejected.operation_id,
+                    code: RejectionCode::BusinessRule,
+                    message: "attendance session is already submitted".into(),
+                }],
+                conflicts: vec![Conflict {
+                    operation_id: conflicted.operation_id,
+                    entity: conflicted.entity,
+                    client_base: conflicted.base_version,
+                    server_version: Some(EntityVersion::INITIAL),
+                    policy: ConflictPolicy::ManualResolution,
+                    message: "attendance changed on another device".into(),
+                }],
+                changes: Vec::new(),
+                next_cursor: Cursor {
+                    scope,
+                    sequence: Sequence(0),
+                },
+                has_more: false,
+                server_time: rejected.created_at,
+            })
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let stats = store
+            .outbox_stats()
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(stats.replayable(), 0);
+        assert_eq!(stats.rejected, 1);
+        assert_eq!(
+            store
+                .unresolved_conflict_count()
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            1
+        );
     }
 
     #[tokio::test]
