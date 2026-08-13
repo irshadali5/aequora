@@ -315,6 +315,72 @@ impl StoolapDatabase {
             .transpose()
     }
 
+    /// Erases cached synchronization state for one revoked/replaced scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error and rolls back every removal if any scoped table cannot be updated.
+    pub fn erase_scope_cache(&self, scope: SyncScopeId) -> Result<(), StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let scope = scope.to_string();
+        for statement in [
+            "DELETE FROM aequora_applied_events WHERE scope_id=$1",
+            "DELETE FROM aequora_local_entities WHERE scope_id=$1",
+            "DELETE FROM aequora_snapshot_staging WHERE scope_id=$1",
+            "DELETE FROM aequora_snapshot_progress WHERE scope_id=$1",
+            "DELETE FROM aequora_cursors WHERE scope_id=$1",
+        ] {
+            transaction
+                .execute(statement, (&scope,))
+                .map_err(stoolap_error)?;
+        }
+        transaction.commit().map_err(stoolap_error)
+    }
+
+    /// Discards commands and conflicts created by one revoked device.
+    ///
+    /// Device matching is performed against the decoded typed envelope. Other devices' rows are
+    /// never selected, so a shared local store cannot erase unrelated pending work.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error and preserves all rows when an envelope is corrupt or deletion
+    /// cannot commit.
+    pub fn discard_device_operations(
+        &self,
+        device: aequora_types::DeviceId,
+    ) -> Result<u64, StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let rows = transaction
+            .query("SELECT envelope FROM aequora_outbox", ())
+            .map_err(stoolap_error)?;
+        let mut operation_ids = Vec::new();
+        for row in rows {
+            let row = row.map_err(stoolap_error)?;
+            let envelope = row.get::<String>(0).map_err(stoolap_error)?;
+            let operation: OperationEnvelope = decode(&envelope)?;
+            if operation.device_id == device {
+                operation_ids.push(operation.operation_id.to_string());
+            }
+        }
+        for operation_id in &operation_ids {
+            transaction
+                .execute(
+                    "DELETE FROM aequora_conflicts WHERE operation_id=$1",
+                    (operation_id,),
+                )
+                .map_err(stoolap_error)?;
+            transaction
+                .execute(
+                    "DELETE FROM aequora_outbox WHERE operation_id=$1",
+                    (operation_id,),
+                )
+                .map_err(stoolap_error)?;
+        }
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(u64::try_from(operation_ids.len()).unwrap_or(u64::MAX))
+    }
+
     /// Installs an application-owned projection hook before the backend begins synchronizing.
     #[must_use]
     pub fn with_projection_hook(mut self, hook: impl StoolapProjectionHook + 'static) -> Self {
@@ -2128,5 +2194,57 @@ mod tests {
             .query_one::<String, _>("SELECT payload FROM aequora_local_entities", ())
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(hex::decode(stored_payload), Ok(operation.payload));
+    }
+
+    #[tokio::test]
+    async fn replacement_erasure_is_scope_and_device_bounded() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let revoked_scope = SyncScopeId::new();
+        let retained_scope = SyncScopeId::new();
+        let revoked = operation(entity());
+        let retained = operation(entity());
+        backend
+            .append_operation(revoked.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .append_operation(retained.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .database()
+            .execute(
+                "INSERT INTO aequora_cursors (scope_id,sequence) VALUES ($1,$2)",
+                (revoked_scope.to_string(), 3_i64),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .database()
+            .execute(
+                "INSERT INTO aequora_cursors (scope_id,sequence) VALUES ($1,$2)",
+                (retained_scope.to_string(), 4_i64),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(backend.discard_device_operations(revoked.device_id), Ok(1));
+        backend
+            .erase_scope_cache(revoked_scope)
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(
+            backend
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            vec![retained]
+        );
+        assert_eq!(backend.load_cursor(revoked_scope).await, Ok(None));
+        assert_eq!(
+            backend.load_cursor(retained_scope).await,
+            Ok(Some(Cursor {
+                scope: retained_scope,
+                sequence: Sequence(4),
+            }))
+        );
     }
 }
