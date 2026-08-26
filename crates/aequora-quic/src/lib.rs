@@ -16,7 +16,7 @@ use aequora_store::StoreErrorKind;
 use aequora_transport::{
     SnapshotPageStream, StreamingSyncTransport, SyncTransport, TransportError,
 };
-use aequora_types::ProtocolVersion;
+use aequora_types::{OperationalErrorCode, ProtocolVersion};
 use async_trait::async_trait;
 use quinn::{Connection, ConnectionError, RecvStream, SendStream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -327,8 +327,12 @@ impl QuicServer {
                 self.write_snapshot_stream(send, auth, request).await
             }
             _ => {
-                let reply = encode_wire_error(false, "unsupported QUIC request message")
-                    .map_err(QuicServerError::new)?;
+                let reply = encode_wire_error(
+                    false,
+                    Some(OperationalErrorCode::Protocol),
+                    "unsupported QUIC request message",
+                )
+                .map_err(QuicServerError::new)?;
                 send.write_all(&reply).await.map_err(QuicServerError::new)?;
                 send.finish().map_err(QuicServerError::new)
             }
@@ -439,10 +443,15 @@ fn decode_reply<T: DeserializeOwned + WireProtocol>(
             },
         )
         .map_err(permanent)?;
-        return Err(if error.transient {
-            TransportError::transient(error.message)
+        let (code, message) = split_operational_code(error.message);
+        let transport_error = if error.transient {
+            TransportError::transient(message)
         } else {
-            TransportError::permanent(error.message)
+            TransportError::permanent(message)
+        };
+        return Err(match code {
+            Some(code) => transport_error.with_code(code),
+            None => transport_error,
         });
     }
     let (frame_protocol, value) = decode_with_limits::<T>(
@@ -479,20 +488,49 @@ fn encode_server_error(error: &ServerError) -> Result<Vec<u8>, aequora_codec::Co
     let transient = matches!(
         error,
         ServerError::Store(store) if store.kind == StoreErrorKind::Transient
-    );
-    encode_wire_error(transient, &error.to_string())
+    ) || matches!(error, ServerError::Maintenance { .. });
+    let code = match error {
+        ServerError::Maintenance { .. } => OperationalErrorCode::Maintenance,
+        ServerError::Store(_) => OperationalErrorCode::Storage,
+        ServerError::IdentityMismatch | ServerError::ScopeAuthorization(_) => {
+            OperationalErrorCode::Authentication
+        }
+        ServerError::Validation(_) | ServerError::Codec(_) | ServerError::BootstrapUnavailable => {
+            OperationalErrorCode::Protocol
+        }
+        ServerError::Dependency(_) => OperationalErrorCode::Validation,
+        ServerError::ResponseLimit | ServerError::SnapshotNoProgress => {
+            OperationalErrorCode::PayloadLimit
+        }
+        ServerError::VersionOverflow | ServerError::Compute(_) | ServerError::Merge(_) => {
+            OperationalErrorCode::Storage
+        }
+    };
+    encode_wire_error(transient, Some(code), &error.to_string())
 }
 
-fn encode_wire_error(transient: bool, message: &str) -> Result<Vec<u8>, aequora_codec::CodecError> {
+fn encode_wire_error(
+    transient: bool,
+    code: Option<OperationalErrorCode>,
+    message: &str,
+) -> Result<Vec<u8>, aequora_codec::CodecError> {
+    let message = code.map_or_else(|| message.to_owned(), |code| format!("{code}: {message}"));
     encode_with_options(
         ProtocolVersion::V1,
         MessageKind::TransportError,
-        &WireError {
-            transient,
-            message: message.to_owned(),
-        },
+        &WireError { transient, message },
         EncodeOptions::default(),
     )
+}
+
+fn split_operational_code(message: String) -> (Option<OperationalErrorCode>, String) {
+    let Some((candidate, detail)) = message.split_once(": ") else {
+        return (None, message);
+    };
+    match OperationalErrorCode::parse(candidate) {
+        Some(code) => (Some(code), detail.to_owned()),
+        None => (None, message),
+    }
 }
 
 async fn write_length_delimited(
@@ -611,14 +649,19 @@ mod tests {
 
     #[test]
     fn typed_wire_errors_preserve_retry_semantics() {
-        let frame = encode_wire_error(true, "temporarily unavailable")
-            .unwrap_or_else(|error| panic!("{error}"));
+        let frame = encode_wire_error(
+            true,
+            Some(OperationalErrorCode::Maintenance),
+            "temporarily unavailable",
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let result =
             decode_reply::<SyncResponse>(&frame, MessageKind::SyncResponse, QuicConfig::default());
         assert!(matches!(
             result,
             Err(TransportError {
                 kind: TransportErrorKind::Transient,
+                code: Some(OperationalErrorCode::Maintenance),
                 ..
             })
         ));
