@@ -6,7 +6,7 @@ use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, Capability, SyncRequest, SyncResponse};
 use aequora_server::{ExchangeService, ServerError};
 use aequora_store::StoreErrorKind;
-use aequora_types::TenantId;
+use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode, TenantId};
 use async_trait::async_trait;
 use axum::{
     Extension, Router,
@@ -824,80 +824,110 @@ impl From<ServerError> for HttpError {
 }
 
 impl IntoResponse for HttpError {
+    #[allow(clippy::too_many_lines)]
     fn into_response(self) -> Response {
-        let (status, message, retry_after) = match self {
+        let (status, message, retry_after, code) = match self {
             Self::UnsupportedMediaType => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported sync content type".to_owned(),
                 None,
+                OperationalErrorCode::Protocol,
             ),
-            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message.to_owned(), None),
+            Self::BadRequest(message) => (
+                StatusCode::BAD_REQUEST,
+                message.to_owned(),
+                None,
+                OperationalErrorCode::Validation,
+            ),
             Self::BodyTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "sync request body exceeds the configured wire limit".to_owned(),
                 None,
+                OperationalErrorCode::PayloadLimit,
             ),
             Self::BodyReadTimedOut(seconds) => (
                 StatusCode::REQUEST_TIMEOUT,
                 "sync request body exceeded its receive deadline".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Deadline,
             ),
             Self::MissingAuthentication => (
                 StatusCode::UNAUTHORIZED,
                 "authenticated identity is unavailable".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Overloaded(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync server is at its in-flight request limit".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::TenantOverloaded(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "tenant is at its in-flight sync request limit".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::TenantRateLimited(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "tenant sync request rate limit exceeded".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::Draining(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync server is draining".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Draining,
             ),
             Self::DeadlineExceeded(seconds) => (
                 StatusCode::GATEWAY_TIMEOUT,
                 "sync request exceeded its server execution deadline".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Deadline,
             ),
-            Self::Codec(error) => (StatusCode::BAD_REQUEST, error.to_string(), None),
-            Self::Server(ServerError::Validation(error)) => {
-                (StatusCode::BAD_REQUEST, error.to_string(), None)
-            }
-            Self::Server(ServerError::Dependency(error)) => {
-                (StatusCode::BAD_REQUEST, error.to_string(), None)
-            }
+            Self::Codec(error) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Validation(error)) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Dependency(error)) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Validation,
+            ),
             Self::Server(ServerError::ResponseLimit) => (
                 StatusCode::BAD_REQUEST,
                 "client response limit is too small".to_owned(),
                 None,
+                OperationalErrorCode::PayloadLimit,
             ),
             Self::Server(ServerError::IdentityMismatch) => (
                 StatusCode::UNAUTHORIZED,
                 "authenticated identity mismatch".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::ScopeAuthorization(_)) => (
                 StatusCode::FORBIDDEN,
                 "sync scope is not authorized".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::Store(error)) if error.kind == StoreErrorKind::Transient => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync storage unavailable".to_owned(),
                 None,
+                OperationalErrorCode::Storage,
             ),
             Self::Server(
                 ServerError::Store(_)
@@ -910,11 +940,22 @@ impl IntoResponse for HttpError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "sync processing failed".to_owned(),
                 None,
+                OperationalErrorCode::Storage,
             ),
             Self::Server(ServerError::BootstrapUnavailable) => (
                 StatusCode::NOT_IMPLEMENTED,
                 "snapshot bootstrap is not available".to_owned(),
                 None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Maintenance {
+                retry_after_seconds,
+                ..
+            }) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "sync is temporarily unavailable due to maintenance".to_owned(),
+                Some(retry_after_seconds),
+                OperationalErrorCode::Maintenance,
             ),
         };
         let mut response = (status, message).into_response();
@@ -923,6 +964,10 @@ impl IntoResponse for HttpError {
         {
             response.headers_mut().insert(RETRY_AFTER, value);
         }
+        response.headers_mut().insert(
+            OPERATIONAL_ERROR_CODE_HEADER,
+            HeaderValue::from_static(code.as_str()),
+        );
         response
     }
 }
@@ -930,6 +975,24 @@ impl IntoResponse for HttpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_failures_expose_stable_codes_without_payloads() {
+        let response = HttpError::Server(ServerError::Maintenance {
+            mode: aequora_server::MaintenanceMode::SyncPaused,
+            retry_after_seconds: 17,
+        })
+        .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(OPERATIONAL_ERROR_CODE_HEADER),
+            Some(&HeaderValue::from_static("AEQ-MAINT-001"))
+        );
+        assert_eq!(
+            response.headers().get(RETRY_AFTER),
+            Some(&HeaderValue::from_static("17"))
+        );
+    }
 
     const fn rate_config() -> TenantRateLimitConfig {
         TenantRateLimitConfig {
