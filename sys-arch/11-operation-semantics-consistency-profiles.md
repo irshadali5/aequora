@@ -2,6 +2,10 @@
 
 # Operation Semantics, Aggregate Policies, and Consistency Profiles Architecture
 
+**Repository status (2026-08-20): Complete at the reusable framework boundary.** See
+[`docs/operation-semantics-consistency-profiles-completion.md`](docs/operation-semantics-consistency-profiles-completion.md)
+for code, compliance, operations, and deployment evidence.
+
 ## 1. Purpose
 
 Aequora already defines many important mechanisms:
@@ -1978,20 +1982,20 @@ DerivedProjection
 Part 11 is complete when:
 
 ```text
-[ ] built-in consistency profiles defined
-[ ] aggregate profile vs operation semantics separated
-[ ] versioning policies defined
-[ ] ordering policies defined
-[ ] delete policies defined
-[ ] audit policies defined
-[ ] profile capability requirements defined
-[ ] invalid combinations rejected
-[ ] registry API defined
-[ ] derive/builder ergonomics defined
-[ ] profile manifest generated
-[ ] compatibility CI hooks defined
-[ ] profile-specific property/compliance tests defined
-[ ] finance/workflow examples covered
+[x] built-in consistency profiles defined
+[x] aggregate profile vs operation semantics separated
+[x] versioning policies defined
+[x] ordering policies defined
+[x] delete policies defined
+[x] audit policies defined
+[x] profile capability requirements defined
+[x] invalid combinations rejected
+[x] registry API defined
+[x] derive/builder ergonomics defined
+[x] profile manifest generated
+[x] compatibility CI hooks defined
+[x] profile-specific property/compliance tests defined
+[x] finance/workflow examples covered
 ```
 
 ---
