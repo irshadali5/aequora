@@ -1,0 +1,25 @@
+[package]
+name = "aequora-migration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Canonical verified export artifacts for database-neutral Aequora migrations"
+repository.workspace = true
+
+[dependencies]
+aequora-schema = { version = "0.1.0", path = "../aequora-schema" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+tokio.workspace = true
+
+[lints]
+workspace = true
