@@ -51,6 +51,7 @@ fn operation(session: &SessionMetadata, dependency: Option<OperationId>) -> Oper
         metadata: OperationMetadata {
             trace_id: None,
             dependencies: dependency.into_iter().collect(),
+            ..OperationMetadata::default()
         },
     }
 }

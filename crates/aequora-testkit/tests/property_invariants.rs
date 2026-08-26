@@ -10,8 +10,9 @@ use aequora_store::{
 };
 use aequora_testkit::{InMemoryAuthoritativeStore, InMemoryLocalStore};
 use aequora_types::{
-    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp,
-    NodeId, OperationId, ProtocolVersion, SchemaVersion, Sequence, SyncScopeId, TenantId,
+    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, ProtocolVersion,
+    SchemaVersion, Sequence, SyncScopeId, TenantId,
 };
 use proptest::prelude::*;
 
@@ -71,11 +72,15 @@ fn response(
     entity: EntityRef,
     sequence: u64,
 ) -> SyncResponse {
+    let event_id = EventId::new();
+    let lineage = LineageContext::root().derived(LineageRef::Operation(operation_id));
     SyncResponse {
         protocol: ProtocolVersion::V1,
         directive: SyncDirective::Continue,
         acknowledged: vec![OperationAck {
             operation_id,
+            event_id,
+            lineage,
             entity_version: EntityVersion::INITIAL,
             sequence: Sequence(sequence),
             duplicate: false,
@@ -87,6 +92,8 @@ fn response(
             scope_id: scope,
             sequence: Sequence(sequence),
             operation_id,
+            event_id,
+            lineage,
             entity,
             version: EntityVersion::INITIAL,
             change_kind: ChangeKind::Upsert,
@@ -167,6 +174,8 @@ proptest! {
             let payload = b"one logical effect".to_vec();
             let commit = CommitOperation {
                 operation_id,
+                event_id: EventId::new(),
+                operation_lineage: LineageContext::root(),
                 actor_id: ActorId::new(),
                 device_id: DeviceId::new(),
                 operation_kind: 1,
@@ -245,6 +254,9 @@ proptest! {
                 operation_ids.push(operation_id);
                 acknowledgements.push(OperationAck {
                     operation_id,
+                    event_id: EventId::new(),
+                    lineage: LineageContext::root()
+                        .derived(LineageRef::Operation(operation_id)),
                     entity_version: EntityVersion::INITIAL,
                     sequence: Sequence(u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1)),
                     duplicate: false,
