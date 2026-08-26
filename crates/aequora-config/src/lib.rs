@@ -1,13 +1,19 @@
 //! Validated, secret-free RON configuration for Aequora runtime components.
 
-use aequora_client::{AdaptiveBatchConfig, ClientConfig, RetryConfig, SyncCoordinatorConfig};
+use aequora_client::{
+    AdaptiveBatchConfig, ClientConfig, MultiProcessCoordinatorConfig, RetryConfig,
+    SyncCoordinatorConfig,
+};
 use aequora_compute::ComputeConfig;
+use aequora_coordination::{LocalProcessMode, ProcessInstanceId};
+use aequora_crypto::CryptoPolicy;
 use aequora_protocol::{Capability, ClientLimits, SessionMetadata, SnapshotLimits};
+use aequora_scheduler::{SchedulerPolicy, SyncProfile};
 use aequora_server::ServerConfig;
 use aequora_types::ProtocolVersion;
 use aequora_validator::ProtocolLimits;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{fmt, time::Duration};
 use thiserror::Error;
 
 #[cfg(feature = "axum")]
@@ -38,8 +44,66 @@ pub struct AequoraConfig {
     pub limits: ResourceLimitsConfig,
     /// Background synchronization settings.
     pub coordinator: CoordinatorConfig,
+    /// Platform-neutral adaptive scheduling and `QoS` policy.
+    pub scheduler: SchedulerPolicy,
+    /// Bounded local outbox compaction thresholds.
+    pub outbox_optimization: OutboxOptimizationConfig,
+    /// Conservative anti-entropy verification and repair policy.
+    pub integrity: IntegrityConfig,
+    /// Secret-free cryptographic algorithms and required-feature policy.
+    pub crypto: CryptoPolicy,
     /// Production server admission, deadline, and readiness controls.
     pub operational: OperationalConfig,
+}
+
+/// Named, conservative starting points for common deployment shapes.
+///
+/// Profiles are intentionally database- and transport-neutral. Applications may override public
+/// fields after selecting a profile, but must call [`AequoraConfig::validate`] before constructing
+/// runtime components.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DeploymentProfile {
+    /// Fast feedback and small resource use on one developer machine.
+    Development,
+    /// Conservative first production deployment with one or two application nodes.
+    #[default]
+    SmallProduction,
+    /// Higher bounded admission for a horizontally scaled application tier.
+    Enterprise,
+    /// Longer deadlines and retry windows for intermittent or high-latency links.
+    HighLatencyNetwork,
+}
+
+/// Secret value whose debug representation is always redacted.
+///
+/// Secrets remain application-owned and deliberately do not implement serialization, preventing
+/// accidental inclusion in RON configuration or sanitized support output.
+pub struct Secret<T>(T);
+
+impl<T> Secret<T> {
+    /// Wraps one value that must not appear in diagnostics.
+    #[must_use]
+    pub const fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    /// Explicitly exposes the value to the integration that consumes the secret.
+    #[must_use]
+    pub const fn expose(&self) -> &T {
+        &self.0
+    }
+
+    /// Consumes the wrapper when ownership must be transferred to a secret consumer.
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> fmt::Debug for Secret<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Secret([REDACTED])")
+    }
 }
 
 /// Wire protocol selection.
@@ -248,6 +312,12 @@ pub struct CoordinatorConfig {
     pub periodic_interval_ms: Option<u64>,
     /// Drain once immediately after the coordinator starts.
     pub sync_on_start: bool,
+    /// Local ownership mode. `MultiProcess` requires a coordination-capable adapter.
+    pub process_mode: LocalProcessMode,
+    /// Durable lease lifetime in milliseconds.
+    pub lease_ttl_ms: u64,
+    /// Leader renewal and follower election interval in milliseconds.
+    pub heartbeat_interval_ms: u64,
 }
 
 impl Default for CoordinatorConfig {
@@ -256,7 +326,93 @@ impl Default for CoordinatorConfig {
             channel_capacity: 32,
             periodic_interval_ms: Some(30_000),
             sync_on_start: false,
+            process_mode: LocalProcessMode::Auto,
+            lease_ttl_ms: 15_000,
+            heartbeat_interval_ms: 5_000,
         }
+    }
+}
+
+/// Bounded local outbox compaction scheduling and work limits.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutboxOptimizationConfig {
+    /// Enables opt-in policy-driven compaction for capable local adapters.
+    pub enabled: bool,
+    /// Queue depth that permits a cheap eager pass.
+    pub eager_threshold_operations: usize,
+    /// Queue depth that schedules background maintenance.
+    pub background_threshold_operations: usize,
+    /// Queue depth that permits a deeper idle-time pass.
+    pub deep_compaction_threshold_operations: usize,
+    /// Maximum operations inspected in one deterministic pass.
+    pub max_operations_per_pass: usize,
+}
+
+impl Default for OutboxOptimizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            eager_threshold_operations: 32,
+            background_threshold_operations: 512,
+            deep_compaction_threshold_operations: 5_000,
+            max_operations_per_pass: 10_000,
+        }
+    }
+}
+
+impl OutboxOptimizationConfig {
+    const fn is_valid(self) -> bool {
+        self.eager_threshold_operations != 0
+            && self.background_threshold_operations >= self.eager_threshold_operations
+            && self.deep_compaction_threshold_operations >= self.background_threshold_operations
+            && self.max_operations_per_pass >= self.eager_threshold_operations
+    }
+}
+
+/// Background canonical integrity verification and automatic-repair limits.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IntegrityConfig {
+    /// Enables routine anti-entropy scheduling for capable production adapters.
+    pub enabled: bool,
+    /// Routine verification interval in hours.
+    pub routine_interval_hours: u32,
+    /// Deterministic canonical partition count.
+    pub partition_count: u32,
+    /// Allows bounded entity replacement for non-suspicious mismatches.
+    pub automatic_repair: bool,
+    /// Maximum entities in one automatic replacement plan.
+    pub max_auto_repair_entities: usize,
+    /// Scope mismatch percentage that escalates to bootstrap.
+    pub full_bootstrap_threshold_percent: u8,
+    /// Maximum entities scanned in one on-demand integrity snapshot.
+    pub max_entities_per_verification: usize,
+}
+
+impl Default for IntegrityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            routine_interval_hours: 168,
+            partition_count: 1_024,
+            automatic_repair: true,
+            max_auto_repair_entities: 100,
+            full_bootstrap_threshold_percent: 10,
+            max_entities_per_verification: 1_000_000,
+        }
+    }
+}
+
+impl IntegrityConfig {
+    const fn is_valid(self) -> bool {
+        self.routine_interval_hours != 0
+            && self.partition_count != 0
+            && self.partition_count <= 4_096
+            && self.max_auto_repair_entities != 0
+            && self.full_bootstrap_threshold_percent != 0
+            && self.full_bootstrap_threshold_percent <= 100
+            && self.max_entities_per_verification != 0
     }
 }
 
@@ -317,7 +473,82 @@ pub enum ConfigError {
     Invalid(&'static str),
 }
 
+impl OperationalConfig {
+    const fn invalid_reason(self) -> Option<&'static str> {
+        if self.max_in_flight_requests == 0
+            || self.max_in_flight_per_tenant == 0
+            || self.tenant_requests_per_second == 0
+            || self.tenant_request_burst == 0
+            || self.max_rate_limit_tenants == 0
+            || self.rate_limit_idle_timeout_ms == 0
+            || self.body_read_timeout_ms == 0
+            || self.request_timeout_ms == 0
+            || self.readiness_timeout_ms == 0
+            || self.drain_timeout_ms == 0
+            || self.retry_after_seconds == 0
+        {
+            return Some("operational limits must be greater than zero");
+        }
+        if self.max_in_flight_per_tenant > self.max_in_flight_requests {
+            return Some("per-tenant admission limit must not exceed the global limit");
+        }
+        if self.max_rate_limit_tenants < self.max_in_flight_requests {
+            return Some("rate-limit tenant capacity must cover the global in-flight limit");
+        }
+        None
+    }
+}
+
 impl AequoraConfig {
+    /// Returns safe defaults for a named deployment profile.
+    ///
+    /// The returned value remains ordinary typed configuration: integrations may override public
+    /// fields and then call [`Self::validate`] before using any derived component configuration.
+    #[must_use]
+    pub fn for_profile(profile: DeploymentProfile) -> Self {
+        let mut config = Self::default();
+        match profile {
+            DeploymentProfile::Development => {
+                config.scheduler = SchedulerPolicy::for_profile(SyncProfile::Desktop);
+                config.push.max_wait_ms = 25;
+                config.retry.initial_ms = 100;
+                config.retry.max_ms = 5_000;
+                config.compute.worker_threads = 2;
+                config.coordinator.sync_on_start = true;
+                config.operational.max_in_flight_requests = 32;
+                config.operational.max_in_flight_per_tenant = 16;
+                config.operational.max_rate_limit_tenants = 128;
+                config.operational.request_timeout_ms = 15_000;
+            }
+            DeploymentProfile::SmallProduction => {}
+            DeploymentProfile::Enterprise => {
+                config.crypto = CryptoPolicy::enterprise();
+                config.scheduler = SchedulerPolicy::for_profile(SyncProfile::EnterpriseLan);
+                config.pull.max_events = 2_048;
+                config.operational.max_in_flight_requests = 512;
+                config.operational.max_in_flight_per_tenant = 64;
+                config.operational.tenant_requests_per_second = 128;
+                config.operational.tenant_request_burst = 256;
+                config.operational.max_rate_limit_tenants = 16_384;
+            }
+            DeploymentProfile::HighLatencyNetwork => {
+                config.scheduler = SchedulerPolicy::for_profile(SyncProfile::HighLatency);
+                config.push.max_operations = 128;
+                config.push.max_wait_ms = 500;
+                config.retry.max_attempts = 8;
+                config.retry.initial_ms = 1_000;
+                config.retry.max_ms = 120_000;
+                config.coordinator.periodic_interval_ms = Some(60_000);
+                config.operational.max_in_flight_requests = 128;
+                config.operational.max_in_flight_per_tenant = 32;
+                config.operational.body_read_timeout_ms = 60_000;
+                config.operational.request_timeout_ms = 120_000;
+                config.operational.drain_timeout_ms = 120_000;
+            }
+        }
+        config
+    }
+
     /// Parses and validates a strict RON configuration. Unknown fields are rejected.
     ///
     /// # Errors
@@ -401,34 +632,28 @@ impl AequoraConfig {
         }
         if self.coordinator.channel_capacity == 0
             || matches!(self.coordinator.periodic_interval_ms, Some(0))
+            || self.coordinator.heartbeat_interval_ms == 0
+            || self.coordinator.lease_ttl_ms
+                <= self.coordinator.heartbeat_interval_ms.saturating_mul(2)
         {
             return Err(ConfigError::Invalid("coordinator limits are inconsistent"));
         }
-        if self.operational.max_in_flight_requests == 0
-            || self.operational.max_in_flight_per_tenant == 0
-            || self.operational.tenant_requests_per_second == 0
-            || self.operational.tenant_request_burst == 0
-            || self.operational.max_rate_limit_tenants == 0
-            || self.operational.rate_limit_idle_timeout_ms == 0
-            || self.operational.body_read_timeout_ms == 0
-            || self.operational.request_timeout_ms == 0
-            || self.operational.readiness_timeout_ms == 0
-            || self.operational.drain_timeout_ms == 0
-            || self.operational.retry_after_seconds == 0
-        {
+        if self.scheduler.validate().is_err() {
+            return Err(ConfigError::Invalid("scheduler limits are inconsistent"));
+        }
+        if !self.outbox_optimization.is_valid() {
             return Err(ConfigError::Invalid(
-                "operational limits must be greater than zero",
+                "outbox optimization limits are inconsistent",
             ));
         }
-        if self.operational.max_in_flight_per_tenant > self.operational.max_in_flight_requests {
-            return Err(ConfigError::Invalid(
-                "per-tenant admission limit must not exceed the global limit",
-            ));
+        if !self.integrity.is_valid() {
+            return Err(ConfigError::Invalid("integrity limits are inconsistent"));
         }
-        if self.operational.max_rate_limit_tenants < self.operational.max_in_flight_requests {
-            return Err(ConfigError::Invalid(
-                "rate-limit tenant capacity must cover the global in-flight limit",
-            ));
+        if self.crypto.validate().is_err() {
+            return Err(ConfigError::Invalid("cryptographic policy is inconsistent"));
+        }
+        if let Some(reason) = self.operational.invalid_reason() {
+            return Err(ConfigError::Invalid(reason));
         }
         Ok(())
     }
@@ -467,6 +692,7 @@ impl AequoraConfig {
             max_entities: self.limits.max_snapshot_entities,
             max_payload_bytes: self.limits.max_snapshot_bytes,
         };
+        config.scheduler = self.scheduler;
         if self.compression.algorithm == CompressionAlgorithm::Zstd {
             config.capabilities.push(Capability::Zstd);
         }
@@ -591,6 +817,22 @@ impl AequoraConfig {
             mutation_debounce: Duration::from_millis(self.push.max_wait_ms),
         })
     }
+
+    /// Produces durable local election settings with one fresh process identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when lease timing is unsafe.
+    pub fn multi_process_coordinator_config(
+        &self,
+    ) -> Result<MultiProcessCoordinatorConfig, ConfigError> {
+        self.validate()?;
+        Ok(MultiProcessCoordinatorConfig {
+            process_id: ProcessInstanceId::new(),
+            lease_ttl: Duration::from_millis(self.coordinator.lease_ttl_ms),
+            heartbeat_interval: Duration::from_millis(self.coordinator.heartbeat_interval_ms),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -607,6 +849,42 @@ mod tests {
             scope_id: SyncScopeId::new(),
             partitions: Vec::new(),
         }
+    }
+
+    #[test]
+    fn every_named_deployment_profile_is_safe_and_distinct() {
+        let development = AequoraConfig::for_profile(DeploymentProfile::Development);
+        let small = AequoraConfig::for_profile(DeploymentProfile::SmallProduction);
+        let enterprise = AequoraConfig::for_profile(DeploymentProfile::Enterprise);
+        let high_latency = AequoraConfig::for_profile(DeploymentProfile::HighLatencyNetwork);
+
+        for config in [&development, &small, &enterprise, &high_latency] {
+            config
+                .validate()
+                .unwrap_or_else(|error| panic!("unsafe built-in profile: {error}"));
+        }
+        assert!(
+            development.operational.max_in_flight_requests
+                < small.operational.max_in_flight_requests
+        );
+        assert!(
+            enterprise.operational.max_in_flight_requests
+                > small.operational.max_in_flight_requests
+        );
+        assert!(high_latency.operational.request_timeout_ms > small.operational.request_timeout_ms);
+        assert!(high_latency.retry.max_ms > small.retry.max_ms);
+    }
+
+    #[test]
+    fn secret_debug_output_is_redacted() {
+        let secret = Secret::new("postgresql://user:password@example.invalid/database".to_owned());
+        let output = format!("{secret:?}");
+        assert_eq!(output, "Secret([REDACTED])");
+        assert!(!output.contains("password"));
+        assert_eq!(
+            secret.expose(),
+            "postgresql://user:password@example.invalid/database"
+        );
     }
 
     #[test]
