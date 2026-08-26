@@ -613,6 +613,29 @@ Create `config/aequora.ron`:
         periodic_interval_ms: Some(30000),
         sync_on_start: true,
     ),
+    scheduler: (
+        profile: Mobile,
+        batch: (
+            min_ops: 1,
+            target_ops: 32,
+            max_ops: 128,
+            min_bytes: 1024,
+            target_bytes: 262144,
+            max_bytes: 524288,
+            additive_ops: 8,
+            additive_bytes: 32768,
+        ),
+        concurrency: 1,
+        interactive_debounce_ms: 150,
+        aging_quantum_ms: 60000,
+        maximum_age_boost: 5,
+        defer_bulk_on_metered: true,
+        defer_background_on_metered: true,
+        defer_bulk_on_roaming: true,
+        defer_background_on_roaming: true,
+        defer_background_on_low_power: true,
+        maximum_retry_deferral_ms: 1800000,
+    ),
     operational: (
         max_in_flight_requests: 256,
         max_in_flight_per_tenant: 64,
@@ -922,6 +945,139 @@ println!("pending operations: {}", health.borrow().pending_operations);
 
 Do not bind the synchronization kernel directly to a particular GUI framework. Translate
 `SyncStatus` and `SyncHealth` into your application's state-management system.
+
+### 12.1 Share one local store across processes
+
+When a desktop app, helper, CLI, or background worker can open the same local store, select a
+process mode and run the durable coordinator. The built-in Stoolap adapter stores the lease,
+monotonic fencing token, and local-store generation in the same database as synchronization state.
+
+```rust
+use aequora::{
+    client::{ClientSyncEngineBuilder, SyncCoordinator, SyncTrigger},
+    coordination::LocalProcessMode,
+};
+use std::sync::Arc;
+
+let client = ClientSyncEngineBuilder::new()
+    .store(local_store)
+    .transport(transport)
+    .config(config.client_config(session)?)
+    .process_mode(LocalProcessMode::MultiProcess)
+    .build_production()?;
+
+let (coordinator, handle) =
+    SyncCoordinator::new(Arc::new(client), config.coordinator_config()?);
+let election = config.multi_process_coordinator_config()?;
+let task = tokio::spawn(coordinator.run_multi_process(election));
+
+println!("local role: {:?}", handle.coordinator_status());
+handle.trigger(SyncTrigger::Shutdown).await?;
+task.await??;
+```
+
+Only the current fenced leader runs sync, reconciliation, bootstrap, compaction, rebase, or repair.
+Followers still commit ordinary domain mutations and the matching outbox row atomically. If a
+leader crashes, its lease expires; a follower acquires a strictly higher token, and the adapter
+rejects any late commit from the old epoch. Use `LocalProcessMode::SingleProcess` only when the host
+can guarantee exclusive ownership, and `Observer` for a read-only process.
+
+### 12.2 Supply scheduling context and persist controller state
+
+The core scheduler does not call an operating-system API. A platform adapter translates local
+connectivity, power, and lifecycle signals into normalized hints:
+
+```rust
+use aequora::scheduler::{
+    AppActivity, NetworkContext, PowerContext, SchedulingContext,
+};
+
+let context = SchedulingContext {
+    network: NetworkContext {
+        online: true,
+        metered: Some(true),
+        roaming: Some(false),
+        ..NetworkContext::default()
+    },
+    power: PowerContext {
+        charging: Some(false),
+        battery_level_percent: Some(34),
+        low_power_mode: Some(true),
+    },
+    activity: AppActivity::Background,
+    ..SchedulingContext::default()
+};
+
+client.update_scheduling_context(context);
+```
+
+Missing signals are safe: synchronization uses conservative defaults and the result of the actual
+transport request remains authoritative. Metering, roaming, low power, and server hints can defer
+eligible bulk/background work or reduce its batch, but cannot delete an outbox item, bypass a
+dependency, enlarge a hard limit, or let a follower execute leader-only work.
+
+Pause and resume only control network work; local transactions remain available:
+
+```rust
+client.pause_sync();
+// Continue committing domain state plus durable outbox intent here.
+client.resume_sync();
+```
+
+Persist `client.scheduler_state()` with application metadata during orderly shutdown or periodic
+checkpointing, and restore it with
+`ClientSyncEngineBuilder::scheduler_state`. The snapshot contains adaptive batch, circuit-breaker,
+backoff, accounting, and fairness state—not operation payloads or a second queue. On restart, the
+builder rejects a mismatched policy version and caps future deadlines to the configured maximum
+deferral. Durable work remains authoritative in the outbox, bootstrap, repair, or blob store.
+
+### 12.3 Subscribe to authorized dynamic datasets
+
+Treat each synchronized subset as a server-issued authorization contract. The client requests a
+registered definition with bounded opaque parameters; the authenticated server resolver produces
+the canonical tenant, partitions, policy/projection version, scope identity, scope version, and
+authority generation. Never turn client parameters into raw SQL or trust a requested campus,
+class, user, or module identifier as authorization.
+
+```rust
+use aequora::scope::{ScopePrincipal, ScopeRegistry, ScopeRequest};
+
+let principal = ScopePrincipal {
+    tenant_id: verified_auth.tenant_id,
+    actor_id: verified_auth.actor_id,
+    device_id: verified_auth.device_id,
+};
+
+// Register application-owned ScopeResolver implementations at startup.
+let resolved = scope_registry.resolve(principal, &scope_request).await?;
+assert_eq!(resolved.descriptor.tenant_id, verified_auth.tenant_id);
+```
+
+Every durable subscription has its own `ScopeCursor`. Its sequence is valid only with the exact
+`scope_id`, `ScopeVersion`, and `ScopeGeneration`. When filtering a global journal, advance the
+cursor through every entry the server evaluated—even entries intentionally excluded from the
+response. `project_filtered_page` implements that watermark rule and rejects unordered input.
+
+For the first production version, prefer a full per-scope bootstrap when membership changes. A
+certified partial expansion uses `ScopeBootstrapPlan`, stages the added partitions, and activates
+them only through one complete `ScopeTransition`. An interrupted stage remains `Bootstrapping` or
+`Expanding`; existing active membership stays coherent.
+
+```rust
+client.install_subscription(&subscription).await?;
+
+// Apply only after the snapshot/partition stage is complete and verified.
+transition.staging_complete = true;
+let outcome = client.apply_scope_transition(&transition).await?;
+assert!(outcome.applied);
+```
+
+Contraction uses `ScopeRemoval`, not a domain tombstone. The local membership map reports physical
+removal only after no active scope references the entity. Revocation deactivates access first,
+clears the scope cursor, and quarantines every explicitly affected pending operation so the normal
+outbox drain cannot transmit it. The built-in Stoolap adapter commits membership, binding/cursor,
+transition identity, and quarantine in one fenced transaction. Applications must also remove or
+gate their own search indexes, caches, derived projections, blobs, and raw repository queries.
 
 ---
 
@@ -1559,6 +1715,192 @@ concurrency, interrupted migration, and snapshot-install tests against the real 
 - [ ] Readiness, graceful drain, capacity, and retention are monitored.
 
 ---
+
+## 23.1 Add optional live acceleration safely
+
+Keep your existing periodic synchronization active. Create one `HintWakeTracker` from the
+authenticated tenant and server-issued active scopes, then pass incoming `SyncHint` values to
+`SyncCoordinatorHandle::observe_live_hint`. A new hint schedules the same authenticated exchange;
+duplicates are coalesced and no hint API can advance a cursor.
+
+On the server, authenticate the live connection, implement `LiveScopeAuthorizer`, and route through
+`LiveRouter`. Publish with `publish_best_effort` only after the journal transaction commits. Use
+`InMemoryHintBroker` for one node or `PostgresNotifyHintBroker` as the initial PostgreSQL
+cross-node adapter. Broker failure must leave ordinary HTTP/QUIC polling healthy.
+
+Only the current Part 05 fenced leader should own the live socket for a shared local store. After
+connect, reconnect, or leadership acquisition, run an immediate normal cursor catch-up. Presence
+belongs in `PresenceDirectory` with a short TTL and application-owned visibility policy; it is not
+a journal entity, authorization signal, or edit lock.
+
+## 23.2 Plan a safe bulk migration
+
+Build and verify a `CanonicalExport` first. Create an `ImportJob` with an immutable
+`SourceFingerprint`, then run two-pass `IdentityPlan` assignment before relationship transforms.
+Use separate mapper, transformer, and validator implementations; invalid rows become durable
+`QuarantineEntry` references rather than silent coercions.
+
+Each bounded `ImportBatch` carries its next `ImportCheckpoint`. Your adapter implements
+`CheckpointedImportSink` so target rows, the import ledger, and that checkpoint commit in one
+transaction. Retry the exact job/root/source keys after interruption. Use
+`aequora-testkit::migration::FaultInjectingImportSink` to prove rollback and response-loss replay.
+
+For an authority seed, publish a `BaselinePlan` with scope snapshots and a declared sequence rather
+than manufacturing historical journal rows. Imported operations and every bridge change after
+activation must use ordinary journal-visible authority semantics. Call `verify_cutover` only after
+fingerprint/root/domain/reference/scope verification, zero source lag, accepted quarantine,
+verified backup and rollback, client bootstrap, and legacy-writer fencing all pass.
+
+The CLI supports read-only planning and evidence checks:
+
+```bash
+aequora import plan export.postcard schema.ron
+aequora import validate export.postcard schema.ron
+aequora import status job.ron
+aequora import cutover evidence.ron
+```
+
+Actual writes and activation remain in the privileged application authority adapter.
+
+## 23.3 Stream and activate a large snapshot
+
+Use `SnapshotManifest::build` when one page-session snapshot is too large for practical transfer.
+It deterministically orders `SnapshotEntity` records, creates bounded chunks, and binds scope
+version/generation, authority epoch, sequence, schema version, totals, ranges, and chunk digests
+into one root. Publish immutable chunks first and the verified manifest last.
+
+Create a durable `BootstrapJob` with a new inactive `ReplicaGeneration` and a
+`PendingIntentPlan`. Before transfer, run `BootstrapPreflight`. Persist every
+`record_chunk_read` result; a resumed range must present the same snapshot, chunk, object identity,
+and contiguous offset. Decode with `SnapshotChunk::decode_verified`, then call your
+`SnapshotSink::install_chunk` in a bounded native transaction that includes installed progress.
+
+After every chunk is installed, verify staging and obtain `VerifiedActivation` through
+`verify_activation`. This rechecks authorization, scope version/generation, authority epoch,
+manifest root, complete chunk membership, retention lease, and unchanged pending intent. The sink
+then atomically switches the active generation and cursor to boundary N. Normal synchronization
+immediately resumes from N+1; partially staged data never becomes application-visible.
+
+Useful read-only diagnostics are:
+
+```bash
+aequora bootstrap inspect manifest.ron
+aequora bootstrap status job.ron
+aequora bootstrap explain
+```
+
+Use `FaultInjectingSnapshotSink` to prove rollback before chunk progress, duplicate-safe response
+loss, pre-activation crash safety, and idempotent activation replay before certifying a real local
+adapter.
+
+## 23.4 Declare consistency profiles before registering handlers
+
+Choose one aggregate profile, then declare each operation's distinct semantic class. The derive API
+publishes stable metadata without bypassing registry validation:
+
+```rust
+use aequora::prelude::*;
+
+#[derive(AequoraAggregate)]
+#[aequora(aggregate = 10, profile = "OptimisticVersioned")]
+struct Student;
+
+#[derive(AequoraOperation, serde::Deserialize)]
+#[aequora(
+    kind = 0x1002,
+    schema = 1,
+    entity = "student",
+    aggregate = 10,
+    semantic = "SetValue"
+)]
+struct UpdateStudentPhone {
+    phone: String,
+}
+```
+
+Build and register the corresponding `AggregateProfile` and `OperationSemanticProfile`, then call
+`validate_capabilities` against the actual adapter declaration before startup. Unknown operations
+fail closed. Finance and workflow aggregates require audit-safe, noncompactable semantics; custom
+dimension overrides require `CustomProfileBuilder::advanced_opt_in()` and compliance evidence.
+
+Persist `ProfileRegistry::manifest()` with each released domain schema. Run `aequora-dev profile
+verify` on candidates and `profile compare` against the released manifest so removals and semantic
+changes without an explicit version increase fail CI.
+
+## 23.5 Make authoritative decisions replayable
+
+Implement new replayable domain logic as `ReplayHandler`. Before `decide`, the authority captures
+one `DomainTimestamp`, labelled retry-stable ID/random seeds, authenticated principal, canonical
+external results, and immutable policy/config versions into `ExecutionInputs`. Supply the exact
+canonical pre-state; never let the handler read a clock, environment variable, database, network,
+filesystem, UUID generator, or external SDK directly.
+
+The handler returns an `ExecutionPlan` containing mutations, events, durable side-effect intents,
+and the canonical operation result. Verify its digest, then implement `PlanCommitter` using one
+native transaction for the plan and operation-ledger replay metadata. A worker executes committed
+intents afterward with their idempotency keys. A lost response followed by a retry must return the
+same committed decision; changed captured inputs must fail closed.
+
+Build an integrity-bound `ReplayBundle` from the operation, inputs, pre-state reference, exact
+handler/profile versions, and expected plan digest. `ReplaySandbox` can verify or differentially
+compare the decision but has no production write or side-effect handle. Before certification run:
+
+```bash
+cargo run -q -p aequora-dev -- replay explain
+cargo test -p aequora-replay
+cargo test -p aequora-testkit --test replay_contracts
+```
+
+Replay bundles are integrity-protected, not automatically confidential. Encrypt them, authorize
+access, redact secrets, and apply tenant retention policy in the host deployment.
+
+## 23.6 Declare canonical business audit explicitly
+
+Do not use sync journal rows or application logs as a business audit trail. Register stable
+`AuditActionId`, `AuditFieldId`, and `ReasonCode` values, then build an `AuditPolicy` for each
+audited action. Choose `RequiredAtomic` for business, finance, security, permission, approval, and
+administrative evidence. Select full, redacted, digest, metadata-only, or omitted values per field;
+unknown fields fail closed.
+
+Add canonical `AuditEvent` values to the deterministic `ExecutionPlan`. Use a truthful
+`AuditActor`: scheduled work is a service/system actor, an import is an import actor, and the
+originating device remains provenance rather than becoming the user. Add structured `AuditOrigin`
+for imports, repairs, scope-only removal, or bootstrap. The native plan transaction must persist
+required audit, its chain sequence/hash, and authoritative field pointers with the mutation,
+journal, and ledger.
+
+Authorize every query with `AuditAccess`; tenant equality and subject restriction are mandatory.
+Verify and checkpoint chains before archive/export:
+
+```bash
+cargo run -q -p aequora-dev -- audit explain
+cargo run -q -p aequora-dev -- audit verify ./audit-chain.ron
+cargo test -p aequora-audit
+cargo test -p aequora-testkit --test audit_contracts
+```
+
+The host still owns encryption, redaction/keyed hashing, current entity authorization, external
+anchor credentials, localization, retention, legal hold, erasure, and regulatory acceptance.
+
+## 23.7 Govern deletion as a distributed workflow
+
+Register versioned `RetentionPolicy` values and every known copy in `GovernanceRegistry`. Resolve
+subjects into an explicit `DataSubjectGraph`; never infer ownership from foreign keys. Verify an
+`ErasurePlan`, then require dry-run review and separate approval before irreversible work.
+
+Tombstone GC requires valid client watermarks and a bootstrap-safe `JournalFloor`. Retired devices
+below the floor rebootstrap, while identity guards prevent stale resurrection. Active holds block
+normal purge, and tenant offboarding removes writes before deletion. Every required store must
+verify before completion; restore remains restricted until erasures, revocations, and holds are
+reconciled.
+
+```bash
+cargo run -q -p aequora-dev -- governance explain
+cargo run -q -p aequora-dev -- governance verify ./erasure-plan.ron
+cargo test -p aequora-governance
+cargo test -p aequora-crypto
+cargo test -p aequora-testkit --test governance_contracts
+```
 
 ## 24. Where to go next
 
