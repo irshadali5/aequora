@@ -2,6 +2,10 @@
 
 # Cryptographic Integrity, Key Management, Signed Artifacts, and Optional End-to-End Protected Payload Architecture
 
+**Repository status:** Complete at the reusable database-neutral boundary. Implementation evidence,
+exact constructions, and deployment-owned acceptance are recorded in
+[the Part 15 completion report](docs/cryptographic-integrity-key-management-e2e-completion.md).
+
 ## 1. Purpose
 
 Aequora already has strong logical correctness mechanisms:
@@ -3340,23 +3344,23 @@ hash algorithm
 Part 15 is complete when:
 
 ```text
-[ ] cryptographic layers separated
-[ ] BLAKE3 canonical hashing standardized
-[ ] server signing architecture defined
-[ ] key purpose separation defined
-[ ] key registry and rotation defined
-[ ] device signing optional architecture defined
-[ ] tenant envelope encryption defined
-[ ] snapshot/export/replay encryption defined
-[ ] audit checkpoint signing defined
-[ ] key revocation and registry rollback protection defined
-[ ] cryptographic erasure integration defined
-[ ] E2E compatibility rules defined
-[ ] protected payload envelope defined
-[ ] KMS/HSM/provider abstraction defined
-[ ] secret handling/zeroization policy defined
-[ ] testing/fuzzing/negative vectors defined
-[ ] cryptographic invariants added
+[x] cryptographic layers separated
+[x] BLAKE3 canonical hashing standardized
+[x] server signing architecture defined
+[x] key purpose separation defined
+[x] key registry and rotation defined
+[x] device signing optional architecture defined
+[x] tenant envelope encryption defined
+[x] snapshot/export/replay encryption defined
+[x] audit checkpoint signing defined
+[x] key revocation and registry rollback protection defined
+[x] cryptographic erasure integration defined
+[x] E2E compatibility rules defined
+[x] protected payload envelope defined
+[x] KMS/HSM/provider abstraction defined
+[x] secret handling/zeroization policy defined
+[x] testing/fuzzing/negative vectors defined
+[x] cryptographic invariants added
 ```
 
 ---
