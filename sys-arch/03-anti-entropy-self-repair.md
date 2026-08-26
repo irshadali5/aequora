@@ -2464,21 +2464,30 @@ Large or suspicious mismatches should escalate.
 Part 03 is complete when:
 
 ```text
-[ ] canonical entity digest defined
-[ ] integrity generation defined
-[ ] deterministic partitioning defined
-[ ] root/partition verification protocol defined
-[ ] Merkle path designed
-[ ] repair state machine defined
-[ ] pending operation preservation defined
-[ ] same-version mismatch escalation defined
-[ ] full bootstrap fallback defined
-[ ] adapter compliance extended
-[ ] DB differential digest tests defined
-[ ] model/fault tests specified
-[ ] metrics/alerts defined
-[ ] operator CLI/API specified
+[x] canonical entity digest defined
+[x] integrity generation defined
+[x] deterministic partitioning defined
+[x] root/partition verification protocol defined
+[x] Merkle path designed
+[x] repair state machine defined
+[x] pending operation preservation defined
+[x] same-version mismatch escalation defined
+[x] full bootstrap fallback defined
+[x] adapter compliance extended
+[x] DB differential digest tests defined
+[x] model/fault tests specified
+[x] metrics/alerts defined
+[x] operator CLI/API specified
 ```
+
+### Current implementation evidence
+
+The reusable repository implementation is mapped in
+`docs/anti-entropy-self-repair-completion.md`. It includes canonical BLAKE3 entity and partition
+digests, bounded Merkle proofs, generation and cursor-bound manifests, conservative repair
+planning, atomic Stoolap replica repair, repeatable-read PostgreSQL evidence, adapter contracts,
+fault tests, metrics, alerts, and payload-free CLI diagnostics. Live PostgreSQL acceptance remains
+an explicit environment gate.
 
 ---
 
