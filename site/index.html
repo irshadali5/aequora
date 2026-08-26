@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aequora System Architecture Docs (Parts 01–30)</title>
+  <meta name="description" content="Interactive System Architecture Documentation for Aequora Distributed Sync Engine, covering formal correctness, causality, anti-entropy, QoS scheduling, security, and protocols.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="top-header">
+    <div class="header-left">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu">☰</button>
+      <a href="#/part-01" class="brand">
+        <div class="brand-icon">A</div>
+        <div class="brand-text">Aequora Architecture</div>
+      </a>
+    </div>
+
+    <div class="header-right">
+      <button class="search-trigger" id="search-trigger" aria-label="Search specifications">
+        <span>🔍 Search 30 specs & invariants...</span>
+        <span class="search-shortcut">⌘K</span>
+      </button>
+
+      <button class="btn-icon" id="theme-toggle" title="Toggle theme" aria-label="Toggle light/dark mode">☀️</button>
+      <a href="https://github.com/irshadali5/aequora" target="_blank" rel="noopener noreferrer" class="btn-icon" title="GitHub Repository" aria-label="GitHub Repository">
+        <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+      </a>
+      <a href="https://github.com/irshadali5/aequora/wiki" target="_blank" rel="noopener noreferrer" class="btn-icon" title="GitHub Wiki" aria-label="GitHub Wiki">📖</a>
+    </div>
+
+    <!-- Reading Progress Bar -->
+    <div class="progress-container">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="app-container">
+
+    <!-- Left Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Architectural Tiers</div>
+        <input type="text" class="sidebar-search-input" id="sidebar-search-input" placeholder="Filter specifications..." aria-label="Filter specifications">
+      </div>
+      <nav id="sidebar-nav">
+        <!-- Injected dynamically by app.js -->
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content" id="main-content">
+      <!-- Injected dynamically by app.js -->
+    </main>
+
+    <!-- Right Table of Contents -->
+    <aside class="toc-sidebar">
+      <div class="toc-title">On This Page</div>
+      <ul class="toc-list" id="toc-list">
+        <!-- Injected dynamically by app.js -->
+      </ul>
+    </aside>
+
+  </div>
+
+  <!-- Search Modal -->
+  <div class="search-modal-backdrop" id="search-modal-backdrop">
+    <div class="search-modal">
+      <div class="search-modal-header">
+        <span>🔍</span>
+        <input type="text" class="search-modal-input" id="search-modal-input" placeholder="Search 30 specifications, invariants (AEQ-INV-*), protocols..." aria-label="Search query">
+        <button class="btn-icon" id="search-modal-close" style="width:28px;height:28px;font-size:12px;">✕</button>
+      </div>
+      <div class="search-results" id="search-results">
+        <!-- Search results injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Scripts -->
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
