@@ -2984,14 +2984,16 @@ Axum route installers, status subscriptions, deterministic TestKit stores/transp
 public adapter conformance contracts, versioned adapter manifests, and fail-closed production
 adapter-pair verification.
 
-`aequora-cli` provides payload-free adapter doctor, manifest inspection, and pair verification.
-Database migration commands are intentionally absent until canonical export/import contracts are
-implemented; the CLI does not present a placeholder as a safe migration tool.
+`aequora-cli` provides payload-free adapter doctor, generated manifest inspection, pair
+verification, and offline canonical export verification. Live export/import execution belongs to a
+host extension that supplies explicit application mappings, connections, and authorization; the
+generic CLI does not guess those destructive inputs.
 
 The CLI also provides `aequora init <new-directory> <client|server>`. Generation is
 non-destructive: the parent must already exist, the target must not exist, files are assembled in a
 temporary sibling, and the complete starter is renamed into place. Client starters contain no
-credentials; server starters contain no allow-all authentication.
+credentials; server starters contain no allow-all authentication. The exact generated Rust sources
+are compiled as workspace examples so template drift fails normal all-target checks.
 
 Production assembly can call `build_production()` on client and server type-state builders. These
 paths validate the selected adapter manifest before returning a runtime. Explicit `build()` remains
@@ -3000,7 +3002,7 @@ available for volatile TestKit/reference stores and advanced non-production cons
 The derive accepts stable `u16` `kind` and non-zero `schema` metadata. Optional `entity` metadata is
 documentation only and never couples a domain operation to a table name.
 
-The exact section map and tooling still required before this prerequisite is fully closed are in
+The exact section map and resolved host/tooling ownership are in
 [`docs/plug-and-play-completion.md`](docs/plug-and-play-completion.md). In particular, project
-templates and the migration command surface are not claimed merely because internal developer
-checks or static adapter inspection exist.
+templates are compile checked, while live database mutation is not claimed merely because an
+artifact can be inspected safely. The reusable repository prerequisite is complete.
