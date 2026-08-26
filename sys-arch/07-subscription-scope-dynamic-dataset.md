@@ -2,6 +2,13 @@
 
 # Subscription, Scope, Filter, and Dynamic Dataset Architecture
 
+> **Implementation status (2026-08-20):** Complete at the reusable repository boundary. Canonical
+> scope identity, resolver/filter/projection contracts, filtered watermarks, subscriptions,
+> atomic transitions, reference-counted membership, pending-intent quarantine, Stoolap durability,
+> client integration, diagnostics, and invariants are mapped in
+> [`docs/subscription-scope-dynamic-dataset-completion.md`](docs/subscription-scope-dynamic-dataset-completion.md).
+> Application membership policy and live authorization/revocation acceptance remain host gates.
+
 ## 1. Purpose
 
 Aequora is not always intended to synchronize an entire tenant database to every client.
@@ -2682,25 +2689,25 @@ without rewriting the synchronization core.
 Part 07 is complete when:
 
 ```text
-[ ] ScopeDefinitionId defined
-[ ] ScopeId defined
-[ ] ScopeVersion defined
-[ ] ScopeGeneration defined
-[ ] ScopeCursor defined
-[ ] ScopeResolver defined
-[ ] subscription lifecycle defined
-[ ] filtered cursor semantics defined
-[ ] full bootstrap per scope defined
-[ ] expansion architecture defined
-[ ] contraction architecture defined
-[ ] ScopeRemoval distinct from Tombstone
-[ ] multi-scope membership reference tracking defined
-[ ] revocation and pending-op handling defined
-[ ] projection rules defined
-[ ] scope transition atomicity defined
-[ ] anti-entropy/bootstrap/QoS integrations defined
-[ ] adapter compliance tests defined
-[ ] correctness invariants added
+[x] ScopeDefinitionId defined
+[x] ScopeId defined
+[x] ScopeVersion defined
+[x] ScopeGeneration defined
+[x] ScopeCursor defined
+[x] ScopeResolver defined
+[x] subscription lifecycle defined
+[x] filtered cursor semantics defined
+[x] full bootstrap per scope defined
+[x] expansion architecture defined
+[x] contraction architecture defined
+[x] ScopeRemoval distinct from Tombstone
+[x] multi-scope membership reference tracking defined
+[x] revocation and pending-op handling defined
+[x] projection rules defined
+[x] scope transition atomicity defined
+[x] anti-entropy/bootstrap/QoS integrations defined
+[x] adapter compliance tests defined
+[x] correctness invariants added
 ```
 
 ---
