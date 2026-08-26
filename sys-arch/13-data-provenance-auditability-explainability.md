@@ -2,6 +2,10 @@
 
 # Data Provenance, Auditability, and Explainability Architecture
 
+**Repository status (2026-08-21): Complete at the reusable framework boundary.** See
+[`docs/data-provenance-auditability-explainability-completion.md`](docs/data-provenance-auditability-explainability-completion.md)
+for code, verification, security, adapter, and deployment evidence.
+
 ## 1. Purpose
 
 Aequora already defines:
@@ -2854,22 +2858,22 @@ handler Invoice.Calculate v4
 Part 13 is complete when:
 
 ```text
-[ ] sync journal/ledger/audit/log separation documented
-[ ] AuditEvent model defined
-[ ] actor/subject/action/reason types defined
-[ ] required-vs-optional audit durability defined
-[ ] field-level audit policy defined
-[ ] sensitive-value policy defined
-[ ] atomic audit integration defined
-[ ] tamper-evident chaining defined
-[ ] external checkpoint/anchor path defined
-[ ] field provenance/explainability defined
-[ ] import/repair/scope provenance integrated
-[ ] audit query/index model defined
-[ ] retention/archive hooks defined
-[ ] authorization/export model defined
-[ ] property/tamper/security tests defined
-[ ] audit coverage CI defined
+[x] sync journal/ledger/audit/log separation documented
+[x] AuditEvent model defined
+[x] actor/subject/action/reason types defined
+[x] required-vs-optional audit durability defined
+[x] field-level audit policy defined
+[x] sensitive-value policy defined
+[x] atomic audit integration defined
+[x] tamper-evident chaining defined
+[x] external checkpoint/anchor path defined
+[x] field provenance/explainability defined
+[x] import/repair/scope provenance integrated
+[x] audit query/index model defined
+[x] retention/archive hooks defined
+[x] authorization/export model defined
+[x] property/tamper/security tests defined
+[x] audit coverage CI defined
 ```
 
 ---
