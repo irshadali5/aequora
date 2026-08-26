@@ -23,6 +23,71 @@ records under `docs/` map those requirements to code, tests, host responsibiliti
 remaining work. Work on Parts 01–30 must not be reported as the active implementation phase until
 the prerequisite set is reconciled.
 
+As of the current workspace implementation, all four named prerequisites are reconciled at the
+reusable repository boundary. Their completion records retain the live infrastructure,
+application-specific mapping, deployment, and release-acceptance gates that cannot be proven by an
+offline library build. Work therefore proceeds with Part 01; no later numbered part is considered
+complete merely because its architecture document exists.
+
+Part 01 is implemented and mapped to executable evidence in `01-formal-correctness.md`: versioned
+invariants, bounded distributed-model exploration, properties, Loom single-flight coverage,
+failpoints, differential adapter scenarios, replayable traces, and CI tiers. Sequential work may
+therefore proceed to Part 02. Part 02 is also implemented at the reusable repository boundary:
+retry-stable correlation, authoritative event identity, trusted provenance, durable lineage,
+tenant-bounded correlation diagnostics, adapter round-trips, and executable lineage invariants are
+mapped in `docs/causality-provenance-completion.md`. Sequential work may therefore proceed to Part
+03. Part 03 is implemented at the reusable repository boundary: canonical database-neutral
+digests, generation-bound partition trees, Merkle localization, conservative repair planning,
+pending-intent preservation, adapter verification/repair contracts, fault tests, observability,
+and operator diagnostics are mapped in `docs/anti-entropy-self-repair-completion.md`. Part 04 is
+also implemented at the reusable repository boundary: immutable once-possibly-delivered payloads,
+bounded dependency-aware compaction, durable supersession, safe rebase, transactional Stoolap
+rewrites, fail-closed finance/append semantics, properties, failpoints, metrics, and diagnostics
+are mapped in `docs/offline-compaction-rebase-completion.md`. Sequential work may therefore proceed
+to Part 05; live deployment validation remains an explicit environment gate. Part 05 is now
+implemented at the reusable repository boundary: persistent store/process identities, atomic
+Stoolap lease epochs, fencing across leader-only local commits, follower-safe domain/outbox writes,
+crash takeover, maintenance generation changes, process-mode configuration, reusable adapter
+compliance, Loom/property coverage, diagnostics, and metrics are mapped in
+`docs/local-multiprocess-coordination-completion.md`. Sequential work may therefore proceed to Part
+06; multi-process deployment acceptance remains an explicit host gate. Part 06 is now implemented
+at the reusable repository boundary: normalized platform context, bounded priority metadata,
+deterministic eligibility, aging and dependency inheritance, weighted fairness, adaptive
+count/byte batching, retry and circuit state, safe server hints, profiles, client lifecycle gates,
+invariants, metrics, and diagnostics are mapped in
+`docs/adaptive-sync-scheduler-qos-completion.md`. Sequential work may therefore proceed to Part 07;
+device-specific scheduling acceptance remains an explicit host gate. Part 07 is now implemented at
+the reusable repository boundary: server-issued scope definitions, exact version/generation cursor
+binding, filtered watermarks, projection/resource authorization contracts, independent durable
+subscriptions, atomic bootstrap/expansion/contraction/revocation, shared membership tracking,
+pending-intent quarantine, Stoolap migration and fencing, adapter compliance, client scheduling,
+invariants, metrics, and diagnostics are mapped in
+`docs/subscription-scope-dynamic-dataset-completion.md`. Sequential work may therefore proceed to
+Part 08; application authorization and live revocation acceptance remain explicit host gates.
+Part 08 is now implemented at the reusable repository boundary: additive payload-free live
+envelopes, transport and broker contracts, post-commit best-effort publication, authenticated
+tenant/scope fan-out, dynamic revocation, latest-only bounded backpressure, client wake-generation
+coalescing, fenced leader ownership, reconnect catch-up, PostgreSQL NOTIFY and in-memory adapters,
+TTL presence, fault injection, invariants, metrics, and diagnostics are mapped in
+`docs/live-sync-push-presence-completion.md`. Sequential work may therefore proceed to Part 09;
+provider-specific WebSocket/SSE/mobile integration, application presence privacy, and production
+load acceptance remain explicit host gates.
+Part 09 is now implemented at the reusable repository boundary: canonical checksummed artifacts,
+durable import jobs and checkpoints, deterministic two-pass identity mapping, payload-minimized
+quarantine, dependency ordering, baseline and journal semantics, CDC watermarks, fail-closed
+cutover evidence, export manifests, CLI inspection, scheduler/telemetry integration, invariants,
+and fault-injected restart/replay contracts are mapped in
+`docs/bulk-import-export-seed-migration-completion.md`. Sequential work may therefore proceed to
+Part 10; source-specific mapping, live CDC, native authority transactions, writer fencing,
+backup/rollback rehearsal, and production-scale acceptance remain explicit host gates.
+Part 10 is now implemented at the reusable repository boundary: durable bootstrap jobs,
+deterministic manifests/chunks, safe range resume, bounded verification and staging, retention
+leases, pending-intent commitments, fail-closed generation activation, transport-neutral source
+and sink contracts, fault injection, invariants, telemetry, and diagnostics are mapped in
+`docs/large-snapshot-streaming-bootstrap-completion.md`. Sequential work may therefore proceed to
+Part 11; real database read views, object-store/CDN integration, native generation swaps,
+multi-GB capacity, and production delta catch-up remain explicit adapter/deployment gates.
+
 ## Existing Foundation
 
 Already covered:
@@ -167,6 +232,10 @@ Design:
 
 ### Part 11 — Operation Semantics, Aggregate Policies, and Consistency Profiles
 
+**Repository status:** Complete. The profile registry, manifests, derives/builders, capability
+validation, invariants, telemetry, CLI, and compliance evidence are mapped in
+[`docs/operation-semantics-consistency-profiles-completion.md`](docs/operation-semantics-consistency-profiles-completion.md).
+
 Profiles:
 
 - ImmutableAppendOnly;
@@ -183,6 +252,11 @@ Each profile defines version, conflict, retry, compaction, delete, and snapshot 
 
 ### Part 12 — Deterministic Domain Execution and Replay
 
+**Repository status:** Complete. Captured execution inputs, pure decision plans, handler/policy
+versions, integrity-bound replay bundles, isolated and differential replay, commit/side-effect
+boundaries, invariants, telemetry, diagnostics, and fault contracts are mapped in
+[`docs/deterministic-execution-replay-completion.md`](docs/deterministic-execution-replay-completion.md).
+
 - deterministic handlers;
 - capture nondeterministic inputs;
 - clocks;
@@ -192,6 +266,12 @@ Each profile defines version, conflict, retry, compaction, delete, and snapshot 
 - historical debugging.
 
 ### Part 13 — Data Provenance, Auditability, and Explainability
+
+**Repository status:** Complete. Canonical business-audit events, truthful attribution, stable
+actions/fields/reasons, sensitivity and durability policies, atomic execution-plan declarations,
+tamper-evident chains, checkpoints/anchors, bounded authorized queries, field provenance,
+origin-specific explanations, invariants, telemetry, diagnostics, and fault contracts are mapped
+in [`docs/data-provenance-auditability-explainability-completion.md`](docs/data-provenance-auditability-explainability-completion.md).
 
 - who changed data;
 - source device;
@@ -204,6 +284,11 @@ Each profile defines version, conflict, retry, compaction, delete, and snapshot 
 
 ### Part 14 — Data Governance, Retention, Legal Hold, and Erasure
 
+**Repository status:** Complete. Versioned retention/deletion policy, legal holds, subject/copy
+graphs, erasure and purge plans, tombstone/journal/ledger safety, tenant offboarding, restore gates,
+client purge directives, storage-surface verification, invariants, diagnostics, and fault contracts
+are mapped in [`docs/data-governance-retention-erasure-completion.md`](docs/data-governance-retention-erasure-completion.md).
+
 - journal retention;
 - tombstones;
 - audit retention;
@@ -214,6 +299,13 @@ Each profile defines version, conflict, retry, compaction, delete, and snapshot 
 - deletion evidence.
 
 ### Part 15 — Cryptographic Integrity and Optional End-to-End Protected Payloads
+
+**Repository status:** Complete. Provider-neutral BLAKE3 domain-separated digests, Ed25519
+artifact/checkpoint/device signatures, purpose-bound rollback-protected key registries,
+XChaCha20-Poly1305 tenant envelopes, Argon2id export keys, E2E compatibility rules, governance
+destruction evidence, invariants, telemetry, diagnostics, contract/property/tamper tests, and fuzz
+coverage are mapped in
+[the Part 15 completion report](docs/cryptographic-integrity-key-management-e2e-completion.md).
 
 - device keypairs;
 - signed operations;
