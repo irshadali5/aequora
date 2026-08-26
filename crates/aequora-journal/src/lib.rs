@@ -139,8 +139,8 @@ pub fn plan_compaction(inputs: CompactionInputs) -> Option<CompactionPlan> {
 mod tests {
     use super::*;
     use aequora_types::{
-        EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp, NodeId, OperationId,
-        TenantId,
+        EntityId, EntityRef, EntityType, EntityVersion, EventId, HybridTimestamp, LineageContext,
+        LineageRef, NodeId, OperationId, TenantId,
     };
 
     #[test]
@@ -171,11 +171,14 @@ mod tests {
                 )
                 .is_ok()
         );
+        let operation_id = OperationId::new();
         let change = RemoteChange {
             tenant_id: TenantId::new(),
             scope_id: scope,
             sequence: Sequence(6),
-            operation_id: OperationId::new(),
+            operation_id,
+            event_id: EventId::new(),
+            lineage: LineageContext::root().derived(LineageRef::Operation(operation_id)),
             entity: EntityRef {
                 entity_type: EntityType::new(1).unwrap_or_else(|error| panic!("{error}")),
                 entity_id: EntityId::new(),
