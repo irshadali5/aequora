@@ -2,6 +2,10 @@
 
 # Data Governance, Retention, Legal Hold, Erasure, and Lifecycle Architecture
 
+**Repository status (2026-08-21): Complete at the reusable framework boundary.** See
+[`docs/data-governance-retention-erasure-completion.md`](docs/data-governance-retention-erasure-completion.md)
+for code, lifecycle verification, adapter, operational, and deployment evidence.
+
 ## 1. Purpose
 
 Aequora is designed for long-lived business systems.
@@ -2901,22 +2905,22 @@ rebootstrap floors
 Part 14 is complete when:
 
 ```text
-[ ] retention classes defined
-[ ] deletion modes defined
-[ ] legal hold model defined
-[ ] erasure planner defined
-[ ] data-subject graph defined
-[ ] tombstone GC safety defined
-[ ] journal floor defined
-[ ] stale-client resurrection prevention defined
-[ ] operation-ledger retention defined
-[ ] snapshot/blob/export/replay lifecycle integrated
-[ ] tenant offboarding workflow defined
-[ ] backup/PITR erasure replay defined
-[ ] client purge directive defined
-[ ] governance storage registry defined
-[ ] dry-run/approval/audit model defined
-[ ] lifecycle correctness tests defined
+[x] retention classes defined
+[x] deletion modes defined
+[x] legal hold model defined
+[x] erasure planner defined
+[x] data-subject graph defined
+[x] tombstone GC safety defined
+[x] journal floor defined
+[x] stale-client resurrection prevention defined
+[x] operation-ledger retention defined
+[x] snapshot/blob/export/replay lifecycle integrated
+[x] tenant offboarding workflow defined
+[x] backup/PITR erasure replay defined
+[x] client purge directive defined
+[x] governance storage registry defined
+[x] dry-run/approval/audit model defined
+[x] lifecycle correctness tests defined
 ```
 
 ---
