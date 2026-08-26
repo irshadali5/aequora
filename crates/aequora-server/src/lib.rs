@@ -1,5 +1,35 @@
 //! Authoritative sync-session orchestration.
 
+/// Stable plug-and-play entry point for constructing an authoritative service.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AequoraServer;
+
+impl AequoraServer {
+    /// Starts the type-state server builder.
+    #[must_use]
+    pub fn builder() -> SyncServerBuilder {
+        SyncServerBuilder::new()
+    }
+}
+
+/// Focused imports for application server integrations.
+pub mod prelude {
+    pub use crate::{
+        AequoraServer, ExchangeService, ServerBuildError, ServerCommandOutcome, ServerConfig,
+        ServerError, SyncServer, SyncServerBuilder,
+    };
+    pub use aequora_clock::{Clock, SystemClock};
+    pub use aequora_conflict::{ConflictResolver, RejectConflicts};
+    pub use aequora_executor::{
+        AuthContext, DerivedEventProvenance, DomainOperation, JobProvenance, OperationExecutor,
+        OperationHandler, OperationRegistry, ScopeAuthorizer, TrustedProvenance,
+    };
+    pub use aequora_store::{
+        AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRequirements,
+        AdapterRole, AdapterTier, AuthoritativeStore, ProductionAdapterPair,
+    };
+}
+
 use aequora_clock::Clock;
 use aequora_compute::{ComputeError, ComputePool};
 use aequora_conflict::{
@@ -19,17 +49,25 @@ use aequora_protocol::{
     SyncDirective, SyncRequest, SyncResponse,
 };
 use aequora_store::{
-    AuthoritativeStore, CommitOperation, CommitOutcome, StoreError, StoreErrorKind,
+    AdapterCompatibilityError, AdapterManifestProvider, AdapterRequirements, AuthoritativeStore,
+    CommitOperation, CommitOutcome, StoreError, StoreErrorKind,
 };
 use aequora_types::{
-    Cursor, EntityVersion, OperationId, RequestId, Sequence, SessionId, SyncScopeId,
+    Cursor, EntityVersion, EventId, OperationId, RequestId, Sequence, SessionId, SyncScopeId,
 };
 use aequora_validator::{
     ProtocolLimits, ValidationError, validate_bootstrap_request, validate_request,
 };
 use async_trait::async_trait;
 use rayon::prelude::*;
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+    time::Instant,
+};
 use thiserror::Error;
 
 /// Server processing configuration.
@@ -89,6 +127,138 @@ pub enum ServerError {
     /// An application-registered deterministic merger failed.
     #[error("sync conflict merge failed: {0}")]
     Merge(#[from] MergeError),
+    /// Operator-selected maintenance mode currently rejects this synchronization action.
+    #[error("sync is unavailable while the server is in {mode:?} maintenance mode")]
+    Maintenance {
+        /// Active maintenance policy.
+        mode: MaintenanceMode,
+        /// Retry delay safe to expose to clients and transports.
+        retry_after_seconds: u64,
+    },
+}
+
+/// Runtime maintenance policy for an [`ExchangeService`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u8)]
+pub enum MaintenanceMode {
+    /// Bidirectional synchronization and bootstrap are enabled.
+    #[default]
+    Normal = 0,
+    /// Pull and bootstrap remain available, but exchanges containing writes are rejected.
+    ReadOnly = 1,
+    /// All exchange and bootstrap work is rejected with a retryable typed error.
+    SyncPaused = 2,
+}
+
+impl MaintenanceMode {
+    /// Whether one exchange may proceed in this mode.
+    #[must_use]
+    pub const fn allows_exchange(self, has_operations: bool) -> bool {
+        match self {
+            Self::Normal => true,
+            Self::ReadOnly => !has_operations,
+            Self::SyncPaused => false,
+        }
+    }
+
+    /// Whether snapshot bootstrap may proceed in this mode.
+    #[must_use]
+    pub const fn allows_bootstrap(self) -> bool {
+        matches!(self, Self::Normal | Self::ReadOnly)
+    }
+}
+
+/// Cloneable, lock-free maintenance policy handle suitable for an authenticated control plane.
+#[derive(Clone, Default)]
+pub struct MaintenanceController {
+    mode: Arc<AtomicU8>,
+}
+
+impl MaintenanceController {
+    /// Returns the active mode.
+    #[must_use]
+    pub fn mode(&self) -> MaintenanceMode {
+        match self.mode.load(Ordering::Acquire) {
+            1 => MaintenanceMode::ReadOnly,
+            2 => MaintenanceMode::SyncPaused,
+            _ => MaintenanceMode::Normal,
+        }
+    }
+
+    /// Atomically changes the active mode and returns the previous value.
+    #[must_use]
+    pub fn set_mode(&self, mode: MaintenanceMode) -> MaintenanceMode {
+        let previous = self.mode.swap(mode as u8, Ordering::AcqRel);
+        match previous {
+            1 => MaintenanceMode::ReadOnly,
+            2 => MaintenanceMode::SyncPaused,
+            _ => MaintenanceMode::Normal,
+        }
+    }
+}
+
+/// Maintenance-policy decorator that preserves pending client work by rejecting before execution.
+pub struct MaintenanceService<S: ?Sized> {
+    inner: Arc<S>,
+    controller: MaintenanceController,
+    retry_after_seconds: u64,
+}
+
+impl<S: ?Sized> MaintenanceService<S> {
+    /// Wraps a service with a runtime maintenance gate.
+    #[must_use]
+    pub fn new(inner: Arc<S>, controller: MaintenanceController, retry_after_seconds: u64) -> Self {
+        Self {
+            inner,
+            controller,
+            retry_after_seconds: retry_after_seconds.max(1),
+        }
+    }
+
+    /// Returns the handle used by the host's authenticated control plane.
+    #[must_use]
+    pub const fn controller(&self) -> &MaintenanceController {
+        &self.controller
+    }
+
+    fn rejection(&self, mode: MaintenanceMode) -> ServerError {
+        ServerError::Maintenance {
+            mode,
+            retry_after_seconds: self.retry_after_seconds,
+        }
+    }
+}
+
+#[async_trait]
+impl<S> ExchangeService for MaintenanceService<S>
+where
+    S: ExchangeService + ?Sized,
+{
+    async fn exchange(
+        &self,
+        auth: AuthContext,
+        request: SyncRequest,
+    ) -> Result<SyncResponse, ServerError> {
+        let mode = self.controller.mode();
+        if mode.allows_exchange(!request.operations.is_empty()) {
+            self.inner.exchange(auth, request).await
+        } else {
+            Err(self.rejection(mode))
+        }
+    }
+
+    async fn bootstrap(
+        &self,
+        auth: AuthContext,
+        request: BootstrapRequest,
+    ) -> Result<BootstrapResponse, ServerError> {
+        let mode = self.controller.mode();
+        if mode.allows_bootstrap() {
+            self.inner.bootstrap(auth, request).await
+        } else {
+            Err(self.rejection(mode))
+        }
+    }
 }
 
 /// Result of a server-originated command executed through the same authoritative pipeline as sync.
@@ -167,6 +337,14 @@ pub struct SyncServerBuilder<
     config: ServerConfig,
     compute: Option<Arc<ComputePool>>,
     observer: Arc<dyn Observer>,
+}
+
+/// Production server assembly failure.
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub enum ServerBuildError {
+    /// Selected authority adapter does not meet production requirements.
+    #[error(transparent)]
+    Adapter(#[from] AdapterCompatibilityError),
 }
 
 impl Default for SyncServerBuilder {
@@ -289,6 +467,26 @@ where
             compute: self.compute,
             observer: self.observer,
         }
+    }
+}
+
+impl<S, E, R, C> SyncServerBuilder<Arc<S>, Arc<E>, Arc<R>, Arc<C>>
+where
+    S: AuthoritativeStore + AdapterManifestProvider + 'static,
+    E: OperationExecutor + 'static,
+    R: ConflictResolver + 'static,
+    C: Clock + 'static,
+{
+    /// Verifies the authority adapter's production manifest before building the server.
+    ///
+    /// Reference/test stores should continue to use [`Self::build`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed adapter compatibility failure before any request is accepted.
+    pub fn build_production(self) -> Result<SyncServer<S, E, R, C>, ServerBuildError> {
+        AdapterRequirements::PRODUCTION_AUTHORITATIVE.verify(self.store.adapter_manifest())?;
+        Ok(self.build())
     }
 }
 
@@ -419,6 +617,7 @@ where
                 }));
             }
         };
+        let provenance = authenticated.provenance(auth);
 
         let database_started = Instant::now();
         let previous = self
@@ -427,6 +626,26 @@ where
             .await?;
         self.record_phase(ServerPhaseKind::Database, database_started);
         if let Some(mut previous) = previous {
+            let database_started = Instant::now();
+            let original_lineage = self
+                .store
+                .operation_lineage(auth.tenant_id, operation.operation_id)
+                .await?;
+            self.record_phase(ServerPhaseKind::Database, database_started);
+            if original_lineage
+                != Some(
+                    operation
+                        .metadata
+                        .lineage
+                        .resolved_for_operation(operation.operation_id),
+                )
+            {
+                return Ok(ProcessResult::Rejected(rejection(
+                    operation,
+                    RejectionCode::InvalidOperation,
+                    "retry lineage differs from the original operation",
+                )));
+            }
             self.observer.record(MetricEvent::ServerTransaction {
                 outcome: TransactionOutcomeKind::Duplicate,
             });
@@ -556,12 +775,15 @@ where
             Some(version) => version.checked_next().ok_or(ServerError::VersionOverflow)?,
             None => EntityVersion::INITIAL,
         };
+        let event = provenance.primary_event(EventId::new());
         let commit = CommitOperation {
             operation_id: operation.operation_id,
-            actor_id: auth.actor_id,
-            device_id: auth.device_id,
+            event_id: event.event_id,
+            operation_lineage: provenance.operation_lineage(),
+            actor_id: provenance.actor_id(),
+            device_id: provenance.device_id(),
             operation_kind: operation.operation_kind.0,
-            tenant_id: auth.tenant_id,
+            tenant_id: provenance.tenant_id(),
             scope_id,
             entity: operation.entity,
             expected_version: current_version,
@@ -969,6 +1191,7 @@ fn server_result_outcome<T>(result: &Result<T, ServerError>) -> OutcomeKind {
         Err(ServerError::Store(error)) if error.kind == StoreErrorKind::Transient => {
             OutcomeKind::TransientFailure
         }
+        Err(ServerError::Maintenance { .. }) => OutcomeKind::TransientFailure,
         Err(_) => OutcomeKind::PermanentFailure,
     }
 }
@@ -1004,5 +1227,39 @@ fn conflict(
         server_version: current,
         policy,
         message: message.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maintenance_controller_transitions_atomically() {
+        let controller = MaintenanceController::default();
+        assert_eq!(controller.mode(), MaintenanceMode::Normal);
+        assert_eq!(
+            controller.set_mode(MaintenanceMode::ReadOnly),
+            MaintenanceMode::Normal
+        );
+        assert_eq!(controller.mode(), MaintenanceMode::ReadOnly);
+        assert_eq!(
+            controller.set_mode(MaintenanceMode::SyncPaused),
+            MaintenanceMode::ReadOnly
+        );
+        assert_eq!(controller.mode(), MaintenanceMode::SyncPaused);
+    }
+
+    #[test]
+    fn maintenance_policy_preserves_read_only_pull_and_blocks_writes() {
+        assert!(MaintenanceMode::Normal.allows_exchange(false));
+        assert!(MaintenanceMode::Normal.allows_exchange(true));
+        assert!(MaintenanceMode::ReadOnly.allows_exchange(false));
+        assert!(!MaintenanceMode::ReadOnly.allows_exchange(true));
+        assert!(!MaintenanceMode::SyncPaused.allows_exchange(false));
+        assert!(!MaintenanceMode::SyncPaused.allows_exchange(true));
+        assert!(MaintenanceMode::Normal.allows_bootstrap());
+        assert!(MaintenanceMode::ReadOnly.allows_bootstrap());
+        assert!(!MaintenanceMode::SyncPaused.allows_bootstrap());
     }
 }
