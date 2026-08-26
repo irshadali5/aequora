@@ -25,6 +25,109 @@ Neon remains
 an environment-conditional release gate and is reported separately from unconditional
 verification rather than being silently treated as passed.
 
+The extension roadmap is implemented sequentially through Part 07. A scope is a server-issued,
+versioned authorization contract rather than a client query; every scope cursor binds identity,
+version, authority generation, and evaluated sequence. Atomic subscription transitions preserve
+membership, cursor, shared references, and pending-intent disposition. `ScopeRemoval` remains
+distinct from domain deletion, and revoked operations are quarantined from transmission. Evidence
+and the host-owned authorization/deployment boundary are recorded in
+[`docs/subscription-scope-dynamic-dataset-completion.md`](docs/subscription-scope-dynamic-dataset-completion.md).
+Part 08 is complete at the reusable repository boundary. Live delivery remains an advisory wakeup mechanism:
+WebSocket, SSE, push, or polling channels may announce bounded tenant/scope progress but cannot
+carry authoritative domain state, advance cursors, bypass normal authentication/authorization, or
+replace durable pull/reconciliation. Disconnects, duplicates, reordering, and missed hints must be
+safe by construction and retain HTTP/QUIC compatibility through explicit negotiation. The stable
+core therefore owns only transport-neutral, additive live envelopes, authorization/fan-out
+contracts, latest-only bounded queues, reconnect catch-up decisions, leader fencing, and ephemeral
+presence expiry. WebSocket, SSE, mobile push, PostgreSQL `LISTEN/NOTIFY`, Redis, NATS, and other
+providers remain replaceable edge adapters. A broker publish happens only after authoritative
+commit and broker failure can degrade latency but must never fail or roll back that commit. Every
+live subscription is tenant and scope authorized, revocation immediately removes routing
+eligibility, slow consumers are coalesced or disconnected within configured bounds, and presence
+is privacy-filtered, TTL-bound advisory state rather than a durable entity or lock. The client uses
+a generation counter so hints received during an exchange cause another normal reconciliation,
+while periodic safety polling remains enabled even when a live connection is healthy. Evidence and
+deployment-owned gates are recorded in
+[`docs/live-sync-push-presence-completion.md`](docs/live-sync-push-presence-completion.md).
+Part 09 is complete at the reusable repository boundary. Canonical artifacts, immutable job and
+source identity, deterministic two-pass IDs, atomic checkpoint contracts, durable quarantine,
+dependency ordering, baseline publication, journal-visible bridge changes, export manifests, and
+fail-closed cutover evidence are mapped in
+[`docs/bulk-import-export-seed-migration-completion.md`](docs/bulk-import-export-seed-migration-completion.md).
+Source-specific mappings, native database transactions, live CDC, writer fencing, backup/rollback
+rehearsal, and production-scale acceptance remain explicit host and deployment gates.
+
+Part 10 is complete at the reusable repository boundary. Durable jobs, deterministic manifests and
+chunks, bounded/ranged resume, independent verification, inactive staging generations, journal
+retention leases, pending-intent commitments, fail-closed activation evidence, scheduling,
+telemetry, invariants, CLI inspection, and fault-injected adapter contracts are mapped in
+[`docs/large-snapshot-streaming-bootstrap-completion.md`](docs/large-snapshot-streaming-bootstrap-completion.md).
+Real consistent database readers, object-store/CDN delivery, native generation transactions,
+multi-GB resource tests, and production delta catch-up remain explicit adapter/deployment gates.
+
+Part 11 is complete at the reusable repository boundary. Nine coherent built-in aggregate profiles,
+separate operation semantics, stable typed identities, validated custom opt-in, capability checks,
+derive/builder declaration, a fail-closed registry, checksummed compatibility manifests, CLI/CI
+inspection, payload-free telemetry, six normative invariants, and finance/workflow compliance
+tests are mapped in
+[`docs/operation-semantics-consistency-profiles-completion.md`](docs/operation-semantics-consistency-profiles-completion.md).
+Applications still own domain classification, aggregate transaction implementation, capability
+evidence, profile-manifest governance, and production-scale acceptance.
+
+Part 12 is complete at the reusable repository boundary. `aequora-replay` supplies explicit
+execution inputs, controlled clocks/randomness/IDs, captured external results, pure execution
+plans, semantic handler and policy/config versions, integrity-bound replay bundles, bounded
+sandbox and differential modes, and separate commit/side-effect contracts. Six invariants,
+property/replay/fault tests, payload-free telemetry, CLI inspection, and Guppy/CI boundaries are
+mapped in
+[`docs/deterministic-execution-replay-completion.md`](docs/deterministic-execution-replay-completion.md).
+Applications still own authenticated capture, canonical domain codecs, native atomic plan commits,
+secret retention/redaction, historical state resolution, worker idempotency, and production replay
+acceptance.
+
+Part 13 is complete at the reusable repository boundary. `aequora-audit` separates canonical
+business evidence from synchronization journals, operation ledgers, and operational logs; defines
+stable subjects/actions/actors/fields/reasons, explicit durability/retention/value policies,
+truthful import/repair/scope provenance, deterministic audit identity, append-only corrections,
+tenant-partition hash chains, checkpoints and external anchor/archive hooks, field provenance,
+bounded authorized queries, and canonical export evidence. Required audit declarations are part of
+the deterministic `ExecutionPlan`, so a native `PlanCommitter` can persist mutation, journal,
+ledger, and audit together. Nine invariants, property/tamper/security/fault tests, payload-free
+telemetry, CLI verification, Guppy boundaries, and CI coverage are mapped in
+[`docs/data-provenance-auditability-explainability-completion.md`](docs/data-provenance-auditability-explainability-completion.md).
+Applications still own action/field registries, authorization, native transactional audit storage,
+index selection, redaction/keyed hashing, anchoring credentials, archive/search projections,
+localization, and compliance acceptance.
+
+Part 14 is complete at the reusable repository boundary. `aequora-governance` defines versioned
+retention and deletion policy, legal-hold precedence, explicit subject/copy discovery, immutable
+erasure plans, safe tombstone and journal-floor evaluation, operation-ledger retry horizons,
+tenant write fencing before purge, restore governance gates, client purge directives,
+storage-surface capability/coverage, separate approval, dry-run, and all-surface verification.
+Nine invariants and lifecycle/property/fault contracts are mapped in
+[`docs/data-governance-retention-erasure-completion.md`](docs/data-governance-retention-erasure-completion.md).
+Applications still own legal durations, subject relationships, approval authorization, native
+bounded deletion/pseudonymization, encryption-key destruction, device enforcement, backup/archive
+operations, and regulatory acceptance.
+
+Part 15 is complete at the reusable repository boundary. aequora-crypto supplies versioned,
+domain-separated BLAKE3 digests; Ed25519 artifact/checkpoint/device signatures; purpose-bound,
+root-signed, rollback-protected key registries; historical verification and revocation rules;
+tenant-bound XChaCha20-Poly1305 envelopes; Argon2id export keys; protected-domain compatibility
+checks; key-reference and destruction evidence; provider composition; telemetry; diagnostics; and
+the nine Part 15 invariants. Evidence and deployment boundaries are mapped in
+[the Part 15 completion report](docs/cryptographic-integrity-key-management-e2e-completion.md).
+Applications and deployment adapters still own authentication/authorization, KMS/HSM/keystore
+credentials, provider custody and outages, external anchors, native audit persistence,
+backup/recovery, destructive authorization, and production cryptographic acceptance.
+
+Part 15's repository boundary is a provider-neutral cryptography layer: canonical domain-separated
+digests, Ed25519 artifact/device signatures, XChaCha20-Poly1305 envelope encryption, purpose-bound
+key registries and rotation, rollback-protected trust, opaque client-managed payload contracts,
+governance-safe key-reference/destruction checks, and fail-closed verification. Cloud KMS, HSM,
+platform keystore, application authorization, and production custody/recovery remain adapter and
+deployment responsibilities rather than hidden core defaults.
+
 ---
 
 # 0. Non-Negotiable Project Direction
