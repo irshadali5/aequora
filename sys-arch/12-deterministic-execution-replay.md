@@ -2,6 +2,10 @@
 
 # Deterministic Domain Execution, Replay, and Reproducibility Architecture
 
+**Repository status (2026-08-21): Complete at the reusable framework boundary.** See
+[`docs/deterministic-execution-replay-completion.md`](docs/deterministic-execution-replay-completion.md)
+for code, verification, security, adapter, and deployment evidence.
+
 ## 1. Purpose
 
 Aequora already defines:
@@ -2233,23 +2237,23 @@ not core domain handlers.
 Part 12 is complete when:
 
 ```text
-[ ] ExecutionContext defined
-[ ] domain clock abstraction defined
-[ ] deterministic/random input policy defined
-[ ] server-derived ID policy defined
-[ ] external result capture architecture defined
-[ ] side effects removed from authoritative handler transaction
-[ ] ExecutionPlan defined
-[ ] decision-vs-commit separation defined
-[ ] HandlerVersion defined
-[ ] policy/config version capture defined
-[ ] ReplayBundle defined
-[ ] replay modes defined
-[ ] replay sandbox defined
-[ ] differential handler CI defined
-[ ] determinism lints/dependency boundaries defined
-[ ] property/replay/fault tests defined
-[ ] correctness invariants added
+[x] ExecutionContext defined
+[x] domain clock abstraction defined
+[x] deterministic/random input policy defined
+[x] server-derived ID policy defined
+[x] external result capture architecture defined
+[x] side effects removed from authoritative handler transaction
+[x] ExecutionPlan defined
+[x] decision-vs-commit separation defined
+[x] HandlerVersion defined
+[x] policy/config version capture defined
+[x] ReplayBundle defined
+[x] replay modes defined
+[x] replay sandbox defined
+[x] differential handler CI defined
+[x] determinism lints/dependency boundaries defined
+[x] property/replay/fault tests defined
+[x] correctness invariants added
 ```
 
 ---
