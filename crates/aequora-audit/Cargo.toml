@@ -1,0 +1,22 @@
+[package]
+name = "aequora-audit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Canonical business audit, provenance, chaining, query, and explainability contracts for Aequora"
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+
+[lints]
+workspace = true
