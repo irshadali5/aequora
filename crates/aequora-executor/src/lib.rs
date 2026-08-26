@@ -1,7 +1,10 @@
 //! Application-owned authorization and domain execution boundary.
 
 use aequora_protocol::{ChangeKind, OperationEnvelope, RejectionCode, SessionMetadata};
-use aequora_types::{ActorId, DeviceId, SchemaVersion, TenantId};
+use aequora_types::{
+    ActorId, DeviceId, EventId, JobId, LineageContext, LineageRef, OperationId, SchemaVersion,
+    TenantId,
+};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use std::{
@@ -65,12 +68,119 @@ impl<'a> AuthenticatedOperation<'a> {
         self.0
     }
 
+    /// Builds server-trusted identity and causal metadata after claim authentication succeeds.
+    #[must_use]
+    pub fn provenance(self, auth: &AuthContext) -> TrustedProvenance {
+        TrustedProvenance {
+            actor_id: auth.actor_id,
+            tenant_id: auth.tenant_id,
+            device_id: auth.device_id,
+            operation_id: self.0.operation_id,
+            operation_lineage: self
+                .0
+                .metadata
+                .lineage
+                .resolved_for_operation(self.0.operation_id),
+        }
+    }
+
     /// Marks successful application authorization. Callers should invoke this only after their
     /// policy has approved the operation.
     #[must_use]
     pub const fn authorize(self) -> AuthorizedOperation<'a> {
         AuthorizedOperation(self.0)
     }
+}
+
+/// Server-trusted provenance created only from an authenticated operation and connection context.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TrustedProvenance {
+    actor_id: ActorId,
+    tenant_id: TenantId,
+    device_id: DeviceId,
+    operation_id: OperationId,
+    operation_lineage: LineageContext,
+}
+
+impl TrustedProvenance {
+    /// Authenticated actor responsible for the originating command.
+    #[must_use]
+    pub const fn actor_id(self) -> ActorId {
+        self.actor_id
+    }
+
+    /// Authenticated tenant that owns every derived artifact.
+    #[must_use]
+    pub const fn tenant_id(self) -> TenantId {
+        self.tenant_id
+    }
+
+    /// Authenticated device that submitted the originating command.
+    #[must_use]
+    pub const fn device_id(self) -> DeviceId {
+        self.device_id
+    }
+
+    /// Original operation identifier.
+    #[must_use]
+    pub const fn operation_id(self) -> OperationId {
+        self.operation_id
+    }
+
+    /// Client-originating lineage retained by the operation ledger and audit record.
+    #[must_use]
+    pub const fn operation_lineage(self) -> LineageContext {
+        self.operation_lineage
+    }
+
+    /// Creates the primary authoritative event lineage with the operation as direct cause.
+    #[must_use]
+    pub const fn primary_event(self, event_id: EventId) -> DerivedEventProvenance {
+        DerivedEventProvenance {
+            event_id,
+            lineage: self
+                .operation_lineage
+                .derived(LineageRef::Operation(self.operation_id)),
+        }
+    }
+
+    /// Creates durable job/outbox metadata while retaining the originating correlation chain.
+    #[must_use]
+    pub const fn job(self, job_id: JobId, caused_by: LineageRef) -> JobProvenance {
+        JobProvenance {
+            job_id,
+            lineage: self.operation_lineage.derived(caused_by),
+        }
+    }
+}
+
+/// Identity and inherited lineage for a server-derived authoritative event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DerivedEventProvenance {
+    /// Stable event identity allocated by the server.
+    pub event_id: EventId,
+    /// Correlation-preserving direct causal reference.
+    pub lineage: LineageContext,
+}
+
+impl DerivedEventProvenance {
+    /// Derives a follow-up event whose direct cause is this event.
+    #[must_use]
+    pub const fn derive(self, event_id: EventId) -> Self {
+        Self {
+            event_id,
+            lineage: self.lineage.derived(LineageRef::Event(self.event_id)),
+        }
+    }
+}
+
+/// Required durable metadata for a job/outbox record derived from an authenticated operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct JobProvenance {
+    /// Stable job identity.
+    pub job_id: JobId,
+    /// Inherited correlation and direct cause; persist this alongside the job payload.
+    pub lineage: LineageContext,
 }
 
 /// Authenticated operation approved by application authorization policy.
@@ -231,6 +341,11 @@ pub trait DomainOperation: DeserializeOwned + Send + Sync + 'static {
 }
 
 /// Authorization and execution logic for one typed domain command.
+///
+/// This compatibility boundary does not receive a captured execution context and therefore does
+/// not, by itself, qualify for full deterministic replay. New replayable authority paths should
+/// implement `aequora_replay::ReplayHandler`, persist its `ExecutionPlan` through a native atomic
+/// commit, and keep this handler only as an integration facade where required.
 #[async_trait]
 pub trait OperationHandler<O>: Send + Sync
 where
@@ -736,5 +851,42 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn authenticated_provenance_preserves_correlation_for_events_and_jobs() {
+        let operation = envelope(Vec::new(), SchemaVersion(1));
+        let auth = AuthContext {
+            actor_id: operation.actor_id,
+            tenant_id: operation.tenant_id,
+            device_id: operation.device_id,
+        };
+        let authenticated = IncomingOperation::new(&operation)
+            .authenticate(&auth)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let provenance = authenticated.provenance(&auth);
+        let event = provenance.primary_event(EventId::new());
+        let derived = event.derive(EventId::new());
+        let job = provenance.job(JobId::new(), LineageRef::Event(derived.event_id));
+
+        assert_eq!(provenance.tenant_id(), auth.tenant_id);
+        assert_eq!(
+            event.lineage.correlation_id,
+            operation.metadata.lineage.correlation_id
+        );
+        assert_eq!(
+            event.lineage.caused_by,
+            Some(LineageRef::Operation(operation.operation_id))
+        );
+        assert_eq!(derived.lineage.correlation_id, event.lineage.correlation_id);
+        assert_eq!(
+            derived.lineage.caused_by,
+            Some(LineageRef::Event(event.event_id))
+        );
+        assert_eq!(job.lineage.correlation_id, event.lineage.correlation_id);
+        assert_eq!(
+            job.lineage.caused_by,
+            Some(LineageRef::Event(derived.event_id))
+        );
     }
 }
