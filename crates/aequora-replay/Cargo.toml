@@ -1,0 +1,24 @@
+[package]
+name = "aequora-replay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+
+[lints]
+workspace = true
