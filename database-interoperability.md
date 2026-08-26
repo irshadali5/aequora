@@ -3635,17 +3635,18 @@ validated schemas, and fail-closed record validation. `aequora-mapping` supplies
 entity/field/type maps, required-field coverage, and mandatory acknowledgement for lossy
 conversions. It validates declarations without introducing SQL or database-pair logic into core.
 
-`aequora-migration` defines a bounded Postcard export artifact with canonical-schema identity,
-contiguous independently hashed chunks, a root digest, record validation, tamper detection, and a
-`VerifiedExport` type that must exist before import. It does not open or overwrite databases;
-adapter-specific export/import transactions and authority timeline changes remain explicit.
+`aequora-migration` defines bounded `CanonicalRecordSource` and `CanonicalRecordSink` contracts,
+consistent source paging, resumable idempotent staging, atomic publication, and a Postcard export
+artifact with canonical-schema identity, independently hashed chunks, a root digest, record
+validation, and tamper detection. `aequora-mapping` exposes concrete conversion hooks plus golden
+physical/canonical fixtures so adapter conversions can be certified without coupling core to SQL.
 
 The installable `aequora` binary supplied by `aequora-cli` exposes payload-free `doctor adapters`,
-`inspect adapter`, and `verify pair` commands. Static inspection never opens a database or prints a
-credential. Live database health remains an explicit host/environment check.
+`inspect adapters`, `inspect adapter`, `verify pair`, and `verify export` commands. Static
+inspection never opens a database or prints a credential. Live database health and actual target
+mutation remain explicit host/environment actions around concrete application mappings.
 
-The exact section mapping and remaining migration-tooling, record-conversion, and legacy CDC
-work are tracked in
+The exact section mapping, ownership boundaries, and optional legacy CDC work are tracked in
 [`docs/database-interoperability-completion.md`](docs/database-interoperability-completion.md).
-Those gaps remain within the prerequisite phase; their absence must not be hidden by claiming that
-support for arbitrary database schemas or engines already exists.
+The reusable repository prerequisite is complete. This does not claim arbitrary database engines,
+application mappings, or a live PostgreSQL/Neon run without their adapter and environment evidence.
