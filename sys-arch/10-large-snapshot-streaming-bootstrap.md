@@ -2,6 +2,14 @@
 
 # Large Snapshot, Streaming Bootstrap, and Resumable Transfer Architecture
 
+> **Implementation status (2026-08-20):** Complete at the reusable repository boundary. Durable
+> jobs, deterministic manifests and chunks, range-resume identity, bounded verification/install,
+> staging generations, retention leases, pending-intent preservation, atomic activation evidence,
+> fault tests, telemetry, CLI inspection, and invariants are mapped in
+> [`docs/large-snapshot-streaming-bootstrap-completion.md`](docs/large-snapshot-streaming-bootstrap-completion.md).
+> Real database read views, object storage/CDN delivery, native generation transactions, and
+> production-scale resource/catch-up acceptance remain adapter and deployment gates.
+
 ## 1. Purpose
 
 Aequora already supports bootstrap snapshots for bringing a new or reset client to a known authoritative state.
@@ -2428,23 +2436,23 @@ Server adapter handles snapshot production.
 Part 10 is complete when:
 
 ```text
-[ ] BootstrapJob state machine defined
-[ ] snapshot boundary defined
-[ ] chunk manifest defined
-[ ] deterministic chunking defined
-[ ] resumable transfer defined
-[ ] range retry safety defined
-[ ] streaming decode/install defined
-[ ] staging generation defined
-[ ] atomic activation defined
-[ ] delta-after-snapshot catch-up defined
-[ ] journal retention/snapshot lease defined
-[ ] pending-operation preservation defined
-[ ] scope/version/revocation handling defined
-[ ] object-storage/CDN path defined
-[ ] adapter source/sink traits defined
-[ ] disk/memory preflight defined
-[ ] correctness/property/fault tests defined
+[x] BootstrapJob state machine defined
+[x] snapshot boundary defined
+[x] chunk manifest defined
+[x] deterministic chunking defined
+[x] resumable transfer defined
+[x] range retry safety defined
+[x] streaming decode/install defined
+[x] staging generation defined
+[x] atomic activation defined
+[x] delta-after-snapshot catch-up defined
+[x] journal retention/snapshot lease defined
+[x] pending-operation preservation defined
+[x] scope/version/revocation handling defined
+[x] object-storage/CDN path defined
+[x] adapter source/sink traits defined
+[x] disk/memory preflight defined
+[x] correctness/property/fault tests defined
 ```
 
 ---
