@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 2 * * *"
 
 permissions:
   contents: read
@@ -35,10 +37,34 @@ jobs:
         run: bash scripts/check-database-neutrality.sh
       - name: Enforce Guppy dependency boundaries
         run: cargo +stable run -p aequora-dev --locked -- check
+      - name: Enforce consistency-profile contracts and manifest compatibility rules
+        run: |
+          cargo +stable test -p aequora-profile --locked
+          cargo +stable test -p aequora-testkit --test profile_contracts --locked
+      - name: Enforce deterministic decision and replay contracts
+        run: |
+          cargo +stable test -p aequora-replay --locked
+          cargo +stable test -p aequora-testkit --test replay_contracts --locked
+      - name: Enforce canonical audit, tamper, and authorization contracts
+        run: |
+          cargo +stable test -p aequora-audit --locked
+          cargo +stable test -p aequora-testkit --test audit_contracts --locked
+      - name: Enforce governance lifecycle and distributed purge contracts
+        run: |
+          cargo +stable test -p aequora-governance --locked
+          cargo +stable test -p aequora-testkit --test governance_contracts --locked
+      - name: Enforce cryptographic integrity, key lifecycle, and protected-payload contracts
+        run: |
+          cargo +stable test -p aequora-crypto --locked
+          cargo +stable test -p aequora-testkit --test crypto_contracts --locked
       - name: Strict Clippy
         run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Workspace tests
         run: cargo +stable test --workspace --all-features --locked
+      - name: Bounded formal model and Loom verification
+        run: |
+          cargo +stable run -p aequora-cli --locked -- verify model
+          cargo +stable test -p aequora-client loom_single_flight --locked
       - name: Rustdoc
         env:
           RUSTDOCFLAGS: -Dwarnings
@@ -104,3 +130,19 @@ jobs:
         run: cargo +stable run -p aequora --example in_process --features testkit --locked
       - name: Run the Stoolap ERP example
         run: cargo +stable run -p aequora --example school_erp --features stoolap,testkit --locked
+
+  nightly-correctness:
+    name: Extended deterministic correctness
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Run formal model, properties, Loom, and fault matrices
+        env:
+          PROPTEST_CASES: "1024"
+        run: |
+          cargo +stable run -p aequora-cli --locked -- verify model
+          cargo +stable test -p aequora-model -p aequora-replay -p aequora-audit -p aequora-governance -p aequora-crypto -p aequora-client -p aequora-testkit --locked
