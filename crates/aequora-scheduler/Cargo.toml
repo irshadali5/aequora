@@ -1,0 +1,18 @@
+[package]
+name = "aequora-scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic platform-neutral QoS scheduling for Aequora clients"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1.6.0"
+
+[lints]
+workspace = true
