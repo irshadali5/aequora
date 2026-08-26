@@ -1,0 +1,43 @@
+[package]
+name = "aequora-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Payload-free adapter diagnostics and verification for Aequora"
+repository.workspace = true
+
+[[bin]]
+name = "aequora"
+path = "src/main.rs"
+doc = false
+
+[[example]]
+name = "generated_client_starter"
+path = "templates/client.rs"
+
+[[example]]
+name = "generated_server_starter"
+path = "templates/server.rs"
+
+[dependencies]
+aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
+aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
+aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap" }
+aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
+aequora-model = { version = "0.1.0", path = "../aequora-model" }
+aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
+aequora-schema = { version = "0.1.0", path = "../aequora-schema" }
+hex.workspace = true
+ron.workspace = true
+serde.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+aequora = { version = "0.1.0", path = "../aequora" }
+
+[lints]
+workspace = true
