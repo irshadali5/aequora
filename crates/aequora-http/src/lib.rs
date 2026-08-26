@@ -4,6 +4,7 @@ use aequora_codec::{Compression, DecodeLimits, EncodeOptions, MessageKind};
 use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, BootstrapResponse, SyncRequest, SyncResponse};
 use aequora_transport::{SyncTransport, TransportError};
+use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode};
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE};
 use reqwest::{Client, Response, StatusCode, Url};
@@ -173,8 +174,13 @@ impl HttpTransport {
             .await
             .map_err(map_reqwest_error)?;
         let status = response.status();
+        let operational_code = response
+            .headers()
+            .get(OPERATIONAL_ERROR_CODE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(OperationalErrorCode::parse);
         if !status.is_success() {
-            return Err(status_error(status));
+            return Err(status_error(status, operational_code));
         }
         let content_type = response
             .headers()
@@ -296,15 +302,22 @@ async fn read_bounded(mut response: Response, maximum: usize) -> Result<Vec<u8>,
     Ok(body)
 }
 
-fn status_error(status: StatusCode) -> TransportError {
+fn status_error(
+    status: StatusCode,
+    operational_code: Option<OperationalErrorCode>,
+) -> TransportError {
     let message = format!("HTTP synchronization endpoint returned status {status}");
-    if status == StatusCode::REQUEST_TIMEOUT
+    let error = if status == StatusCode::REQUEST_TIMEOUT
         || status == StatusCode::TOO_MANY_REQUESTS
         || status.is_server_error()
     {
         TransportError::transient(message)
     } else {
         TransportError::permanent(message)
+    };
+    match operational_code {
+        Some(code) => error.with_code(code),
+        None => error,
     }
 }
 
@@ -343,11 +356,22 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             StatusCode::GATEWAY_TIMEOUT,
         ] {
-            assert_eq!(status_error(status).kind, TransportErrorKind::Transient);
+            assert_eq!(
+                status_error(status, None).kind,
+                TransportErrorKind::Transient
+            );
         }
         assert_eq!(
-            status_error(StatusCode::PAYLOAD_TOO_LARGE).kind,
+            status_error(StatusCode::PAYLOAD_TOO_LARGE, None).kind,
             TransportErrorKind::Permanent
+        );
+        assert_eq!(
+            status_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some(OperationalErrorCode::Maintenance)
+            )
+            .code,
+            Some(OperationalErrorCode::Maintenance)
         );
     }
 
