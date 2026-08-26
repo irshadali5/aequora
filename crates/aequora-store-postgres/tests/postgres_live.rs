@@ -4,10 +4,10 @@ use aequora_store_postgres::{
     POSTGRES_SCHEMA_VERSION, PostgresBackend, PostgresPoolConfig, PostgresStore,
     SqlxPostgresBackend,
 };
-use aequora_testkit::contracts::verify_authoritative_store;
+use aequora_testkit::{InMemoryAuthoritativeStore, contracts::verify_authoritative_store};
 use aequora_types::{
-    ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp, NodeId,
-    OperationId, Sequence, SyncScopeId, TenantId,
+    ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId, HybridTimestamp,
+    LineageContext, NodeId, OperationId, Sequence, SyncScopeId, TenantId,
 };
 
 #[tokio::test]
@@ -56,6 +56,8 @@ async fn exercise_backend(backend: &SqlxPostgresBackend) {
     };
     let commit = CommitOperation {
         operation_id,
+        event_id: EventId::new(),
+        operation_lineage: LineageContext::root(),
         actor_id: ActorId::new(),
         device_id: DeviceId::new(),
         operation_kind: 9,
@@ -71,10 +73,15 @@ async fn exercise_backend(backend: &SqlxPostgresBackend) {
     };
 
     let store = PostgresStore::new(backend.clone());
+    let reference =
+        verify_authoritative_store(&InMemoryAuthoritativeStore::default(), commit.clone())
+            .await
+            .unwrap_or_else(|error| panic!("reference contract failed: {error}"));
     let report = verify_authoritative_store(&store, commit)
         .await
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(report.acknowledgement.operation_id, operation_id);
+    assert_eq!(report.acknowledgement, reference.acknowledgement);
 
     verify_data_path(backend, tenant, scope, operation_id, entity, payload).await;
     verify_mid_transaction_failure_rolls_back(backend, tenant, scope).await;
@@ -93,6 +100,8 @@ async fn verify_mid_transaction_failure_rolls_back(
     let payload = b"must roll back".to_vec();
     let commit = CommitOperation {
         operation_id,
+        event_id: EventId::new(),
+        operation_lineage: LineageContext::root(),
         actor_id: ActorId::new(),
         device_id: DeviceId::new(),
         operation_kind: 10,

@@ -4,25 +4,129 @@
 //! satisfy it without exposing `sqlx::Transaction` to the rest of Aequora.
 
 use aequora_executor::CurrentEntity;
+use aequora_integrity::{
+    CURRENT_HASH_SCHEMA, CanonicalEntity, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
+    PartitionScheme,
+};
+use aequora_live::{HintBroker, HintSubscription, LiveError, LiveFailureKind, SyncHint};
 use aequora_protocol::{
     ChangeKind, OperationAck, OperationRejection, Partition, RemoteChange, SnapshotEntity,
 };
 use aequora_store::{
-    AuditLog, AuditOffset, AuditPage, ChangeJournal, ChangePage, CommitOperation, CommitOutcome,
-    EntityReader, EntitySnapshot, JournalCompactor, OperationLedger, SnapshotDescriptor,
+    AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRole, AdapterTier,
+    AuditLog, AuditOffset, AuditPage, AuthoritativeIntegritySource, ChangeJournal, ChangePage,
+    CommitOperation, CommitOutcome, CorrelationLog, EntityReader, EntitySnapshot,
+    IntegrityCapabilityProvider, JournalCompactor, OperationLedger, SnapshotDescriptor,
     SnapshotPage, SnapshotStore, StoreError, StoreErrorReason, TransactionCapabilities,
     TransactionCapabilityProvider,
 };
 use aequora_types::{
-    ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp, NodeId,
-    OperationId, Sequence, SnapshotId, SyncScopeId, TenantId,
+    ActorId, CorrelationId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion,
+    EventId, HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, Sequence,
+    SnapshotId, SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
 use sqlx::{
     PgPool, Postgres, Row, Transaction,
-    postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
+    postgres::{PgConnectOptions, PgListener, PgPoolOptions, PgSslMode},
 };
 use std::{fmt, str::FromStr, sync::Arc, time::Duration};
+
+/// `PostgreSQL` `LISTEN/NOTIFY` adapter for ephemeral, post-commit live hints.
+///
+/// The durable transaction must commit before [`HintBroker::publish`] is called. A notification
+/// failure is deliberately independent from authoritative commit success.
+#[derive(Clone, Debug)]
+pub struct PostgresNotifyHintBroker {
+    pool: PgPool,
+    channel: Arc<str>,
+}
+
+impl PostgresNotifyHintBroker {
+    /// Creates a broker on one fixed deployment channel.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unsafe or empty channel identifiers.
+    pub fn new(pool: PgPool, channel: impl Into<Arc<str>>) -> Result<Self, LiveError> {
+        let channel = channel.into();
+        if channel.is_empty()
+            || channel.len() > 63
+            || !channel
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(LiveError::new(
+                LiveFailureKind::PermanentConfig,
+                "invalid PostgreSQL notification channel",
+            ));
+        }
+        Ok(Self { pool, channel })
+    }
+
+    fn encode(hint: SyncHint) -> Result<String, LiveError> {
+        let bytes = postcard::to_stdvec(&hint)
+            .map_err(|error| LiveError::new(LiveFailureKind::PermanentConfig, error.to_string()))?;
+        let payload = hex::encode(bytes);
+        if payload.len() >= 8_000 {
+            return Err(LiveError::new(
+                LiveFailureKind::PermanentConfig,
+                "PostgreSQL notification payload exceeds limit",
+            ));
+        }
+        Ok(payload)
+    }
+
+    fn decode(payload: &str) -> Result<SyncHint, LiveError> {
+        let bytes = hex::decode(payload).map_err(|error| {
+            LiveError::new(LiveFailureKind::ProtocolMismatch, error.to_string())
+        })?;
+        postcard::from_bytes(&bytes)
+            .map_err(|error| LiveError::new(LiveFailureKind::ProtocolMismatch, error.to_string()))
+    }
+}
+
+struct PostgresHintSubscription {
+    listener: PgListener,
+}
+
+#[async_trait]
+impl HintSubscription for PostgresHintSubscription {
+    async fn next_hint(&mut self) -> Result<Option<SyncHint>, LiveError> {
+        let notification = self.listener.recv().await.map_err(|error| {
+            LiveError::new(LiveFailureKind::OptionalUnavailable, error.to_string())
+        })?;
+        PostgresNotifyHintBroker::decode(notification.payload()).map(Some)
+    }
+}
+
+#[async_trait]
+impl HintBroker for PostgresNotifyHintBroker {
+    async fn publish(&self, hint: SyncHint) -> Result<(), LiveError> {
+        let payload = Self::encode(hint)?;
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(self.channel.as_ref())
+            .bind(payload)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                LiveError::new(LiveFailureKind::OptionalUnavailable, error.to_string())
+            })?;
+        Ok(())
+    }
+
+    async fn subscribe(&self) -> Result<Box<dyn HintSubscription>, LiveError> {
+        let mut listener = PgListener::connect_with(&self.pool)
+            .await
+            .map_err(|error| {
+                LiveError::new(LiveFailureKind::OptionalUnavailable, error.to_string())
+            })?;
+        listener.listen(&self.channel).await.map_err(|error| {
+            LiveError::new(LiveFailureKind::OptionalUnavailable, error.to_string())
+        })?;
+        Ok(Box::new(PostgresHintSubscription { listener }))
+    }
+}
 
 /// `PostgreSQL` schema for opaque authoritative snapshots, scoped journals, and operation ledger.
 /// Applications may include this migration in their own migration runner.
@@ -132,6 +236,48 @@ CREATE TABLE IF NOT EXISTS aequora_snapshot_entities (
 );
 ";
 
+/// Adds durable operation and event lineage to the ledger, journal, and audit log.
+pub const MIGRATION_0002: &str = r"
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS event_id UUID;
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS correlation_id UUID;
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS caused_by_kind SMALLINT;
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS caused_by_id UUID;
+UPDATE aequora_sync_events
+SET event_id = operation_id,
+    correlation_id = operation_id,
+    caused_by_kind = 1,
+    caused_by_id = operation_id
+WHERE event_id IS NULL OR correlation_id IS NULL;
+ALTER TABLE aequora_sync_events ALTER COLUMN event_id SET NOT NULL;
+ALTER TABLE aequora_sync_events ALTER COLUMN correlation_id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS aequora_sync_events_event_idx
+    ON aequora_sync_events (tenant_id, event_id);
+
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS event_id UUID;
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS correlation_id UUID;
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS caused_by_kind SMALLINT;
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS caused_by_id UUID;
+UPDATE aequora_applied_operations
+SET event_id = operation_id,
+    correlation_id = operation_id
+WHERE event_id IS NULL OR correlation_id IS NULL;
+ALTER TABLE aequora_applied_operations ALTER COLUMN event_id SET NOT NULL;
+ALTER TABLE aequora_applied_operations ALTER COLUMN correlation_id SET NOT NULL;
+
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS event_id UUID;
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS correlation_id UUID;
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS caused_by_kind SMALLINT;
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS caused_by_id UUID;
+UPDATE aequora_audit_log
+SET event_id = operation_id,
+    correlation_id = operation_id
+WHERE event_id IS NULL OR correlation_id IS NULL;
+ALTER TABLE aequora_audit_log ALTER COLUMN event_id SET NOT NULL;
+ALTER TABLE aequora_audit_log ALTER COLUMN correlation_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS aequora_audit_log_correlation_idx
+    ON aequora_audit_log (tenant_id, correlation_id, audit_offset);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     version INTEGER PRIMARY KEY CHECK (version > 0),
@@ -142,7 +288,23 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest `PostgreSQL` schema revision understood by this Aequora release.
-pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 2;
+
+/// Versioned role and capability declaration for the built-in `PostgreSQL` authority adapter.
+pub const POSTGRES_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
+    name: "postgresql",
+    adapter_version: env!("CARGO_PKG_VERSION"),
+    tested_aequora_version: env!("CARGO_PKG_VERSION"),
+    tested_database_versions: &["18"],
+    roles: &[
+        AdapterRole::AuthoritativeWritable,
+        AdapterRole::ReadOnlySource,
+        AdapterRole::SnapshotSource,
+    ],
+    tier: AdapterTier::FullProduction,
+    capabilities: AdapterCapabilities::FULL_AUTHORITATIVE,
+    limitations: &[],
+};
 
 #[derive(Clone, Copy)]
 struct PostgresMigration {
@@ -157,11 +319,18 @@ struct AppliedMigration {
     checksum: Vec<u8>,
 }
 
-const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[PostgresMigration {
-    version: 1,
-    name: "initial_authoritative_schema",
-    sql: MIGRATION_0001,
-}];
+const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
+    PostgresMigration {
+        version: 1,
+        name: "initial_authoritative_schema",
+        sql: MIGRATION_0001,
+    },
+    PostgresMigration {
+        version: 2,
+        name: "durable_causality_and_lineage",
+        sql: MIGRATION_0002,
+    },
+];
 
 /// Applied and expected `PostgreSQL` schema revisions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,6 +429,8 @@ pub struct PostgresFanoutDelivery {
     pub scope_id: SyncScopeId,
     /// Unique event identity for this delivery.
     pub operation_id: OperationId,
+    /// Stable identity of this derived fan-out journal event.
+    pub event_id: EventId,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -314,6 +485,18 @@ impl fmt::Debug for SqlxPostgresBackend {
 impl TransactionCapabilityProvider for SqlxPostgresBackend {
     fn transaction_capabilities(&self) -> TransactionCapabilities {
         TransactionCapabilities::FULL_AUTHORITATIVE
+    }
+}
+
+impl IntegrityCapabilityProvider for SqlxPostgresBackend {
+    fn integrity_support(&self) -> IntegritySupport {
+        IntegritySupport::SnapshotOnly
+    }
+}
+
+impl AdapterManifestProvider for SqlxPostgresBackend {
+    fn adapter_manifest(&self) -> AdapterManifest {
+        POSTGRES_ADAPTER_MANIFEST
     }
 }
 
@@ -941,7 +1124,8 @@ async fn prepare_commit_in_transaction(
         .await
         .map_err(postgres_error)?;
     if let Some(row) = sqlx::query(
-        "SELECT entity_version, server_sequence
+        "SELECT entity_version, server_sequence, event_id, correlation_id,
+                caused_by_kind, caused_by_id
            FROM aequora_applied_operations
           WHERE tenant_id = $1 AND operation_id = $2",
     )
@@ -951,6 +1135,17 @@ async fn prepare_commit_in_transaction(
     .await
     .map_err(postgres_error)?
     {
+        let stored_lineage = LineageContext {
+            correlation_id: CorrelationId::from_uuid(
+                row.try_get("correlation_id").map_err(postgres_error)?,
+            ),
+            caused_by: lineage_ref_from_row(&row)?,
+        };
+        if stored_lineage != commit.operation_lineage {
+            return Err(StoreError::permanent(
+                "retry changed operation lineage for an existing OperationId",
+            ));
+        }
         return Ok(Some(CommitOutcome::Duplicate(ack_from_row(
             commit.operation_id,
             &row,
@@ -987,6 +1182,9 @@ async fn persist_commit_in_transaction(
     authoritative_payload: &[u8],
 ) -> Result<OperationAck, StoreError> {
     let next_version = to_i64(commit.next_version.get(), "next entity version")?;
+    let (operation_cause_kind, operation_cause_id) = lineage_ref_columns(commit.operation_lineage);
+    let event_lineage = commit.event_lineage();
+    let (event_cause_kind, event_cause_id) = lineage_ref_columns(event_lineage);
     sqlx::query(
         "INSERT INTO aequora_entities (tenant_id, entity_type, entity_id, version, payload, tombstone) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload, tombstone = EXCLUDED.tombstone",
     )
@@ -1018,12 +1216,16 @@ async fn persist_commit_in_transaction(
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.scope_id.as_uuid())
     .bind(sequence)
     .bind(commit.operation_id.as_uuid())
+    .bind(commit.event_id.as_uuid())
+    .bind(event_lineage.correlation_id.as_uuid())
+    .bind(event_cause_kind)
+    .bind(event_cause_id)
     .bind(i32::from(commit.entity.entity_type.get()))
     .bind(commit.entity.entity_id.as_uuid())
     .bind(next_version)
@@ -1039,10 +1241,14 @@ async fn persist_commit_in_transaction(
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, entity_version, scope_id, server_sequence) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_version, scope_id, server_sequence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.operation_id.as_uuid())
+    .bind(commit.event_id.as_uuid())
+    .bind(commit.operation_lineage.correlation_id.as_uuid())
+    .bind(operation_cause_kind)
+    .bind(operation_cause_id)
     .bind(next_version)
     .bind(commit.scope_id.as_uuid())
     .bind(sequence)
@@ -1050,10 +1256,14 @@ async fn persist_commit_in_transaction(
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_audit_log (tenant_id, operation_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        "INSERT INTO aequora_audit_log (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.operation_id.as_uuid())
+    .bind(commit.event_id.as_uuid())
+    .bind(commit.operation_lineage.correlation_id.as_uuid())
+    .bind(operation_cause_kind)
+    .bind(operation_cause_id)
     .bind(commit.actor_id.as_uuid())
     .bind(commit.device_id.as_uuid())
     .bind(i32::from(commit.operation_kind))
@@ -1072,6 +1282,8 @@ async fn persist_commit_in_transaction(
     .map_err(postgres_error)?;
     Ok(OperationAck {
         operation_id: commit.operation_id,
+        event_id: commit.event_id,
+        lineage: event_lineage,
         entity_version: commit.next_version,
         sequence: Sequence(from_i64(sequence, "server sequence")?),
         duplicate: false,
@@ -1107,16 +1319,25 @@ async fn append_fanout_event_in_transaction(
     .fetch_one(&mut **transaction)
     .await
     .map_err(postgres_error)?;
+    let lineage = commit
+        .event_lineage()
+        .derived(LineageRef::Event(commit.event_id));
+    let (cause_kind, cause_id) = lineage_ref_columns(lineage);
     sqlx::query(
         "INSERT INTO aequora_sync_events
-            (tenant_id,scope_id,sequence,operation_id,entity_type,entity_id,entity_version,
-             change_kind,payload,physical_ms,logical_clock,clock_node)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            (tenant_id,scope_id,sequence,operation_id,event_id,correlation_id,caused_by_kind,
+             caused_by_id,entity_type,entity_id,entity_version,change_kind,payload,physical_ms,
+             logical_clock,clock_node)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(delivery.scope_id.as_uuid())
     .bind(sequence)
     .bind(delivery.operation_id.as_uuid())
+    .bind(delivery.event_id.as_uuid())
+    .bind(lineage.correlation_id.as_uuid())
+    .bind(cause_kind)
+    .bind(cause_id)
     .bind(i32::from(commit.entity.entity_type.get()))
     .bind(commit.entity.entity_id.as_uuid())
     .bind(to_i64(commit.next_version.get(), "fan-out entity version")?)
@@ -1151,6 +1372,12 @@ pub trait PostgresBackend: Send + Sync {
         tenant: TenantId,
         operation_id: OperationId,
     ) -> Result<Option<aequora_protocol::OperationAck>, StoreError>;
+    /// Reads the original operation lineage used to reject altered retries.
+    async fn operation_lineage(
+        &self,
+        tenant: TenantId,
+        operation_id: OperationId,
+    ) -> Result<Option<LineageContext>, StoreError>;
     /// Performs the critical authoritative atomic transaction.
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError>;
     /// Loads the oldest cursor from which retained journal history is complete.
@@ -1198,6 +1425,24 @@ pub trait PostgresBackend: Send + Sync {
         offset: AuditOffset,
         limit: usize,
     ) -> Result<AuditPage, StoreError>;
+    /// Reads a tenant-bounded causal chain from durable audit evidence.
+    async fn read_correlation(
+        &self,
+        tenant: TenantId,
+        correlation_id: CorrelationId,
+        offset: AuditOffset,
+        limit: usize,
+    ) -> Result<AuditPage, StoreError>;
+    /// Computes a canonical digest tree from one repeatable-read authoritative boundary.
+    async fn capture_authoritative_integrity(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError>;
 }
 
 #[async_trait]
@@ -1242,7 +1487,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         operation_id: OperationId,
     ) -> Result<Option<OperationAck>, StoreError> {
         let row = sqlx::query(
-            "SELECT entity_version, server_sequence FROM aequora_applied_operations WHERE tenant_id = $1 AND operation_id = $2",
+            "SELECT entity_version, server_sequence, event_id, correlation_id FROM aequora_applied_operations WHERE tenant_id = $1 AND operation_id = $2",
         )
         .bind(tenant.as_uuid())
         .bind(operation_id.as_uuid())
@@ -1251,6 +1496,30 @@ impl PostgresBackend for SqlxPostgresBackend {
         .map_err(postgres_error)?;
         row.map(|row| ack_from_row(operation_id, &row, false))
             .transpose()
+    }
+
+    async fn operation_lineage(
+        &self,
+        tenant: TenantId,
+        operation_id: OperationId,
+    ) -> Result<Option<LineageContext>, StoreError> {
+        let row = sqlx::query(
+            "SELECT correlation_id, caused_by_kind, caused_by_id FROM aequora_applied_operations WHERE tenant_id = $1 AND operation_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(operation_id.as_uuid())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        row.map(|row| {
+            Ok(LineageContext {
+                correlation_id: CorrelationId::from_uuid(
+                    row.try_get("correlation_id").map_err(postgres_error)?,
+                ),
+                caused_by: lineage_ref_from_row(&row)?,
+            })
+        })
+        .transpose()
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1328,7 +1597,7 @@ impl PostgresBackend for SqlxPostgresBackend {
     ) -> Result<ChangePage, StoreError> {
         let query_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
         let rows = sqlx::query(
-            "SELECT sequence, operation_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node, MAX(sequence) OVER () AS journal_head FROM aequora_sync_events WHERE tenant_id = $1 AND scope_id = $2 AND sequence > $3 ORDER BY sequence LIMIT $4",
+            "SELECT sequence, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node, MAX(sequence) OVER () AS journal_head FROM aequora_sync_events WHERE tenant_id = $1 AND scope_id = $2 AND sequence > $3 ORDER BY sequence LIMIT $4",
         )
         .bind(tenant.as_uuid())
         .bind(scope.as_uuid())
@@ -1526,7 +1795,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         limit: usize,
     ) -> Result<AuditPage, StoreError> {
         let rows = sqlx::query(
-            "SELECT audit_offset, operation_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node FROM aequora_audit_log WHERE tenant_id = $1 AND audit_offset > $2 ORDER BY audit_offset LIMIT $3",
+            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node FROM aequora_audit_log WHERE tenant_id = $1 AND audit_offset > $2 ORDER BY audit_offset LIMIT $3",
         )
         .bind(tenant.as_uuid())
         .bind(to_i64(offset.0, "audit offset")?)
@@ -1546,6 +1815,146 @@ impl PostgresBackend for SqlxPostgresBackend {
             has_more,
         })
     }
+
+    async fn read_correlation(
+        &self,
+        tenant: TenantId,
+        correlation_id: CorrelationId,
+        offset: AuditOffset,
+        limit: usize,
+    ) -> Result<AuditPage, StoreError> {
+        let rows = sqlx::query(
+            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node FROM aequora_audit_log WHERE tenant_id = $1 AND correlation_id = $2 AND audit_offset > $3 ORDER BY audit_offset LIMIT $4",
+        )
+        .bind(tenant.as_uuid())
+        .bind(correlation_id.as_uuid())
+        .bind(to_i64(offset.0, "audit offset")?)
+        .bind(i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        let has_more = rows.len() > limit;
+        let mut records = Vec::with_capacity(rows.len().min(limit));
+        for row in rows.into_iter().take(limit) {
+            records.push(audit_from_row(tenant, &row)?);
+        }
+        let next_offset = records.last().map_or(offset, |record| record.offset);
+        Ok(AuditPage {
+            records,
+            next_offset,
+            has_more,
+        })
+    }
+
+    async fn capture_authoritative_integrity(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        if boundary.scope != scope {
+            return Err(StoreError::permanent(
+                "integrity boundary belongs to another scope",
+            ));
+        }
+        let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *transaction)
+            .await
+            .map_err(postgres_error)?;
+        let head = sqlx::query_scalar::<_, i64>(
+            "SELECT sequence FROM aequora_scope_sequences WHERE tenant_id = $1 AND scope_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(scope.as_uuid())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(postgres_error)?
+        .unwrap_or(0);
+        if Sequence(from_i64(head, "integrity boundary")?) != boundary.sequence {
+            return Err(StoreError::permanent(
+                "integrity capture requires the current repeatable-read scope boundary",
+            ));
+        }
+        let rows = sqlx::query(
+            "SELECT e.entity_type, e.entity_id, e.version, e.payload, e.tombstone
+               FROM aequora_entities e
+               JOIN aequora_entity_scopes s
+                 ON s.tenant_id = e.tenant_id
+                AND s.entity_type = e.entity_type
+                AND s.entity_id = e.entity_id
+              WHERE e.tenant_id = $1 AND s.scope_id = $2
+              ORDER BY e.entity_type, e.entity_id
+              LIMIT $3",
+        )
+        .bind(tenant.as_uuid())
+        .bind(scope.as_uuid())
+        .bind(i64::try_from(max_entities.saturating_add(1)).unwrap_or(i64::MAX))
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        if rows.len() > max_entities {
+            return Err(StoreError::permanent(
+                "integrity input exceeds the configured entity bound",
+            ));
+        }
+        let mut entities = Vec::with_capacity(rows.len());
+        for row in rows {
+            entities.push(CanonicalEntity {
+                entity: EntityRef {
+                    entity_type: entity_type(
+                        row.try_get::<i32, _>("entity_type")
+                            .map_err(postgres_error)?,
+                    )?,
+                    entity_id: EntityId::from_uuid(
+                        row.try_get::<uuid::Uuid, _>("entity_id")
+                            .map_err(postgres_error)?,
+                    ),
+                },
+                version: entity_version(row.try_get::<i64, _>("version").map_err(postgres_error)?)?,
+                hash_schema: CURRENT_HASH_SCHEMA,
+                payload: row
+                    .try_get::<Vec<u8>, _>("payload")
+                    .map_err(postgres_error)?,
+                tombstone: row
+                    .try_get::<bool, _>("tombstone")
+                    .map_err(postgres_error)?,
+            });
+        }
+        let snapshot =
+            IntegritySnapshot::build(scope, boundary, generation, scheme, entities, max_entities)
+                .map_err(|error| StoreError::permanent(error.to_string()))?;
+        transaction.commit().await.map_err(postgres_error)?;
+        Ok(snapshot)
+    }
+}
+
+fn lineage_ref_columns(lineage: LineageContext) -> (Option<i16>, Option<uuid::Uuid>) {
+    match lineage.caused_by {
+        None => (None, None),
+        Some(LineageRef::Operation(id)) => (Some(1), Some(id.as_uuid())),
+        Some(LineageRef::Event(id)) => (Some(2), Some(id.as_uuid())),
+        Some(LineageRef::Job(id)) => (Some(3), Some(id.as_uuid())),
+    }
+}
+
+fn lineage_ref_from_row(row: &sqlx::postgres::PgRow) -> Result<Option<LineageRef>, StoreError> {
+    let kind = row
+        .try_get::<Option<i16>, _>("caused_by_kind")
+        .map_err(postgres_error)?;
+    let id = row
+        .try_get::<Option<uuid::Uuid>, _>("caused_by_id")
+        .map_err(postgres_error)?;
+    match (kind, id) {
+        (None, None) => Ok(None),
+        (Some(1), Some(id)) => Ok(Some(LineageRef::Operation(OperationId::from_uuid(id)))),
+        (Some(2), Some(id)) => Ok(Some(LineageRef::Event(EventId::from_uuid(id)))),
+        (Some(3), Some(id)) => Ok(Some(LineageRef::Job(aequora_types::JobId::from_uuid(id)))),
+        _ => Err(corrupt("invalid PostgreSQL lineage reference")),
+    }
 }
 
 fn ack_from_row(
@@ -1555,6 +1964,17 @@ fn ack_from_row(
 ) -> Result<OperationAck, StoreError> {
     Ok(OperationAck {
         operation_id,
+        event_id: EventId::from_uuid(
+            row.try_get::<uuid::Uuid, _>("event_id")
+                .map_err(postgres_error)?,
+        ),
+        lineage: LineageContext {
+            correlation_id: CorrelationId::from_uuid(
+                row.try_get::<uuid::Uuid, _>("correlation_id")
+                    .map_err(postgres_error)?,
+            ),
+            caused_by: Some(LineageRef::Operation(operation_id)),
+        },
         entity_version: entity_version(
             row.try_get::<i64, _>("entity_version")
                 .map_err(postgres_error)?,
@@ -1588,6 +2008,17 @@ fn remote_change_from_row(
             row.try_get::<uuid::Uuid, _>("operation_id")
                 .map_err(postgres_error)?,
         ),
+        event_id: EventId::from_uuid(
+            row.try_get::<uuid::Uuid, _>("event_id")
+                .map_err(postgres_error)?,
+        ),
+        lineage: LineageContext {
+            correlation_id: CorrelationId::from_uuid(
+                row.try_get::<uuid::Uuid, _>("correlation_id")
+                    .map_err(postgres_error)?,
+            ),
+            caused_by: lineage_ref_from_row(row)?,
+        },
         entity: EntityRef {
             entity_type: entity_type(
                 row.try_get::<i32, _>("entity_type")
@@ -1671,6 +2102,17 @@ fn audit_from_row(
             row.try_get::<uuid::Uuid, _>("operation_id")
                 .map_err(postgres_error)?,
         ),
+        event_id: EventId::from_uuid(
+            row.try_get::<uuid::Uuid, _>("event_id")
+                .map_err(postgres_error)?,
+        ),
+        operation_lineage: LineageContext {
+            correlation_id: CorrelationId::from_uuid(
+                row.try_get::<uuid::Uuid, _>("correlation_id")
+                    .map_err(postgres_error)?,
+            ),
+            caused_by: lineage_ref_from_row(row)?,
+        },
         actor_id: ActorId::from_uuid(
             row.try_get::<uuid::Uuid, _>("actor_id")
                 .map_err(postgres_error)?,
@@ -1731,6 +2173,18 @@ impl<B: TransactionCapabilityProvider> TransactionCapabilityProvider for Postgre
     }
 }
 
+impl<B: IntegrityCapabilityProvider> IntegrityCapabilityProvider for PostgresStore<B> {
+    fn integrity_support(&self) -> IntegritySupport {
+        self.backend.integrity_support()
+    }
+}
+
+impl<B: AdapterManifestProvider> AdapterManifestProvider for PostgresStore<B> {
+    fn adapter_manifest(&self) -> AdapterManifest {
+        self.backend.adapter_manifest()
+    }
+}
+
 #[async_trait]
 impl<B: PostgresBackend> EntityReader for PostgresStore<B> {
     async fn read_entity(
@@ -1750,6 +2204,13 @@ impl<B: PostgresBackend> OperationLedger for PostgresStore<B> {
         operation_id: OperationId,
     ) -> Result<Option<aequora_protocol::OperationAck>, StoreError> {
         self.backend.operation_result(tenant, operation_id).await
+    }
+    async fn operation_lineage(
+        &self,
+        tenant: TenantId,
+        operation_id: OperationId,
+    ) -> Result<Option<LineageContext>, StoreError> {
+        self.backend.operation_lineage(tenant, operation_id).await
     }
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError> {
         self.backend.commit_operation(commit).await
@@ -1831,13 +2292,70 @@ impl<B: PostgresBackend> AuditLog for PostgresStore<B> {
     }
 }
 
+#[async_trait]
+impl<B: PostgresBackend> CorrelationLog for PostgresStore<B> {
+    async fn read_correlation(
+        &self,
+        tenant: TenantId,
+        correlation_id: CorrelationId,
+        offset: AuditOffset,
+        limit: usize,
+    ) -> Result<AuditPage, StoreError> {
+        self.backend
+            .read_correlation(tenant, correlation_id, offset, limit)
+            .await
+    }
+}
+
+#[async_trait]
+impl<B: PostgresBackend> AuthoritativeIntegritySource for PostgresStore<B> {
+    async fn capture_authoritative_integrity(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        self.backend
+            .capture_authoritative_integrity(
+                tenant,
+                scope,
+                boundary,
+                generation,
+                scheme,
+                max_entities,
+            )
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        POSTGRES_MIGRATIONS, PgSslMode, PostgresPoolConfig, migration_checksum,
-        parse_connect_options, postgres_transaction_retry_reason, verify_migration_record,
+        POSTGRES_MIGRATIONS, PgSslMode, PostgresNotifyHintBroker, PostgresPoolConfig,
+        migration_checksum, parse_connect_options, postgres_transaction_retry_reason,
+        verify_migration_record,
     };
+    use aequora_live::{SyncHint, SyncHintReason};
     use aequora_store::{StoreErrorKind, StoreErrorReason};
+    use aequora_types::{Sequence, SyncScopeId, TenantId};
+
+    #[test]
+    fn notify_hint_codec_is_small_and_exact() {
+        let hint = SyncHint::v1(
+            TenantId::new(),
+            SyncScopeId::new(),
+            Some(Sequence(42)),
+            SyncHintReason::NewAuthoritativeChange,
+        );
+        let encoded = PostgresNotifyHintBroker::encode(hint);
+        assert!(encoded.is_ok());
+        let encoded = encoded.unwrap_or_default();
+        assert!(encoded.len() < 8_000);
+        assert_eq!(PostgresNotifyHintBroker::decode(&encoded), Ok(hint));
+    }
 
     #[test]
     fn neon_urls_force_hostname_verified_tls_and_scale_to_zero_pooling() {

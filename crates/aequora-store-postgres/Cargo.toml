@@ -9,11 +9,15 @@ repository.workspace = true
 
 [dependencies]
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
+aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 async-trait.workspace = true
 blake3.workspace = true
+hex.workspace = true
+postcard.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
 
