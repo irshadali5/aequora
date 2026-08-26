@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 aequora-codec = { path = "../crates/aequora-codec", features = ["zstd"] }
 aequora-conflict = { path = "../crates/aequora-conflict" }
+aequora-crypto = { path = "../crates/aequora-crypto" }
 aequora-executor = { path = "../crates/aequora-executor" }
 aequora-protocol = { path = "../crates/aequora-protocol" }
 aequora-types = { path = "../crates/aequora-types" }
@@ -43,6 +44,13 @@ bench = false
 [[bin]]
 name = "schema_migration"
 path = "fuzz_targets/schema_migration.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_envelopes"
+path = "fuzz_targets/crypto_envelopes.rs"
 test = false
 doc = false
 bench = false
