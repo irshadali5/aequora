@@ -8,7 +8,11 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
+aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 async-trait.workspace = true
