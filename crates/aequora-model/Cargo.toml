@@ -1,0 +1,21 @@
+[package]
+name = "aequora-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Database-neutral executable state-machine model for Aequora correctness"
+repository.workspace = true
+
+[dependencies]
+aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
+blake3.workspace = true
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+
+[lints]
+workspace = true
