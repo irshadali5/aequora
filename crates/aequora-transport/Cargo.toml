@@ -9,9 +9,9 @@ repository.workspace = true
 
 [dependencies]
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
 async-trait.workspace = true
 thiserror.workspace = true
 
 [lints]
 workspace = true
-

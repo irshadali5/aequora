@@ -1,6 +1,7 @@
 //! Transport abstraction. The synchronization engine is not coupled to HTTP.
 
 use aequora_protocol::{BootstrapRequest, BootstrapResponse, PushHint, SyncRequest, SyncResponse};
+use aequora_types::OperationalErrorCode;
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -10,6 +11,8 @@ use thiserror::Error;
 pub struct TransportError {
     /// Whether an unchanged exchange is worth retrying.
     pub kind: TransportErrorKind,
+    /// Stable operational category, when the transport supplied one.
+    pub code: Option<OperationalErrorCode>,
     /// Non-sensitive implementation explanation.
     pub message: String,
 }
@@ -20,6 +23,7 @@ impl TransportError {
     pub fn transient(message: impl Into<String>) -> Self {
         Self {
             kind: TransportErrorKind::Transient,
+            code: None,
             message: message.into(),
         }
     }
@@ -29,8 +33,16 @@ impl TransportError {
     pub fn permanent(message: impl Into<String>) -> Self {
         Self {
             kind: TransportErrorKind::Permanent,
+            code: None,
             message: message.into(),
         }
+    }
+
+    /// Attaches a stable payload-free operational category.
+    #[must_use]
+    pub const fn with_code(mut self, code: OperationalErrorCode) -> Self {
+        self.code = Some(code);
+        self
     }
 }
 
