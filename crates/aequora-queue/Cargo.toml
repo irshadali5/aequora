@@ -1,0 +1,23 @@
+[package]
+name = "aequora-queue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic offline outbox compaction and rebase planning for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+uuid.workspace = true
+
+[lints]
+workspace = true
