@@ -5,6 +5,7 @@ extern crate self as aequora;
 pub use aequora_macros::{AequoraAggregate, AequoraOperation};
 
 pub use aequora_audit as audit;
+pub use aequora_authority as authority;
 pub use aequora_blob as blob;
 pub use aequora_bootstrap as bootstrap;
 pub use aequora_client as client;
@@ -31,6 +32,7 @@ pub use aequora_partition as partition;
 pub use aequora_profile as profile;
 pub use aequora_protocol as protocol;
 pub use aequora_queue as queue;
+pub use aequora_region as region;
 pub use aequora_replay as replay;
 pub use aequora_routing as routing;
 pub use aequora_scheduler as scheduler;
@@ -75,6 +77,18 @@ pub mod prelude {
         AuditRetentionClass, AuditRetentionDecision, AuditSequence, AuditSubject, AuditTimestamp,
         AuditValue, AuditValuePolicy, ChainedAuditRecord, ExplanationLevel, FieldProvenance,
         ReasonCode, verify_chain,
+    };
+    pub use aequora_authority::{
+        AuthorityArtifactBinding, AuthorityArtifactKind, AuthorityCommitContext,
+        AuthorityController, AuthorityDescriptor, AuthorityError, AuthorityFenceToken,
+        AuthorityPermission, AuthorityPromotionPlan, AuthorityPromotionPolicy, AuthorityRole,
+        AuthorityRuntimeMode, AuthorityState, AuthorityTransitionManifest, BackupAuthorityMetadata,
+        CheckpointComparison, ClientAuthorityState, CursorDisposition, EpochOperationAction,
+        EpochOperationResolution, EpochOperationState, EpochRecoveryPolicy, EpochTransitionPhase,
+        ExternalEpochRegistry, InMemoryEpochRegistry, JournalCheckpoint, OperationRecoveryRecord,
+        PromotionClass, PromotionEvidence, PromotionOutcome, PromotionReadiness, PromotionRequest,
+        RecoveryVerification, TransitionReason, classify_epoch_operation, compare_checkpoints,
+        validate_cursor,
     };
     #[cfg(feature = "axum")]
     pub use aequora_axum::{
@@ -225,6 +239,20 @@ pub mod prelude {
         OperationOptimization, OperationRisk, OptimizationRegistry, PairAction, QueueEntry,
         QueueError, RebasePlan, RebasePolicy, RebaseRewrite, RebaseTarget, Supersession,
         SupersessionReason, plan_compaction, plan_rebase, semantic_envelope_hash,
+    };
+    pub use aequora_region::{
+        AssignmentTrust, AuthorityLocation, AuthorityShardId, DirectoryGeneration,
+        EndpointReadPolicy, ProjectionApplyDecision, ProjectionId,
+        ProjectionSchemaVersion as RegionalProjectionSchemaVersion, ProjectionWatermark,
+        ReadConsistency, ReadFallbackPolicy, ReadResponseMetadata, ReadRouteDecision, ReadTarget,
+        RegionError, RegionMode, RegionalArtifactEvidence, RegionalArtifactKind,
+        RegionalCacheMetadata, RegionalCopyId, RegionalCopyKind, RegionalCopyRecord,
+        RegionalDeploymentProfile, RegionalEventKind, RegionalGovernanceRegistry,
+        RegionalGovernanceReport, RegionalPlacementKind, RegionalPurgeState, RegionalReadRequest,
+        RegionalRole, RegionalRouter, RegionalRouterConfig, ReplicaId, ReplicaObservation,
+        ReplicaReadGuard, ReplicaWait, ReplicaWatermark, ResidencyPolicy, SessionWatermark,
+        StalenessBudget, TenantAuthorityAssignment, TenantAuthorityDirectory,
+        validate_projection_apply,
     };
     pub use aequora_replay::{
         AllocatedId, AllocatedIdKind, CanonicalOperation, CapturedExternalResult,

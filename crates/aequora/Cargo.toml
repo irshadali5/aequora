@@ -23,6 +23,7 @@ record-sync = ["dep:aequora-mapping", "dep:aequora-migration", "dep:aequora-sche
 
 [dependencies]
 aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
+aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
 aequora-blob = { version = "0.1.0", path = "../aequora-blob" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
@@ -49,6 +50,7 @@ aequora-partition = { version = "0.1.0", path = "../aequora-partition" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
+aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
 aequora-routing = { version = "0.1.0", path = "../aequora-routing" }
