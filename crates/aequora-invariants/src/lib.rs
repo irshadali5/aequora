@@ -250,11 +250,47 @@ pub enum InvariantId {
     RegionResidencyCoverage,
     /// Governance completion includes every required regional copy.
     RegionGovernanceCoverage,
+    /// Every in-memory work queue has an explicit configured bound.
+    LoadBoundedQueues,
+    /// Overload rejection happens before authoritative mutation.
+    LoadPreMutationRejection,
+    /// Tenant fairness preserves globally reserved opportunity.
+    LoadTenantFairness,
+    /// Slow live clients cannot consume unbounded memory.
+    LoadSlowClientBound,
+    /// Bulk and maintenance cannot permanently starve higher-value work.
+    LoadPriorityStarvationSafety,
+    /// Retry guidance retains client-side jitter and backoff.
+    LoadRetryJitterSafety,
+    /// Required durable work never exists only in an in-memory queue.
+    LoadDurableIntentSafety,
+    /// Overload never silently weakens consistency.
+    LoadConsistencySafety,
+    /// Limits are acquired before entering the protected resource domain.
+    LoadAdmissionOrdering,
+    /// Every externally driven collection and queue has explicit item and byte bounds.
+    PerformanceBoundedMemory,
+    /// Large snapshots, blobs, and exports do not require full in-memory materialization.
+    PerformanceStreamingLargeObjects,
+    /// CPU-heavy work cannot run unbounded on an asynchronous I/O worker.
+    PerformanceCpuIsolation,
+    /// Performance changes preserve every semantic and durability guarantee.
+    PerformanceCorrectnessPreservation,
+    /// Hot registries and configuration use immutable versioned snapshots.
+    PerformanceImmutableHotState,
+    /// Accepted optimization evidence is bound to a reproducible workload and measured phase.
+    PerformanceReproducibility,
+    /// Reactive UI state remains a bounded query-derived page rather than a database mirror.
+    PerformancePagedUiState,
+    /// Large binary domain content uses bounded streaming blob references.
+    PerformanceBlobReferences,
+    /// Admission and frame limits reject work before expensive allocation or execution.
+    PerformanceEarlyAdmission,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 120] = [
+    pub const ALL: [Self; 138] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -375,6 +411,24 @@ impl InvariantId {
         Self::RegionArtifactIntegrity,
         Self::RegionResidencyCoverage,
         Self::RegionGovernanceCoverage,
+        Self::LoadBoundedQueues,
+        Self::LoadPreMutationRejection,
+        Self::LoadTenantFairness,
+        Self::LoadSlowClientBound,
+        Self::LoadPriorityStarvationSafety,
+        Self::LoadRetryJitterSafety,
+        Self::LoadDurableIntentSafety,
+        Self::LoadConsistencySafety,
+        Self::LoadAdmissionOrdering,
+        Self::PerformanceBoundedMemory,
+        Self::PerformanceStreamingLargeObjects,
+        Self::PerformanceCpuIsolation,
+        Self::PerformanceCorrectnessPreservation,
+        Self::PerformanceImmutableHotState,
+        Self::PerformanceReproducibility,
+        Self::PerformancePagedUiState,
+        Self::PerformanceBlobReferences,
+        Self::PerformanceEarlyAdmission,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -502,6 +556,24 @@ impl InvariantId {
             Self::RegionArtifactIntegrity => "AEQ-INV-REG007",
             Self::RegionResidencyCoverage => "AEQ-INV-REG008",
             Self::RegionGovernanceCoverage => "AEQ-INV-REG009",
+            Self::LoadBoundedQueues => "AEQ-INV-LOAD001",
+            Self::LoadPreMutationRejection => "AEQ-INV-LOAD002",
+            Self::LoadTenantFairness => "AEQ-INV-LOAD003",
+            Self::LoadSlowClientBound => "AEQ-INV-LOAD004",
+            Self::LoadPriorityStarvationSafety => "AEQ-INV-LOAD005",
+            Self::LoadRetryJitterSafety => "AEQ-INV-LOAD006",
+            Self::LoadDurableIntentSafety => "AEQ-INV-LOAD007",
+            Self::LoadConsistencySafety => "AEQ-INV-LOAD008",
+            Self::LoadAdmissionOrdering => "AEQ-INV-LOAD009",
+            Self::PerformanceBoundedMemory => "AEQ-INV-PERF001",
+            Self::PerformanceStreamingLargeObjects => "AEQ-INV-PERF002",
+            Self::PerformanceCpuIsolation => "AEQ-INV-PERF003",
+            Self::PerformanceCorrectnessPreservation => "AEQ-INV-PERF004",
+            Self::PerformanceImmutableHotState => "AEQ-INV-PERF005",
+            Self::PerformanceReproducibility => "AEQ-INV-PERF006",
+            Self::PerformancePagedUiState => "AEQ-INV-PERF007",
+            Self::PerformanceBlobReferences => "AEQ-INV-PERF008",
+            Self::PerformanceEarlyAdmission => "AEQ-INV-PERF009",
         }
     }
 
@@ -858,6 +930,58 @@ impl InvariantId {
             Self::RegionGovernanceCoverage => {
                 "governance completion accounts for every required registered regional copy"
             }
+            Self::LoadBoundedQueues => {
+                "no Aequora in-memory work queue grows without an explicit configured bound"
+            }
+            Self::LoadPreMutationRejection => {
+                "overload rejection occurs before authoritative mutation and cannot report a false commit"
+            }
+            Self::LoadTenantFairness => {
+                "one tenant cannot consume all globally reserved capacity when fairness is enabled"
+            }
+            Self::LoadSlowClientBound => "slow live clients cannot consume unbounded server memory",
+            Self::LoadPriorityStarvationSafety => {
+                "bulk and maintenance work cannot permanently starve critical or interactive work"
+            }
+            Self::LoadRetryJitterSafety => {
+                "server retry guidance never removes client-side jitter and backoff"
+            }
+            Self::LoadDurableIntentSafety => {
+                "required durable work is never represented only by an in-memory scheduling queue"
+            }
+            Self::LoadConsistencySafety => {
+                "consistency is never silently weakened solely because the system is overloaded"
+            }
+            Self::LoadAdmissionOrdering => {
+                "admission limits are enforced before entering the resource domains they protect"
+            }
+            Self::PerformanceBoundedMemory => {
+                "externally driven in-memory collections and queues have explicit item and byte bounds"
+            }
+            Self::PerformanceStreamingLargeObjects => {
+                "large snapshots blobs and exports stream without full payload materialization"
+            }
+            Self::PerformanceCpuIsolation => {
+                "CPU-heavy work cannot execute unbounded on asynchronous I/O worker threads"
+            }
+            Self::PerformanceCorrectnessPreservation => {
+                "performance optimization preserves cursor transaction idempotency authorization and audit guarantees"
+            }
+            Self::PerformanceImmutableHotState => {
+                "hot registries and configuration are immutable or replaced as versioned snapshots"
+            }
+            Self::PerformanceReproducibility => {
+                "performance changes are measured by reproducible workloads and attributed phases"
+            }
+            Self::PerformancePagedUiState => {
+                "reactive UI state is a bounded query-derived page rather than a synchronized database mirror"
+            }
+            Self::PerformanceBlobReferences => {
+                "large binary content is referenced by normal domain sync and streamed by the blob subsystem"
+            }
+            Self::PerformanceEarlyAdmission => {
+                "framing and admission reject excessive work before expensive allocation decode or execution"
+            }
         }
     }
 
@@ -990,6 +1114,24 @@ impl InvariantId {
             Self::RegionArtifactIntegrity => 117,
             Self::RegionResidencyCoverage => 118,
             Self::RegionGovernanceCoverage => 119,
+            Self::LoadBoundedQueues => 120,
+            Self::LoadPreMutationRejection => 121,
+            Self::LoadTenantFairness => 122,
+            Self::LoadSlowClientBound => 123,
+            Self::LoadPriorityStarvationSafety => 124,
+            Self::LoadRetryJitterSafety => 125,
+            Self::LoadDurableIntentSafety => 126,
+            Self::LoadConsistencySafety => 127,
+            Self::LoadAdmissionOrdering => 128,
+            Self::PerformanceBoundedMemory => 129,
+            Self::PerformanceStreamingLargeObjects => 130,
+            Self::PerformanceCpuIsolation => 131,
+            Self::PerformanceCorrectnessPreservation => 132,
+            Self::PerformanceImmutableHotState => 133,
+            Self::PerformanceReproducibility => 134,
+            Self::PerformancePagedUiState => 135,
+            Self::PerformanceBlobReferences => 136,
+            Self::PerformanceEarlyAdmission => 137,
         }
     }
 }
@@ -1041,7 +1183,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 120] = [
+pub const REGISTRY: [InvariantEntry; 138] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -1881,6 +2023,132 @@ pub const REGISTRY: [InvariantEntry; 120] = [
         "regional_erasure_property",
         "verify_regional_governance_registry",
         "regional_governance_incomplete_total",
+    ),
+    entry(
+        InvariantId::LoadBoundedQueues,
+        "bounded_overload_queues",
+        "queue_capacity_property",
+        "verify_queue_configuration",
+        "admission_queue_overflow_total",
+    ),
+    entry(
+        InvariantId::LoadPreMutationRejection,
+        "pre_mutation_overload_rejection",
+        "saturation_rejection_property",
+        "verify_admission_decorator",
+        "admission_post_mutation_rejection_total",
+    ),
+    entry(
+        InvariantId::LoadTenantFairness,
+        "tenant_fair_admission",
+        "hot_tenant_property",
+        "verify_hierarchical_admission",
+        "admission_fairness_violation_total",
+    ),
+    entry(
+        InvariantId::LoadSlowClientBound,
+        "slow_client_memory_bound",
+        "slow_consumer_property",
+        "verify_live_queue_bounds",
+        "live_slow_client_overflow_total",
+    ),
+    entry(
+        InvariantId::LoadPriorityStarvationSafety,
+        "priority_starvation_safety",
+        "weighted_aging_property",
+        "verify_fair_queue",
+        "admission_starvation_total",
+    ),
+    entry(
+        InvariantId::LoadRetryJitterSafety,
+        "retry_jitter_safety",
+        "retry_storm_property",
+        "verify_scheduler_retry_policy",
+        "retry_unjittered_guidance_total",
+    ),
+    entry(
+        InvariantId::LoadDurableIntentSafety,
+        "durable_intent_outlives_queue",
+        "queue_restart_property",
+        "verify_durable_job_source",
+        "ephemeral_only_required_work_total",
+    ),
+    entry(
+        InvariantId::LoadConsistencySafety,
+        "overload_consistency_safety",
+        "brownout_consistency_property",
+        "verify_brownout_policy",
+        "overload_consistency_downgrade_total",
+    ),
+    entry(
+        InvariantId::LoadAdmissionOrdering,
+        "resource_admission_ordering",
+        "resource_saturation_property",
+        "verify_resource_permits",
+        "late_admission_total",
+    ),
+    entry(
+        InvariantId::PerformanceBoundedMemory,
+        "bounded_external_memory",
+        "item_and_byte_capacity_property",
+        "verify_performance_policy",
+        "performance_bound_rejection_total",
+    ),
+    entry(
+        InvariantId::PerformanceStreamingLargeObjects,
+        "streaming_large_objects",
+        "chunk_window_property",
+        "verify_snapshot_blob_streaming",
+        "large_object_materialization_total",
+    ),
+    entry(
+        InvariantId::PerformanceCpuIsolation,
+        "bounded_cpu_isolation",
+        "compute_submission_property",
+        "verify_compute_pool_bounds",
+        "compute_saturation_total",
+    ),
+    entry(
+        InvariantId::PerformanceCorrectnessPreservation,
+        "optimization_preserves_semantics",
+        "optimized_path_equivalence_property",
+        "verify_correctness_gates",
+        "optimization_invariant_failure_total",
+    ),
+    entry(
+        InvariantId::PerformanceImmutableHotState,
+        "immutable_hot_state",
+        "registry_generation_property",
+        "verify_immutable_registry",
+        "hot_state_lock_contention_total",
+    ),
+    entry(
+        InvariantId::PerformanceReproducibility,
+        "reproducible_performance_evidence",
+        "fixed_workload_phase_property",
+        "verify_performance_report",
+        "performance_regression_total",
+    ),
+    entry(
+        InvariantId::PerformancePagedUiState,
+        "paged_reactive_state",
+        "view_window_property",
+        "verify_reactive_view_budget",
+        "reactive_view_overflow_total",
+    ),
+    entry(
+        InvariantId::PerformanceBlobReferences,
+        "streamed_blob_references",
+        "blob_chunk_bound_property",
+        "verify_blob_streaming",
+        "blob_inline_limit_total",
+    ),
+    entry(
+        InvariantId::PerformanceEarlyAdmission,
+        "early_resource_rejection",
+        "header_limit_property",
+        "verify_frame_admission_order",
+        "late_frame_rejection_total",
     ),
 ];
 
