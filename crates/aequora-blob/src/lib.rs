@@ -1,9 +1,10 @@
 //! Content-addressed blob metadata kept outside normal synchronization operation batches.
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
@@ -105,6 +106,12 @@ pub enum BlobError {
     /// Store-specific typed failure.
     #[error("blob storage failed: {0}")]
     Storage(String),
+    /// A streamed source produced more chunks than its explicit manifest bound.
+    #[error("blob stream exceeds configured chunk count")]
+    ChunkLimit,
+    /// A non-final source chunk was short or an empty chunk was supplied.
+    #[error("blob source chunk layout is invalid")]
+    InvalidChunkLayout,
 }
 
 /// Separate content-addressed blob transfer capability.
@@ -114,10 +121,173 @@ pub trait BlobStore: Send + Sync {
     async fn missing(&self, digests: &[BlobDigest]) -> Result<Vec<BlobDigest>, BlobError>;
     /// Stores one verified chunk idempotently.
     async fn put_chunk(&self, digest: BlobDigest, bytes: Vec<u8>) -> Result<(), BlobError>;
+    /// Stores immutable shared bytes. Adapters should override this to retain the buffer without a
+    /// copy; the compatibility default delegates to the original owned-vector API.
+    async fn put_chunk_bytes(&self, digest: BlobDigest, bytes: Bytes) -> Result<(), BlobError> {
+        self.put_chunk(digest, bytes.to_vec()).await
+    }
     /// Verifies the ordered chunks and publishes the complete blob atomically.
     async fn commit(&self, manifest: &BlobManifest) -> Result<(), BlobError>;
     /// Reads a published complete blob. Uncommitted chunks are never visible here.
     async fn get(&self, blob: BlobRef) -> Result<Option<Vec<u8>>, BlobError>;
+}
+
+/// Asynchronous bounded source used by blob uploads. Each returned item is one complete chunk.
+#[async_trait]
+pub trait BlobUploadSource: Send {
+    async fn next_chunk(&mut self) -> Result<Option<Bytes>, BlobError>;
+}
+
+/// A store that can read one immutable chunk of a committed blob without materializing the blob.
+#[async_trait]
+pub trait StreamingBlobStore: BlobStore {
+    async fn get_committed_chunk(&self, digest: BlobDigest) -> Result<Option<Bytes>, BlobError>;
+}
+
+/// Consumer for one verified download chunk at a time.
+#[async_trait]
+pub trait BlobDownloadSink: Send {
+    async fn write_chunk(&mut self, ordinal: u32, bytes: Bytes) -> Result<(), BlobError>;
+}
+
+/// Reads, hashes, and uploads one bounded chunk at a time, then atomically publishes the manifest.
+/// The complete blob never exists in this function's memory.
+///
+/// # Errors
+///
+/// Returns a typed bound, layout, source, storage, or commit failure.
+pub async fn upload_stream<S, R>(
+    store: &S,
+    source: &mut R,
+    chunk_size: u32,
+    max_blob_bytes: u64,
+    max_chunks: usize,
+) -> Result<BlobManifest, BlobError>
+where
+    S: BlobStore + ?Sized,
+    R: BlobUploadSource + ?Sized,
+{
+    let chunk_size = usize::try_from(chunk_size).map_err(|_| BlobError::InvalidChunkSize)?;
+    if chunk_size == 0 || max_blob_bytes == 0 || max_chunks == 0 {
+        return Err(BlobError::InvalidChunkSize);
+    }
+    let mut pending: Option<Bytes> = None;
+    let mut chunks = Vec::with_capacity(max_chunks.min(1_024));
+    let mut complete = blake3::Hasher::new();
+    let mut total = 0_u64;
+    while let Some(next) = source.next_chunk().await? {
+        if next.is_empty() || next.len() > chunk_size {
+            return Err(BlobError::InvalidChunkLayout);
+        }
+        if chunks.len().saturating_add(usize::from(pending.is_some())) == max_chunks {
+            return Err(BlobError::ChunkLimit);
+        }
+        if let Some(previous) = pending.replace(next) {
+            if previous.len() != chunk_size {
+                return Err(BlobError::InvalidChunkLayout);
+            }
+            upload_one_chunk(store, previous, &mut chunks, &mut complete, &mut total).await?;
+            if total > max_blob_bytes {
+                return Err(BlobError::LimitExceeded);
+            }
+        }
+    }
+    if let Some(last) = pending {
+        upload_one_chunk(store, last, &mut chunks, &mut complete, &mut total).await?;
+    }
+    if total > max_blob_bytes || chunks.len() > max_chunks {
+        return Err(BlobError::LimitExceeded);
+    }
+    let manifest = BlobManifest {
+        blob: BlobRef {
+            digest: BlobDigest(*complete.finalize().as_bytes()),
+            length: total,
+        },
+        chunk_size: u32::try_from(chunk_size).map_err(|_| BlobError::InvalidChunkSize)?,
+        chunks,
+    };
+    store.commit(&manifest).await?;
+    Ok(manifest)
+}
+
+async fn upload_one_chunk<S: BlobStore + ?Sized>(
+    store: &S,
+    bytes: Bytes,
+    chunks: &mut Vec<BlobDigest>,
+    complete: &mut blake3::Hasher,
+    total: &mut u64,
+) -> Result<(), BlobError> {
+    let digest = BlobDigest::of(&bytes);
+    complete.update(&bytes);
+    *total = total
+        .checked_add(u64::try_from(bytes.len()).map_err(|_| BlobError::LimitExceeded)?)
+        .ok_or(BlobError::LimitExceeded)?;
+    store.put_chunk_bytes(digest, bytes).await?;
+    chunks.push(digest);
+    Ok(())
+}
+
+/// Downloads and verifies a committed blob one chunk at a time before handing each chunk to the
+/// sink. The full content is never retained by the orchestration layer.
+///
+/// # Errors
+///
+/// Returns a typed manifest, storage, digest, or sink failure.
+pub async fn download_stream<S, W>(
+    store: &S,
+    manifest: &BlobManifest,
+    max_chunk_bytes: usize,
+    max_chunks: usize,
+    sink: &mut W,
+) -> Result<(), BlobError>
+where
+    S: StreamingBlobStore + ?Sized,
+    W: BlobDownloadSink + ?Sized,
+{
+    let chunk_size =
+        usize::try_from(manifest.chunk_size).map_err(|_| BlobError::InvalidManifest)?;
+    if chunk_size == 0 || chunk_size > max_chunk_bytes || manifest.chunks.len() > max_chunks {
+        return Err(BlobError::LimitExceeded);
+    }
+    let expected_chunks = if manifest.blob.length == 0 {
+        0
+    } else {
+        usize::try_from(manifest.blob.length)
+            .map_err(|_| BlobError::LimitExceeded)?
+            .div_ceil(chunk_size)
+    };
+    if manifest.chunks.len() != expected_chunks {
+        return Err(BlobError::InvalidManifest);
+    }
+    let mut complete = blake3::Hasher::new();
+    let mut total = 0_u64;
+    for (index, digest) in manifest.chunks.iter().copied().enumerate() {
+        let bytes = store
+            .get_committed_chunk(digest)
+            .await?
+            .ok_or(BlobError::MissingChunk)?;
+        if bytes.is_empty() || bytes.len() > chunk_size || !digest.verifies(&bytes) {
+            return Err(BlobError::DigestMismatch);
+        }
+        if index + 1 != expected_chunks && bytes.len() != chunk_size {
+            return Err(BlobError::InvalidChunkLayout);
+        }
+        complete.update(&bytes);
+        total = total
+            .checked_add(u64::try_from(bytes.len()).map_err(|_| BlobError::LimitExceeded)?)
+            .ok_or(BlobError::LimitExceeded)?;
+        sink.write_chunk(
+            u32::try_from(index).map_err(|_| BlobError::ChunkLimit)?,
+            bytes,
+        )
+        .await?;
+    }
+    if total != manifest.blob.length
+        || BlobDigest(*complete.finalize().as_bytes()) != manifest.blob.digest
+    {
+        return Err(BlobError::DigestMismatch);
+    }
+    Ok(())
 }
 
 /// Bounded in-memory reference implementation of the separate blob capability.
@@ -134,7 +304,8 @@ pub struct InMemoryBlobStore {
 
 #[derive(Debug, Default)]
 struct BlobState {
-    chunks: HashMap<BlobDigest, Vec<u8>>,
+    chunks: HashMap<BlobDigest, Bytes>,
+    published_chunks: HashSet<BlobDigest>,
     blobs: HashMap<BlobDigest, Vec<u8>>,
 }
 
@@ -178,6 +349,10 @@ impl BlobStore for InMemoryBlobStore {
     }
 
     async fn put_chunk(&self, digest: BlobDigest, bytes: Vec<u8>) -> Result<(), BlobError> {
+        self.put_chunk_bytes(digest, Bytes::from(bytes)).await
+    }
+
+    async fn put_chunk_bytes(&self, digest: BlobDigest, bytes: Bytes) -> Result<(), BlobError> {
         if bytes.len() > self.max_chunk_bytes {
             return Err(BlobError::LimitExceeded);
         }
@@ -231,6 +406,9 @@ impl BlobStore for InMemoryBlobStore {
         if !manifest.blob.verifies(&complete) {
             return Err(BlobError::DigestMismatch);
         }
+        state
+            .published_chunks
+            .extend(manifest.chunks.iter().copied());
         state.blobs.insert(manifest.blob.digest, complete);
         Ok(())
     }
@@ -242,6 +420,17 @@ impl BlobStore for InMemoryBlobStore {
             .get(&blob.digest)
             .filter(|bytes| blob.verifies(bytes))
             .cloned())
+    }
+}
+
+#[async_trait]
+impl StreamingBlobStore for InMemoryBlobStore {
+    async fn get_committed_chunk(&self, digest: BlobDigest) -> Result<Option<Bytes>, BlobError> {
+        let state = self.lock()?;
+        if !state.published_chunks.contains(&digest) {
+            return Ok(None);
+        }
+        Ok(state.chunks.get(&digest).cloned())
     }
 }
 
@@ -261,6 +450,34 @@ pub fn verify_chunk(digest: BlobDigest, bytes: &[u8]) -> Result<(), BlobError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+
+    struct ChunkSource {
+        chunks: VecDeque<Bytes>,
+    }
+
+    #[async_trait]
+    impl BlobUploadSource for ChunkSource {
+        async fn next_chunk(&mut self) -> Result<Option<Bytes>, BlobError> {
+            Ok(self.chunks.pop_front())
+        }
+    }
+
+    #[derive(Default)]
+    struct CollectSink {
+        chunks: Vec<Bytes>,
+    }
+
+    #[async_trait]
+    impl BlobDownloadSink for CollectSink {
+        async fn write_chunk(&mut self, ordinal: u32, bytes: Bytes) -> Result<(), BlobError> {
+            if usize::try_from(ordinal).map_err(|_| BlobError::ChunkLimit)? != self.chunks.len() {
+                return Err(BlobError::InvalidChunkLayout);
+            }
+            self.chunks.push(bytes);
+            Ok(())
+        }
+    }
 
     #[test]
     fn manifests_reference_chunks_and_complete_content() {
@@ -351,6 +568,40 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("{error}")),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_and_download_streams_retain_only_bounded_chunks() {
+        let store = InMemoryBlobStore::new(4, 1_024).unwrap_or_else(|error| panic!("{error}"));
+        let mut source = ChunkSource {
+            chunks: VecDeque::from([
+                Bytes::from_static(b"abcd"),
+                Bytes::from_static(b"efgh"),
+                Bytes::from_static(b"ij"),
+            ]),
+        };
+        let manifest = upload_stream(&store, &mut source, 4, 1_024, 8)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(manifest.blob.length, 10);
+        let mut sink = CollectSink::default();
+        download_stream(&store, &manifest, 4, 8, &mut sink)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(sink.chunks.len(), 3);
+        assert_eq!(sink.chunks.concat(), b"abcdefghij");
+    }
+
+    #[tokio::test]
+    async fn short_non_final_stream_chunk_is_rejected() {
+        let store = InMemoryBlobStore::new(4, 1_024).unwrap_or_else(|error| panic!("{error}"));
+        let mut source = ChunkSource {
+            chunks: VecDeque::from([Bytes::from_static(b"ab"), Bytes::from_static(b"cdef")]),
+        };
+        assert_eq!(
+            upload_stream(&store, &mut source, 4, 1_024, 8).await,
+            Err(BlobError::InvalidChunkLayout)
         );
     }
 }
