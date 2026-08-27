@@ -1,6 +1,8 @@
 //! Thin Axum boundary for framed Postcard exchanges.
 
-use aequora_codec::{CodecError, Compression, DecodeLimits, EncodeOptions, MessageKind};
+use aequora_codec::{
+    CodecError, Compression, DecodeLimits, EncodeOptions, HEADER_LEN, MessageKind, inspect_header,
+};
 use aequora_executor::AuthContext;
 use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, Capability, SyncRequest, SyncResponse};
@@ -10,7 +12,7 @@ use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode, TenantI
 use async_trait::async_trait;
 use axum::{
     Extension, Router,
-    body::{Bytes, to_bytes},
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
@@ -20,7 +22,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use http_body_util::LengthLimitError;
+use bytes::BytesMut;
+use http_body_util::BodyExt as _;
 use std::{
     collections::HashMap,
     future::Future,
@@ -595,21 +598,16 @@ impl FromRequest<AppState> for SyncBody {
         let (parts, body) = request.into_parts();
         let bytes = match timeout(
             state.config.body_read_timeout,
-            to_bytes(body, state.config.max_body_bytes),
+            read_bounded_body(body, state.config.max_body_bytes),
         )
         .await
         {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(error)) => {
-                let too_large = match std::error::Error::source(&error) {
-                    Some(source) => source.is::<LengthLimitError>(),
-                    None => false,
-                };
-                if too_large {
+                if matches!(error, HttpError::BodyTooLarge) {
                     state.observer.record(MetricEvent::ServerBodyTooLarge);
-                    return Err(HttpError::BodyTooLarge);
                 }
-                return Err(HttpError::BadRequest("sync request body could not be read"));
+                return Err(error);
             }
             Err(_) => {
                 state.observer.record(MetricEvent::ServerBodyReadTimedOut);
@@ -623,6 +621,47 @@ impl FromRequest<AppState> for SyncBody {
             bytes,
         })
     }
+}
+
+async fn read_bounded_body(mut body: Body, max_body_bytes: usize) -> Result<Bytes, HttpError> {
+    if max_body_bytes < HEADER_LEN {
+        return Err(HttpError::BodyTooLarge);
+    }
+    let mut buffer = BytesMut::with_capacity(HEADER_LEN);
+    let mut expected_total = None;
+    while let Some(frame) = body.frame().await {
+        let frame =
+            frame.map_err(|_| HttpError::BadRequest("sync request body could not be read"))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        if buffer.len().saturating_add(data.len()) > max_body_bytes {
+            return Err(HttpError::BodyTooLarge);
+        }
+        buffer.extend_from_slice(&data);
+        if expected_total.is_none() && buffer.len() >= HEADER_LEN {
+            let header = inspect_header(
+                &buffer[..HEADER_LEN],
+                max_body_bytes.saturating_sub(HEADER_LEN),
+            )
+            .map_err(|error| match error {
+                CodecError::PayloadTooLarge { .. } => HttpError::BodyTooLarge,
+                other => HttpError::Codec(other),
+            })?;
+            expected_total = Some(HEADER_LEN.saturating_add(header.payload_len));
+        }
+        if expected_total.is_some_and(|expected| buffer.len() > expected) {
+            return Err(HttpError::Codec(CodecError::Length));
+        }
+    }
+    if expected_total != Some(buffer.len()) {
+        return Err(HttpError::Codec(if buffer.len() < HEADER_LEN {
+            CodecError::Truncated
+        } else {
+            CodecError::Length
+        }));
+    }
+    Ok(buffer.freeze())
 }
 
 async fn exchange(
@@ -644,7 +683,7 @@ async fn exchange(
         &body,
         MessageKind::SyncRequest,
         DecodeLimits {
-            max_wire_bytes: state.config.max_body_bytes,
+            max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
     )?;
@@ -691,7 +730,7 @@ async fn bootstrap(
         &body,
         MessageKind::BootstrapRequest,
         DecodeLimits {
-            max_wire_bytes: state.config.max_body_bytes,
+            max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
     )?;
@@ -710,7 +749,7 @@ async fn bootstrap(
         state.observer.record(MetricEvent::ServerDeadlineExceeded);
         HttpError::DeadlineExceeded(state.config.retry_after_seconds)
     })??;
-    let bytes = aequora_codec::encode_with_options(
+    let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::BootstrapResponse,
         &response,
@@ -753,7 +792,7 @@ fn encode_response(
     observer: &dyn Observer,
     uploaded: usize,
 ) -> Result<Response, HttpError> {
-    let bytes = aequora_codec::encode_with_options(
+    let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::SyncResponse,
         response,
@@ -893,6 +932,30 @@ impl IntoResponse for HttpError {
                 None,
                 OperationalErrorCode::Protocol,
             ),
+            Self::Server(ServerError::Admission(rejection)) => {
+                let status = match rejection {
+                    aequora_admission::AdmissionRejection::TenantBusy { .. }
+                    | aequora_admission::AdmissionRejection::RateLimited { .. } => {
+                        StatusCode::TOO_MANY_REQUESTS
+                    }
+                    aequora_admission::AdmissionRejection::RequestTooLarge => {
+                        StatusCode::PAYLOAD_TOO_LARGE
+                    }
+                    aequora_admission::AdmissionRejection::TooManyDependencies => {
+                        StatusCode::BAD_REQUEST
+                    }
+                    _ => StatusCode::SERVICE_UNAVAILABLE,
+                };
+                let code = if rejection.retryable() {
+                    OperationalErrorCode::Overloaded
+                } else {
+                    OperationalErrorCode::PayloadLimit
+                };
+                let retry_after = rejection
+                    .retry_after_ms()
+                    .map(|milliseconds| milliseconds.div_ceil(1_000).max(1));
+                (status, rejection.to_string(), retry_after, code)
+            }
             Self::Server(ServerError::Validation(error)) => (
                 StatusCode::BAD_REQUEST,
                 error.to_string(),
@@ -908,6 +971,12 @@ impl IntoResponse for HttpError {
             Self::Server(ServerError::ResponseLimit) => (
                 StatusCode::BAD_REQUEST,
                 "client response limit is too small".to_owned(),
+                None,
+                OperationalErrorCode::PayloadLimit,
+            ),
+            Self::Server(ServerError::MemoryBudget { .. }) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "typed sync request exceeds the configured memory budget".to_owned(),
                 None,
                 OperationalErrorCode::PayloadLimit,
             ),

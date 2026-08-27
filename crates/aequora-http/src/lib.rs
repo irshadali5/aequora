@@ -6,9 +6,9 @@ use aequora_protocol::{BootstrapRequest, BootstrapResponse, SyncRequest, SyncRes
 use aequora_transport::{SyncTransport, TransportError};
 use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode};
 use async_trait::async_trait;
-use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE};
+use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE, header::RETRY_AFTER};
 use reqwest::{Client, Response, StatusCode, Url};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
 /// Primary synchronization media type.
@@ -156,8 +156,9 @@ impl HttpTransport {
         Request: serde::Serialize + Sync,
         Reply: serde::de::DeserializeOwned + WireProtocol,
     {
-        let frame = aequora_codec::encode_with_options(protocol, request_kind, request, options)
-            .map_err(permanent)?;
+        let frame =
+            aequora_codec::encode_bytes_with_options(protocol, request_kind, request, options)
+                .map_err(permanent)?;
         let uploaded = usize_to_u64(frame.len());
         let mut headers = self.headers.headers()?;
         headers.insert(
@@ -179,8 +180,14 @@ impl HttpTransport {
             .get(OPERATIONAL_ERROR_CODE_HEADER)
             .and_then(|value| value.to_str().ok())
             .and_then(OperationalErrorCode::parse);
+        let retry_after = response
+            .headers()
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs);
         if !status.is_success() {
-            return Err(status_error(status, operational_code));
+            return Err(status_error(status, operational_code, retry_after));
         }
         let content_type = response
             .headers()
@@ -305,6 +312,7 @@ async fn read_bounded(mut response: Response, maximum: usize) -> Result<Vec<u8>,
 fn status_error(
     status: StatusCode,
     operational_code: Option<OperationalErrorCode>,
+    retry_after: Option<Duration>,
 ) -> TransportError {
     let message = format!("HTTP synchronization endpoint returned status {status}");
     let error = if status == StatusCode::REQUEST_TIMEOUT
@@ -315,8 +323,12 @@ fn status_error(
     } else {
         TransportError::permanent(message)
     };
-    match operational_code {
+    let error = match operational_code {
         Some(code) => error.with_code(code),
+        None => error,
+    };
+    match retry_after {
+        Some(delay) => error.with_retry_after(delay),
         None => error,
     }
 }
@@ -357,21 +369,31 @@ mod tests {
             StatusCode::GATEWAY_TIMEOUT,
         ] {
             assert_eq!(
-                status_error(status, None).kind,
+                status_error(status, None, None).kind,
                 TransportErrorKind::Transient
             );
         }
         assert_eq!(
-            status_error(StatusCode::PAYLOAD_TOO_LARGE, None).kind,
+            status_error(StatusCode::PAYLOAD_TOO_LARGE, None, None).kind,
             TransportErrorKind::Permanent
         );
         assert_eq!(
             status_error(
                 StatusCode::SERVICE_UNAVAILABLE,
-                Some(OperationalErrorCode::Maintenance)
+                Some(OperationalErrorCode::Maintenance),
+                Some(Duration::from_secs(7)),
             )
             .code,
             Some(OperationalErrorCode::Maintenance)
+        );
+        assert_eq!(
+            status_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some(OperationalErrorCode::Overloaded),
+                Some(Duration::from_secs(7)),
+            )
+            .retry_after,
+            Some(Duration::from_secs(7))
         );
     }
 

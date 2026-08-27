@@ -330,6 +330,7 @@ impl QuicServer {
                 let reply = encode_wire_error(
                     false,
                     Some(OperationalErrorCode::Protocol),
+                    None,
                     "unsupported QUIC request message",
                 )
                 .map_err(QuicServerError::new)?;
@@ -443,14 +444,20 @@ fn decode_reply<T: DeserializeOwned + WireProtocol>(
             },
         )
         .map_err(permanent)?;
-        let (code, message) = split_operational_code(error.message);
+        let (code, retry_after_ms, message) = split_operational_code(error.message);
         let transport_error = if error.transient {
             TransportError::transient(message)
         } else {
             TransportError::permanent(message)
         };
-        return Err(match code {
+        let transport_error = match code {
             Some(code) => transport_error.with_code(code),
+            None => transport_error,
+        };
+        return Err(match retry_after_ms {
+            Some(delay) => {
+                transport_error.with_retry_after(std::time::Duration::from_millis(delay))
+            }
             None => transport_error,
         });
     }
@@ -488,8 +495,16 @@ fn encode_server_error(error: &ServerError) -> Result<Vec<u8>, aequora_codec::Co
     let transient = matches!(
         error,
         ServerError::Store(store) if store.kind == StoreErrorKind::Transient
-    ) || matches!(error, ServerError::Maintenance { .. });
+    ) || matches!(error, ServerError::Maintenance { .. })
+        || matches!(error, ServerError::Admission(rejection) if rejection.retryable());
     let code = match error {
+        ServerError::Admission(rejection) => {
+            if rejection.retryable() {
+                OperationalErrorCode::Overloaded
+            } else {
+                OperationalErrorCode::PayloadLimit
+            }
+        }
         ServerError::Maintenance { .. } => OperationalErrorCode::Maintenance,
         ServerError::Store(_) => OperationalErrorCode::Storage,
         ServerError::IdentityMismatch | ServerError::ScopeAuthorization(_) => {
@@ -500,22 +515,36 @@ fn encode_server_error(error: &ServerError) -> Result<Vec<u8>, aequora_codec::Co
             OperationalErrorCode::Protocol
         }
         ServerError::Dependency(_) => OperationalErrorCode::Validation,
-        ServerError::ResponseLimit | ServerError::SnapshotNoProgress => {
-            OperationalErrorCode::PayloadLimit
-        }
+        ServerError::ResponseLimit
+        | ServerError::SnapshotNoProgress
+        | ServerError::MemoryBudget { .. } => OperationalErrorCode::PayloadLimit,
         ServerError::VersionOverflow | ServerError::Compute(_) | ServerError::Merge(_) => {
             OperationalErrorCode::Storage
         }
     };
-    encode_wire_error(transient, Some(code), &error.to_string())
+    let retry_after_ms = match error {
+        ServerError::Admission(rejection) => rejection.retry_after_ms(),
+        ServerError::Maintenance {
+            retry_after_seconds,
+            ..
+        } => Some(retry_after_seconds.saturating_mul(1_000)),
+        _ => None,
+    };
+    encode_wire_error(transient, Some(code), retry_after_ms, &error.to_string())
 }
 
 fn encode_wire_error(
     transient: bool,
     code: Option<OperationalErrorCode>,
+    retry_after_ms: Option<u64>,
     message: &str,
 ) -> Result<Vec<u8>, aequora_codec::CodecError> {
-    let message = code.map_or_else(|| message.to_owned(), |code| format!("{code}: {message}"));
+    let retry_prefix =
+        retry_after_ms.map_or_else(String::new, |delay| format!("retry-after-ms={delay}; "));
+    let message = code.map_or_else(
+        || format!("{retry_prefix}{message}"),
+        |code| format!("{code}: {retry_prefix}{message}"),
+    );
     encode_with_options(
         ProtocolVersion::V1,
         MessageKind::TransportError,
@@ -524,13 +553,29 @@ fn encode_wire_error(
     )
 }
 
-fn split_operational_code(message: String) -> (Option<OperationalErrorCode>, String) {
+fn split_operational_code(message: String) -> (Option<OperationalErrorCode>, Option<u64>, String) {
     let Some((candidate, detail)) = message.split_once(": ") else {
-        return (None, message);
+        return split_retry_after(None, message);
     };
     match OperationalErrorCode::parse(candidate) {
-        Some(code) => (Some(code), detail.to_owned()),
-        None => (None, message),
+        Some(code) => split_retry_after(Some(code), detail.to_owned()),
+        None => split_retry_after(None, message),
+    }
+}
+
+fn split_retry_after(
+    code: Option<OperationalErrorCode>,
+    message: String,
+) -> (Option<OperationalErrorCode>, Option<u64>, String) {
+    let Some(rest) = message.strip_prefix("retry-after-ms=") else {
+        return (code, None, message);
+    };
+    let Some((value, detail)) = rest.split_once("; ") else {
+        return (code, None, message);
+    };
+    match value.parse::<u64>() {
+        Ok(delay) => (code, Some(delay), detail.to_owned()),
+        Err(_) => (code, None, message),
     }
 }
 
@@ -647,6 +692,7 @@ mod tests {
         let frame = encode_wire_error(
             true,
             Some(OperationalErrorCode::Maintenance),
+            Some(7_000),
             "temporarily unavailable",
         )
         .unwrap_or_else(|error| panic!("{error}"));
@@ -657,8 +703,9 @@ mod tests {
             Err(TransportError {
                 kind: TransportErrorKind::Transient,
                 code: Some(OperationalErrorCode::Maintenance),
+                retry_after: Some(delay),
                 ..
-            })
+            }) if delay == std::time::Duration::from_secs(7)
         ));
 
         let response = SyncResponse {
