@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/aequora",
     "crates/aequora-axum",
+    "crates/aequora-authority",
     "crates/aequora-blob",
     "crates/aequora-bootstrap",
     "crates/aequora-client",
@@ -29,6 +30,7 @@ members = [
     "crates/aequora-protocol",
     "crates/aequora-profile",
     "crates/aequora-replay",
+    "crates/aequora-region",
     "crates/aequora-audit",
     "crates/aequora-governance",
     "crates/aequora-queue",

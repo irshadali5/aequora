@@ -57,6 +57,10 @@ jobs:
         run: |
           cargo +stable test -p aequora-crypto --locked
           cargo +stable test -p aequora-testkit --test crypto_contracts --locked
+      - name: Enforce epoch-safe regional reads and authority-only writes
+        run: |
+          cargo +stable test -p aequora-region --locked
+          cargo +stable test -p aequora-testkit --test regional_contracts --locked
       - name: Strict Clippy
         run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Workspace tests
@@ -145,4 +149,4 @@ jobs:
           PROPTEST_CASES: "1024"
         run: |
           cargo +stable run -p aequora-cli --locked -- verify model
-          cargo +stable test -p aequora-model -p aequora-replay -p aequora-audit -p aequora-governance -p aequora-crypto -p aequora-client -p aequora-testkit --locked
+          cargo +stable test -p aequora-authority -p aequora-region -p aequora-model -p aequora-replay -p aequora-audit -p aequora-governance -p aequora-crypto -p aequora-client -p aequora-testkit --locked

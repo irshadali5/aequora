@@ -128,6 +128,27 @@ governance-safe key-reference/destruction checks, and fail-closed verification. 
 platform keystore, application authorization, and production custody/recovery remain adapter and
 deployment responsibilities rather than hidden core defaults.
 
+Part 16 is implemented at the reusable repository boundary. `aequora-authority` supplies global
+authority identity and epochs, persistent write fencing, explicit promotion classes, conservative
+continuity evidence, fork checkpoints and quarantine, client epoch transition and ambiguous
+operation recovery policy, rollback protection, artifact bindings, recovery verification, and
+read-only operator diagnostics. Infrastructure still owns physical database fencing, replication,
+backup/restore execution, control-plane authorization, and production disaster-recovery drills.
+
+Part 17 is complete at the reusable repository boundary with one epoch-bound authoritative writer
+and regional reads selected only from verified apply watermarks. The stable core exposes deployment-defined
+region identity, replica and projection watermarks, endpoint consistency/fallback policy,
+session/read-your-writes tracking, bounded deterministic routing, replica-side defense-in-depth,
+epoch-aware cache and artifact metadata, residency placement checks, tenant authority-directory
+contracts, regional governance-copy verification, and payload-free diagnostics. Sync exchange and
+all domain commits remain authority-only; regional snapshot/blob delivery may relocate immutable
+bytes but cannot change signed/hashed authority semantics. Physical PostgreSQL/WAL mapping,
+regional projection databases, global load balancers, CDN/object storage, KMS access, health
+collection, cross-region brokers, and production SLO/chaos acceptance remain replaceable adapter
+and deployment responsibilities rather than core assumptions. Evidence and deployment boundaries
+are mapped in
+[`docs/multi-region-read-single-writer-global-completion.md`](docs/multi-region-read-single-writer-global-completion.md).
+
 ---
 
 # 0. Non-Negotiable Project Direction

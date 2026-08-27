@@ -17,6 +17,7 @@ name = "aequora"
 version = "0.1.0"
 dependencies = [
  "aequora-audit",
+ "aequora-authority",
  "aequora-axum",
  "aequora-blob",
  "aequora-bootstrap",
@@ -44,6 +45,7 @@ dependencies = [
  "aequora-protocol",
  "aequora-queue",
  "aequora-quic",
+ "aequora-region",
  "aequora-replay",
  "aequora-routing",
  "aequora-scheduler",
@@ -75,6 +77,17 @@ dependencies = [
  "blake3",
  "postcard",
  "proptest",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "aequora-authority"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
  "serde",
  "thiserror",
  "uuid",
@@ -134,11 +147,13 @@ name = "aequora-cli"
 version = "0.1.0"
 dependencies = [
  "aequora",
+ "aequora-authority",
  "aequora-bootstrap",
  "aequora-integrity",
  "aequora-migration",
  "aequora-model",
  "aequora-queue",
+ "aequora-region",
  "aequora-schema",
  "aequora-store",
  "aequora-store-postgres",
@@ -160,6 +175,7 @@ dependencies = [
  "aequora-observability",
  "aequora-protocol",
  "aequora-queue",
+ "aequora-region",
  "aequora-scheduler",
  "aequora-scope",
  "aequora-store",
@@ -501,6 +517,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-region"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "aequora-replay"
 version = "0.1.0"
 dependencies = [
@@ -559,6 +585,7 @@ dependencies = [
 name = "aequora-server"
 version = "0.1.0"
 dependencies = [
+ "aequora-authority",
  "aequora-clock",
  "aequora-codec",
  "aequora-compute",
@@ -566,6 +593,7 @@ dependencies = [
  "aequora-executor",
  "aequora-observability",
  "aequora-protocol",
+ "aequora-region",
  "aequora-store",
  "aequora-types",
  "aequora-validator",
@@ -579,6 +607,7 @@ dependencies = [
 name = "aequora-store"
 version = "0.1.0"
 dependencies = [
+ "aequora-authority",
  "aequora-coordination",
  "aequora-executor",
  "aequora-integrity",
@@ -595,6 +624,7 @@ dependencies = [
 name = "aequora-store-postgres"
 version = "0.1.0"
 dependencies = [
+ "aequora-authority",
  "aequora-executor",
  "aequora-integrity",
  "aequora-live",
@@ -638,6 +668,7 @@ name = "aequora-testkit"
 version = "0.1.0"
 dependencies = [
  "aequora-audit",
+ "aequora-authority",
  "aequora-bootstrap",
  "aequora-client",
  "aequora-clock",
@@ -649,6 +680,7 @@ dependencies = [
  "aequora-executor",
  "aequora-governance",
  "aequora-integrity",
+ "aequora-invariants",
  "aequora-journal",
  "aequora-live",
  "aequora-migration",
@@ -656,6 +688,7 @@ dependencies = [
  "aequora-profile",
  "aequora-protocol",
  "aequora-queue",
+ "aequora-region",
  "aequora-replay",
  "aequora-scheduler",
  "aequora-schema",
