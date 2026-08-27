@@ -16,6 +16,7 @@ dependencies = [
 name = "aequora"
 version = "0.1.0"
 dependencies = [
+ "aequora-admission",
  "aequora-audit",
  "aequora-authority",
  "aequora-axum",
@@ -41,6 +42,7 @@ dependencies = [
  "aequora-migration",
  "aequora-observability",
  "aequora-partition",
+ "aequora-performance",
  "aequora-profile",
  "aequora-protocol",
  "aequora-queue",
@@ -67,6 +69,17 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "aequora-admission"
+version = "0.1.0"
+dependencies = [
+ "aequora-scheduler",
+ "aequora-types",
+ "async-trait",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -97,6 +110,7 @@ dependencies = [
 name = "aequora-axum"
 version = "0.1.0"
 dependencies = [
+ "aequora-admission",
  "aequora-codec",
  "aequora-executor",
  "aequora-observability",
@@ -120,6 +134,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "blake3",
+ "bytes",
  "serde",
  "thiserror",
  "tokio",
@@ -199,6 +214,7 @@ version = "0.1.0"
 dependencies = [
  "aequora-types",
  "blake3",
+ "bytes",
  "postcard",
  "ron",
  "serde",
@@ -220,12 +236,14 @@ dependencies = [
 name = "aequora-config"
 version = "0.1.0"
 dependencies = [
+ "aequora-admission",
  "aequora-axum",
  "aequora-client",
  "aequora-compute",
  "aequora-coordination",
  "aequora-crypto",
  "aequora-http",
+ "aequora-performance",
  "aequora-protocol",
  "aequora-quic",
  "aequora-scheduler",
@@ -299,6 +317,7 @@ dependencies = [
  "aequora-coordination",
  "aequora-crypto",
  "aequora-governance",
+ "aequora-performance",
  "aequora-profile",
  "aequora-replay",
  "aequora-scheduler",
@@ -459,6 +478,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-performance"
+version = "0.1.0"
+dependencies = [
+ "aequora-invariants",
+ "blake3",
+ "postcard",
+ "ron",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-profile"
 version = "0.1.0"
 dependencies = [
@@ -585,6 +616,7 @@ dependencies = [
 name = "aequora-server"
 version = "0.1.0"
 dependencies = [
+ "aequora-admission",
  "aequora-authority",
  "aequora-clock",
  "aequora-codec",
@@ -592,8 +624,10 @@ dependencies = [
  "aequora-conflict",
  "aequora-executor",
  "aequora-observability",
+ "aequora-performance",
  "aequora-protocol",
  "aequora-region",
+ "aequora-scheduler",
  "aequora-store",
  "aequora-types",
  "aequora-validator",
@@ -601,6 +635,7 @@ dependencies = [
  "blake3",
  "rayon",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

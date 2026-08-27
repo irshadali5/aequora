@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/aequora",
+    "crates/aequora-admission",
     "crates/aequora-axum",
     "crates/aequora-authority",
     "crates/aequora-blob",
@@ -27,6 +28,7 @@ members = [
     "crates/aequora-model",
     "crates/aequora-observability",
     "crates/aequora-partition",
+    "crates/aequora-performance",
     "crates/aequora-protocol",
     "crates/aequora-profile",
     "crates/aequora-replay",
@@ -111,3 +113,8 @@ expect_used = { level = "deny", priority = 1 }
 lto = "thin"
 codegen-units = 16
 strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
