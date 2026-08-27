@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use thiserror::Error;
 
 /// Version of the executable model and its replay trace schema.
-pub const MODEL_VERSION: u32 = 3;
+pub const MODEL_VERSION: u32 = 4;
 
 /// Bounded model client identity.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -99,6 +99,10 @@ pub struct ClientModel {
     pub optimistic_state: BTreeMap<ModelEntityId, CanonicalEntity>,
     /// Durable pending intent in creation order.
     pub outbox: VecDeque<ModelOperation>,
+    /// Operations that crossed the network without a terminal response.
+    pub possibly_sent: BTreeSet<ModelOperationId>,
+    /// Old-epoch operations frozen until explicit recovery policy resolves them.
+    pub ambiguous_old_epoch: BTreeSet<ModelOperationId>,
     /// Authority epoch attached to the cursor.
     pub cursor_epoch: u64,
     /// Highest contiguously reconciled authority sequence.
@@ -117,6 +121,8 @@ impl Default for ClientModel {
             authoritative_state: BTreeMap::new(),
             optimistic_state: BTreeMap::new(),
             outbox: VecDeque::new(),
+            possibly_sent: BTreeSet::new(),
+            ambiguous_old_epoch: BTreeSet::new(),
             cursor_epoch: 1,
             cursor: 0,
             applied_events: BTreeSet::new(),
@@ -141,6 +147,18 @@ pub struct ServerModel {
     pub next_sequence: u64,
     /// Current fenced authority timeline.
     pub authority_epoch: u64,
+    /// Instance that currently owns the application write fence.
+    pub authority_instance: u8,
+    /// Monotonic promotion fence token.
+    pub fence_token: u64,
+    /// Former instances fenced by promotion or demotion.
+    pub fenced_instances: BTreeSet<u8>,
+    /// Whether recovery verification currently permits writes.
+    pub writes_enabled: bool,
+    /// Fork detection quarantines writes rather than merging histories.
+    pub fork_quarantined: bool,
+    /// Evidence retained for the latest promotion epoch decision.
+    pub last_transition: Option<ModelAuthorityTransition>,
     /// Whether volatile server execution is stopped.
     pub crashed: bool,
 }
@@ -154,6 +172,12 @@ impl Default for ServerModel {
             journal: Vec::new(),
             next_sequence: 1,
             authority_epoch: 1,
+            authority_instance: 1,
+            fence_token: 1,
+            fenced_instances: BTreeSet::new(),
+            writes_enabled: true,
+            fork_quarantined: false,
+            last_transition: None,
             crashed: false,
         }
     }
@@ -170,6 +194,19 @@ pub struct ModelRequest {
     pub cursor: u64,
     /// Authority timeline claimed by the client.
     pub authority_epoch: u64,
+    /// Authority instance selected when the request was created.
+    pub authority_instance: u8,
+    /// Write fence observed by routing at send time.
+    pub fence_token: u64,
+}
+
+/// Minimal failover evidence retained by the executable model.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct ModelAuthorityTransition {
+    pub old_epoch: u64,
+    pub new_epoch: u64,
+    pub continuity_proven: bool,
+    pub timeline_changed: bool,
 }
 
 /// Response delayed in the intentionally unreliable abstract network.
@@ -266,6 +303,7 @@ impl Model {
         self.check_retry_preservation()?;
         self.check_reconciliation_idempotency()?;
         self.check_timeline_safety()?;
+        self.check_authority_failover()?;
         self.check_lineage()?;
         Ok(())
     }
@@ -362,6 +400,31 @@ impl Model {
                 self.network.connected = true;
                 Ok(())
             }
+            ModelAction::PromoteLossless { new_instance } => self.promote(new_instance, true, None),
+            ModelAction::PromoteWithDataLoss {
+                new_instance,
+                retain_through,
+            } => self.promote(new_instance, false, Some(retain_through)),
+            ModelAction::RebootstrapClient(client) => self.rebootstrap_client(client),
+            ModelAction::ResolveAmbiguous {
+                client,
+                operation,
+                safe_replay,
+            } => self.resolve_ambiguous(client, operation, safe_replay),
+            ModelAction::DetectFork { peer_root } => {
+                if peer_root != self.journal_root() {
+                    self.server.fork_quarantined = true;
+                    self.server.writes_enabled = false;
+                }
+                Ok(())
+            }
+            ModelAction::CompleteAuthorityRecovery => {
+                if self.server.fork_quarantined {
+                    return Err(ActionError::ForkQuarantined);
+                }
+                self.server.writes_enabled = true;
+                Ok(())
+            }
         }
     }
 
@@ -408,26 +471,38 @@ impl Model {
         if !self.network.connected {
             return Err(ActionError::NetworkDisconnected);
         }
-        let client = self.client(client_id)?;
-        if client.crashed || !client.online {
-            return Err(ActionError::ClientUnavailable(client_id));
-        }
-        let operation = if with_operation {
-            Some(
-                *client
+        let (operation, cursor, authority_epoch) = {
+            let client = self.client(client_id)?;
+            if client.crashed || !client.online {
+                return Err(ActionError::ClientUnavailable(client_id));
+            }
+            let operation = if with_operation {
+                let operation = *client
                     .outbox
                     .front()
-                    .ok_or(ActionError::EmptyOutbox(client_id))?,
-            )
-        } else {
-            None
+                    .ok_or(ActionError::EmptyOutbox(client_id))?;
+                if client.ambiguous_old_epoch.contains(&operation.id) {
+                    return Err(ActionError::AmbiguousOldEpoch(operation.id));
+                }
+                Some(operation)
+            } else {
+                None
+            };
+            (operation, client.cursor, client.cursor_epoch)
         };
         self.network.requests.push(ModelRequest {
             client: client_id,
             operation,
-            cursor: client.cursor,
-            authority_epoch: client.cursor_epoch,
+            cursor,
+            authority_epoch,
+            authority_instance: self.server.authority_instance,
+            fence_token: self.server.fence_token,
         });
+        if let Some(operation) = operation {
+            self.client_mut(client_id)?
+                .possibly_sent
+                .insert(operation.id);
+        }
         Ok(())
     }
 
@@ -443,6 +518,15 @@ impl Model {
             index,
             ActionError::MissingRequest(index),
         )?;
+        if request.operation.is_some() && !self.server.writes_enabled {
+            return Err(ActionError::AuthorityWritesBlocked);
+        }
+        if request.operation.is_some()
+            && (request.authority_instance != self.server.authority_instance
+                || request.fence_token != self.server.fence_token)
+        {
+            return Err(ActionError::StaleAuthorityFence);
+        }
         if request.authority_epoch != self.server.authority_epoch {
             return Err(ActionError::IncompatibleEpoch {
                 client: request.authority_epoch,
@@ -560,6 +644,8 @@ impl Model {
             client
                 .outbox
                 .retain(|operation| operation.id != operation_id);
+            client.possibly_sent.remove(&operation_id);
+            client.ambiguous_old_epoch.remove(&operation_id);
         }
         client.optimistic_state = client.authoritative_state.clone();
         for pending in &client.outbox {
@@ -577,6 +663,144 @@ impl Model {
             );
         }
         Ok(())
+    }
+
+    fn promote(
+        &mut self,
+        new_instance: u8,
+        continuity_proven: bool,
+        retain_through: Option<u64>,
+    ) -> Result<(), ActionError> {
+        if new_instance == self.server.authority_instance {
+            return Err(ActionError::InvalidPromotionInstance(new_instance));
+        }
+        let old_instance = self.server.authority_instance;
+        let old_epoch = self.server.authority_epoch;
+        self.server.fenced_instances.insert(old_instance);
+        self.server.authority_instance = new_instance;
+        self.server.fence_token = self
+            .server
+            .fence_token
+            .checked_add(1)
+            .ok_or(ActionError::FenceExhausted)?;
+        let timeline_changed = !continuity_proven;
+        if let Some(retain_through) = retain_through {
+            self.server
+                .journal
+                .retain(|event| event.sequence <= retain_through);
+            let retained_operations = self
+                .server
+                .journal
+                .iter()
+                .map(|event| event.operation_id)
+                .collect::<BTreeSet<_>>();
+            self.server
+                .applied_operations
+                .retain(|operation, _| retained_operations.contains(operation));
+            self.server
+                .operation_correlations
+                .retain(|operation, _| retained_operations.contains(operation));
+            self.server.state.clear();
+            for event in &self.server.journal {
+                self.server.state.insert(
+                    event.entity,
+                    CanonicalEntity {
+                        version: event.version,
+                        value: event.value,
+                        tombstone: event.tombstone,
+                    },
+                );
+            }
+            self.server.next_sequence = self
+                .server
+                .journal
+                .last()
+                .map_or(1, |event| event.sequence.saturating_add(1));
+        }
+        if timeline_changed {
+            self.server.authority_epoch = old_epoch
+                .checked_add(1)
+                .ok_or(ActionError::AuthorityEpochExhausted)?;
+            self.server.writes_enabled = false;
+        }
+        self.server.fork_quarantined = false;
+        self.server.last_transition = Some(ModelAuthorityTransition {
+            old_epoch,
+            new_epoch: self.server.authority_epoch,
+            continuity_proven,
+            timeline_changed,
+        });
+        Ok(())
+    }
+
+    fn rebootstrap_client(&mut self, client_id: ClientId) -> Result<(), ActionError> {
+        let authoritative_state = self.server.state.clone();
+        let cursor = self.server.journal.last().map_or(0, |event| event.sequence);
+        let applied_events = self
+            .server
+            .journal
+            .iter()
+            .map(|event| event.sequence)
+            .collect();
+        let epoch = self.server.authority_epoch;
+        let client = self.client_mut(client_id)?;
+        client.ambiguous_old_epoch = client
+            .possibly_sent
+            .iter()
+            .copied()
+            .filter(|operation| client.outbox.iter().any(|pending| pending.id == *operation))
+            .collect();
+        client.authoritative_state = authoritative_state.clone();
+        client.optimistic_state = authoritative_state;
+        client.cursor = cursor;
+        client.cursor_epoch = epoch;
+        client.applied_events = applied_events;
+        for pending in &client.outbox {
+            let version = client
+                .optimistic_state
+                .get(&pending.entity)
+                .map_or(1, |entity| entity.version.saturating_add(1));
+            client.optimistic_state.insert(
+                pending.entity,
+                CanonicalEntity {
+                    version,
+                    value: pending.value,
+                    tombstone: false,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn resolve_ambiguous(
+        &mut self,
+        client_id: ClientId,
+        operation_id: ModelOperationId,
+        safe_replay: bool,
+    ) -> Result<(), ActionError> {
+        let client = self.client_mut(client_id)?;
+        if !client.ambiguous_old_epoch.remove(&operation_id) {
+            return Err(ActionError::OperationNotAmbiguous(operation_id));
+        }
+        client.possibly_sent.remove(&operation_id);
+        if !safe_replay {
+            client
+                .outbox
+                .retain(|operation| operation.id != operation_id);
+        }
+        Ok(())
+    }
+
+    fn journal_root(&self) -> [u8; 32] {
+        let mut hash = blake3::Hasher::new();
+        for event in &self.server.journal {
+            hash.update(&event.sequence.to_le_bytes());
+            hash.update(&[event.operation_id.0, event.entity.0]);
+            hash.update(&event.version.to_le_bytes());
+            hash.update(&event.value.to_le_bytes());
+            hash.update(&[u8::from(event.tombstone)]);
+        }
+        *hash.finalize().as_bytes()
     }
 
     fn check_idempotent_authority(&self) -> Result<(), InvariantViolation> {
@@ -722,13 +946,66 @@ impl Model {
 
     fn check_timeline_safety(&self) -> Result<(), InvariantViolation> {
         for (&client_id, client) in &self.clients {
-            if client.cursor > 0 && client.cursor_epoch != self.server.authority_epoch {
+            if client.cursor_epoch > self.server.authority_epoch {
                 return Err(violation(
-                    InvariantId::TimelineSafety,
+                    InvariantId::AuthorityRollbackSafety,
                     format!(
-                        "client {client_id:?} cursor belongs to epoch {} but authority is {}",
+                        "client {client_id:?} has trusted epoch {} above authority {}",
                         client.cursor_epoch, self.server.authority_epoch
                     ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_authority_failover(&self) -> Result<(), InvariantViolation> {
+        if self
+            .server
+            .fenced_instances
+            .contains(&self.server.authority_instance)
+        {
+            return Err(violation(
+                InvariantId::AuthorityOldPrimaryFence,
+                "the active authority instance is also marked fenced".to_owned(),
+            ));
+        }
+        if self.server.fence_token == 0 {
+            return Err(violation(
+                InvariantId::AuthoritySingleWriter,
+                "the active authority has no valid fence token".to_owned(),
+            ));
+        }
+        if self.server.fork_quarantined && self.server.writes_enabled {
+            return Err(violation(
+                InvariantId::AuthorityNoAutomaticForkMerge,
+                "forked authority remained write-enabled".to_owned(),
+            ));
+        }
+        if let Some(transition) = self.server.last_transition {
+            if transition.continuity_proven && transition.old_epoch != transition.new_epoch {
+                return Err(violation(
+                    InvariantId::AuthorityLosslessEpochContinuity,
+                    "lossless promotion changed the authority epoch".to_owned(),
+                ));
+            }
+            if transition.timeline_changed && transition.old_epoch == transition.new_epoch {
+                return Err(violation(
+                    InvariantId::AuthorityDivergenceEpoch,
+                    "timeline-changing promotion reused the authority epoch".to_owned(),
+                ));
+            }
+        }
+        for (&client_id, client) in &self.clients {
+            if self.network.requests.iter().any(|request| {
+                request.client == client_id
+                    && request
+                        .operation
+                        .is_some_and(|operation| client.ambiguous_old_epoch.contains(&operation.id))
+            }) {
+                return Err(violation(
+                    InvariantId::AuthorityOperationRecoveryPolicy,
+                    format!("client {client_id:?} sent an unresolved old-epoch operation"),
                 ));
             }
         }
@@ -836,6 +1113,25 @@ pub enum ModelAction {
     DisconnectNetwork,
     /// Restore network sends and deliveries.
     ReconnectNetwork,
+    /// Promote a fully caught-up replacement while retaining the authority epoch.
+    PromoteLossless { new_instance: u8 },
+    /// Promote a possibly stale replacement, truncate lost history, and open a new epoch.
+    PromoteWithDataLoss {
+        new_instance: u8,
+        retain_through: u64,
+    },
+    /// Install a fresh snapshot for the current epoch while preserving pending intent.
+    RebootstrapClient(ClientId),
+    /// Resolve one ambiguous old-epoch operation by safe replay or explicit abandonment.
+    ResolveAmbiguous {
+        client: ClientId,
+        operation: ModelOperationId,
+        safe_replay: bool,
+    },
+    /// Compare a same-position peer root and quarantine on mismatch.
+    DetectFork { peer_root: [u8; 32] },
+    /// Record successful recovery verification and enable the promoted primary.
+    CompleteAuthorityRecovery,
 }
 
 /// Stable invariant failure produced after a transition.
@@ -913,6 +1209,30 @@ pub enum ActionError {
         /// Received sequence.
         actual: u64,
     },
+    /// An old-epoch possibly delivered operation has no explicit recovery decision.
+    #[error("operation {0:?} is ambiguous across the authority epoch transition")]
+    AmbiguousOldEpoch(ModelOperationId),
+    /// Promotion attempted to reuse the active instance identity.
+    #[error("authority instance {0} is already active")]
+    InvalidPromotionInstance(u8),
+    /// Authority fencing token cannot advance safely.
+    #[error("authority fence token exhausted")]
+    FenceExhausted,
+    /// Authority epoch cannot advance safely.
+    #[error("authority epoch exhausted")]
+    AuthorityEpochExhausted,
+    /// The current recovery or fork state blocks authoritative writes.
+    #[error("authority writes are blocked")]
+    AuthorityWritesBlocked,
+    /// A request carries an authority instance or fencing token superseded by promotion.
+    #[error("request carries a stale authority fence")]
+    StaleAuthorityFence,
+    /// The operation is not in the ambiguous old-epoch set.
+    #[error("operation {0:?} is not awaiting epoch recovery")]
+    OperationNotAmbiguous(ModelOperationId),
+    /// Fork quarantine cannot be cleared by ordinary recovery completion.
+    #[error("authority remains quarantined after fork detection")]
+    ForkQuarantined,
 }
 
 /// Resource limits for one exhaustive search.
@@ -1206,6 +1526,8 @@ mod tests {
             }),
             cursor: 0,
             authority_epoch: 1,
+            authority_instance: 1,
+            fence_token: 1,
         });
 
         assert_eq!(
@@ -1242,6 +1564,85 @@ mod tests {
         assert_eq!(model.server.journal.len(), 1);
         assert_eq!(model.clients[&ClientId(0)].cursor, 1);
         assert!(model.clients[&ClientId(0)].outbox.is_empty());
+    }
+
+    #[test]
+    fn lossless_promotion_retains_epoch_and_rejects_old_fence() {
+        let mut model = Model::new(1);
+        apply(
+            &mut model,
+            ModelAction::LocalMutate {
+                client: ClientId(0),
+                operation: operation(1, 10, None),
+            },
+        );
+        apply(&mut model, ModelAction::SendOperation(ClientId(0)));
+        apply(&mut model, ModelAction::PromoteLossless { new_instance: 2 });
+        assert_eq!(model.server.authority_epoch, 1);
+        assert_eq!(model.server.fence_token, 2);
+        assert_eq!(
+            model.apply(ModelAction::DeliverRequest(0)),
+            Err(ModelError::Action(ActionError::StaleAuthorityFence))
+        );
+    }
+
+    #[test]
+    fn data_loss_promotion_freezes_ambiguous_intent_until_policy_resolution() {
+        let mut model = Model::new(1);
+        apply(
+            &mut model,
+            ModelAction::LocalMutate {
+                client: ClientId(0),
+                operation: operation(1, 10, None),
+            },
+        );
+        apply(&mut model, ModelAction::SendOperation(ClientId(0)));
+        apply(&mut model, ModelAction::DeliverRequest(0));
+        apply(&mut model, ModelAction::DropResponse(0));
+        apply(
+            &mut model,
+            ModelAction::PromoteWithDataLoss {
+                new_instance: 2,
+                retain_through: 0,
+            },
+        );
+        apply(&mut model, ModelAction::RebootstrapClient(ClientId(0)));
+        assert!(
+            model.clients[&ClientId(0)]
+                .ambiguous_old_epoch
+                .contains(&ModelOperationId(1))
+        );
+        assert_eq!(
+            model.apply(ModelAction::SendOperation(ClientId(0))),
+            Err(ModelError::Action(ActionError::AmbiguousOldEpoch(
+                ModelOperationId(1)
+            )))
+        );
+        apply(
+            &mut model,
+            ModelAction::ResolveAmbiguous {
+                client: ClientId(0),
+                operation: ModelOperationId(1),
+                safe_replay: true,
+            },
+        );
+        apply(&mut model, ModelAction::CompleteAuthorityRecovery);
+        apply(&mut model, ModelAction::SendOperation(ClientId(0)));
+        apply(&mut model, ModelAction::DeliverRequest(0));
+        assert_eq!(model.server.authority_epoch, 2);
+        assert_eq!(model.server.journal.len(), 1);
+    }
+
+    #[test]
+    fn fork_detection_quarantines_instead_of_merging() {
+        let mut model = Model::new(1);
+        apply(&mut model, ModelAction::DetectFork { peer_root: [9; 32] });
+        assert!(model.server.fork_quarantined);
+        assert!(!model.server.writes_enabled);
+        assert_eq!(
+            model.apply(ModelAction::CompleteAuthorityRecovery),
+            Err(ModelError::Action(ActionError::ForkQuarantined))
+        );
     }
 
     #[test]
