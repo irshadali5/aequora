@@ -28,8 +28,8 @@ use aequora_store::{
     SnapshotProgress, StoreError, TransactionCapabilities, TransactionCapabilityProvider,
 };
 use aequora_types::{
-    Cursor, EntityId, EntityRef, EntityType, EntityVersion, OperationId, Sequence, SnapshotId,
-    SyncScopeId,
+    AuthorityEpoch, AuthorityId, Cursor, EntityId, EntityRef, EntityType, EntityVersion,
+    OperationId, Sequence, SnapshotId, SyncScopeId,
 };
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
@@ -180,6 +180,20 @@ CREATE TABLE IF NOT EXISTS aequora_scope_quarantine (
 );
 ";
 
+/// Binds durable local cursors and snapshot staging to authority identity and epoch.
+pub const MIGRATION_0006: &str = r"
+ALTER TABLE aequora_cursors ADD COLUMN authority_id TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+ALTER TABLE aequora_cursors ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE aequora_snapshot_progress ADD COLUMN authority_id TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+ALTER TABLE aequora_snapshot_progress ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS aequora_authority_trust (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    authority_id TEXT NOT NULL UNIQUE,
+    highest_epoch INTEGER NOT NULL CHECK (highest_epoch > 0)
+);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -191,7 +205,7 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest Stoolap schema revision understood by this Aequora release.
-pub const STOOLAP_SCHEMA_VERSION: u32 = 5;
+pub const STOOLAP_SCHEMA_VERSION: u32 = 6;
 
 /// Versioned role and capability declaration for the built-in Stoolap local adapter.
 pub const STOOLAP_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
@@ -241,6 +255,11 @@ const STOOLAP_MIGRATIONS: &[StoolapMigration] = &[
         version: 5,
         name: "authorized_scope_state",
         sql: MIGRATION_0005,
+    },
+    StoolapMigration {
+        version: 6,
+        name: "authority_epoch_cursor_binding",
+        sql: MIGRATION_0006,
     },
 ];
 
@@ -1606,25 +1625,17 @@ impl StoolapBackend for StoolapDatabase {
     }
 
     async fn load_cursor(&self, scope: SyncScopeId) -> Result<Option<Cursor>, StoreError> {
-        let sequence = self
+        let mut rows = self
             .database
-            .query_opt::<i64, _>(
-                "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
+            .query(
+                "SELECT sequence, authority_id, authority_epoch FROM aequora_cursors WHERE scope_id = $1",
                 (scope.to_string(),),
             )
             .map_err(stoolap_error)?;
-        sequence
-            .map(|sequence| {
-                Ok(Cursor {
-                    scope,
-                    sequence: Sequence(
-                        u64::try_from(sequence).map_err(|_| {
-                            StoreError::permanent("negative Stoolap cursor sequence")
-                        })?,
-                    ),
-                })
-            })
-            .transpose()
+        let Some(row) = rows.next() else {
+            return Ok(None);
+        };
+        cursor_from_stoolap_row(scope, &row.map_err(stoolap_error)?).map(Some)
     }
 
     async fn capture_local_integrity(
@@ -1703,12 +1714,21 @@ fn reconcile_stoolap(
     }
     let scope = response.next_cursor.scope;
     if let Some(current) = load_cursor_transaction(&mut transaction, scope)? {
+        if current.authority_id != AuthorityId::LEGACY_UNBOUND
+            && (response.next_cursor.authority_id != current.authority_id
+                || response.next_cursor.authority_epoch != current.authority_epoch)
+        {
+            return Err(StoreError::permanent(
+                "Stoolap incremental reconciliation cannot cross authority timelines",
+            ));
+        }
         if response.next_cursor.sequence < current.sequence {
             return Err(StoreError::permanent(
                 "Stoolap reconciliation cursor would regress",
             ));
         }
     }
+    validate_authority_trust(&mut transaction, response.next_cursor)?;
     for change in &response.changes {
         let sequence = to_i64(change.sequence.0, "change sequence")?;
         let already_applied = transaction
@@ -1783,6 +1803,7 @@ fn stage_stoolap_snapshot(
         validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
     }
     let scope = response.cursor.scope;
+    validate_authority_trust(&mut transaction, response.cursor)?;
     let existing = snapshot_progress_transaction(&mut transaction, scope)?;
     match existing {
         Some(progress)
@@ -2363,28 +2384,105 @@ fn load_cursor_transaction(
     transaction: &mut ApiTransaction,
     scope: SyncScopeId,
 ) -> Result<Option<Cursor>, StoreError> {
-    let sequence = transaction
-        .query_opt::<i64, _>(
-            "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
+    let mut rows = transaction
+        .query(
+            "SELECT sequence, authority_id, authority_epoch FROM aequora_cursors WHERE scope_id = $1",
             (scope.to_string(),),
         )
         .map_err(stoolap_error)?;
-    sequence
-        .map(|value| {
-            Ok(Cursor {
-                scope,
-                sequence: Sequence(
-                    u64::try_from(value)
-                        .map_err(|_| StoreError::permanent("negative Stoolap cursor sequence"))?,
+    let Some(row) = rows.next() else {
+        return Ok(None);
+    };
+    cursor_from_stoolap_row(scope, &row.map_err(stoolap_error)?).map(Some)
+}
+
+fn validate_authority_trust(
+    transaction: &mut ApiTransaction,
+    cursor: Cursor,
+) -> Result<(), StoreError> {
+    if cursor.authority_id == AuthorityId::LEGACY_UNBOUND {
+        return Ok(());
+    }
+    let mut rows = transaction
+        .query(
+            "SELECT authority_id, highest_epoch FROM aequora_authority_trust",
+            (),
+        )
+        .map_err(stoolap_error)?;
+    let Some(row) = rows.next() else {
+        transaction
+            .execute(
+                "INSERT INTO aequora_authority_trust (singleton, authority_id, highest_epoch) VALUES (1, $1, $2)",
+                (
+                    cursor.authority_id.to_string(),
+                    to_i64(cursor.authority_epoch.get(), "trusted authority epoch")?,
                 ),
-            })
-        })
-        .transpose()
+            )
+            .map_err(stoolap_error)?;
+        return Ok(());
+    };
+    let row = row.map_err(stoolap_error)?;
+    let trusted_id: String = row.get(0).map_err(stoolap_error)?;
+    let trusted_epoch: i64 = row.get(1).map_err(stoolap_error)?;
+    let trusted_id = parse_id::<AuthorityId>(&trusted_id, "trusted authority ID")?;
+    let trusted_epoch = u64::try_from(trusted_epoch)
+        .map_err(|_| StoreError::permanent("invalid trusted authority epoch"))?;
+    if trusted_id != cursor.authority_id {
+        return Err(StoreError::permanent(
+            "Stoolap local store rejected a different authority identity",
+        ));
+    }
+    if cursor.authority_epoch.get() < trusted_epoch {
+        return Err(StoreError::permanent(
+            "Stoolap local store detected authority epoch rollback",
+        ));
+    }
+    if cursor.authority_epoch.get() > trusted_epoch {
+        transaction
+            .execute(
+                "UPDATE aequora_authority_trust SET highest_epoch = $1 WHERE singleton = 1 AND authority_id = $2",
+                (
+                    to_i64(cursor.authority_epoch.get(), "trusted authority epoch")?,
+                    cursor.authority_id.to_string(),
+                ),
+            )
+            .map_err(stoolap_error)?;
+    }
+    if rows.next().is_some() {
+        return Err(StoreError::permanent(
+            "Stoolap local store contains multiple trusted authorities",
+        ));
+    }
+    Ok(())
+}
+
+fn cursor_from_stoolap_row(
+    scope: SyncScopeId,
+    row: &stoolap::api::ResultRow,
+) -> Result<Cursor, StoreError> {
+    let sequence: i64 = row.get(0).map_err(stoolap_error)?;
+    let authority_id: String = row.get(1).map_err(stoolap_error)?;
+    let authority_epoch: i64 = row.get(2).map_err(stoolap_error)?;
+    Ok(Cursor::new(
+        parse_id::<AuthorityId>(&authority_id, "authority ID")?,
+        AuthorityEpoch::new(
+            u64::try_from(authority_epoch)
+                .map_err(|_| StoreError::permanent("invalid Stoolap authority epoch"))?,
+        )
+        .map_err(|error| StoreError::permanent(error.to_string()))?,
+        scope,
+        Sequence(
+            u64::try_from(sequence)
+                .map_err(|_| StoreError::permanent("negative Stoolap cursor sequence"))?,
+        ),
+    ))
 }
 
 fn set_cursor(transaction: &mut ApiTransaction, cursor: Cursor) -> Result<(), StoreError> {
     let scope = cursor.scope.to_string();
     let sequence = to_i64(cursor.sequence.0, "cursor sequence")?;
+    let authority_id = cursor.authority_id.to_string();
+    let authority_epoch = to_i64(cursor.authority_epoch.get(), "cursor authority epoch")?;
     if transaction
         .query_opt::<i64, _>(
             "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
@@ -2395,15 +2493,15 @@ fn set_cursor(transaction: &mut ApiTransaction, cursor: Cursor) -> Result<(), St
     {
         transaction
             .execute(
-                "UPDATE aequora_cursors SET sequence = $1 WHERE scope_id = $2",
-                (sequence, &scope),
+                "UPDATE aequora_cursors SET sequence = $1, authority_id = $2, authority_epoch = $3 WHERE scope_id = $4",
+                (sequence, &authority_id, authority_epoch, &scope),
             )
             .map_err(stoolap_error)?;
     } else {
         transaction
             .execute(
-                "INSERT INTO aequora_cursors (scope_id, sequence) VALUES ($1, $2)",
-                (&scope, sequence),
+                "INSERT INTO aequora_cursors (scope_id, sequence, authority_id, authority_epoch) VALUES ($1, $2, $3, $4)",
+                (&scope, sequence, &authority_id, authority_epoch),
             )
             .map_err(stoolap_error)?;
     }
@@ -2495,7 +2593,7 @@ fn snapshot_progress_transaction(
 ) -> Result<Option<SnapshotProgress>, StoreError> {
     let mut rows = transaction
         .query(
-            "SELECT snapshot_id, cursor_sequence, next_offset FROM aequora_snapshot_progress WHERE scope_id = $1",
+            "SELECT snapshot_id, cursor_sequence, next_offset, authority_id, authority_epoch FROM aequora_snapshot_progress WHERE scope_id = $1",
             (scope.to_string(),),
         )
         .map_err(stoolap_error)?;
@@ -2506,15 +2604,23 @@ fn snapshot_progress_transaction(
     let snapshot: String = row.get(0).map_err(stoolap_error)?;
     let cursor: i64 = row.get(1).map_err(stoolap_error)?;
     let offset: i64 = row.get(2).map_err(stoolap_error)?;
+    let authority_id: String = row.get(3).map_err(stoolap_error)?;
+    let authority_epoch: i64 = row.get(4).map_err(stoolap_error)?;
     Ok(Some(SnapshotProgress {
         snapshot_id: parse_id::<SnapshotId>(&snapshot, "snapshot ID")?,
-        cursor: Cursor {
+        cursor: Cursor::new(
+            parse_id::<AuthorityId>(&authority_id, "snapshot authority ID")?,
+            AuthorityEpoch::new(
+                u64::try_from(authority_epoch)
+                    .map_err(|_| StoreError::permanent("invalid snapshot authority epoch"))?,
+            )
+            .map_err(|error| StoreError::permanent(error.to_string()))?,
             scope,
-            sequence: Sequence(
+            Sequence(
                 u64::try_from(cursor)
                     .map_err(|_| StoreError::permanent("negative snapshot cursor"))?,
             ),
-        },
+        ),
         next_offset: u64::try_from(offset)
             .map_err(|_| StoreError::permanent("negative snapshot offset"))?,
     }))
@@ -2528,18 +2634,23 @@ fn put_snapshot_progress(
     let snapshot = progress.snapshot_id.to_string();
     let cursor = to_i64(progress.cursor.sequence.0, "snapshot cursor")?;
     let offset = to_i64(progress.next_offset, "snapshot offset")?;
+    let authority_id = progress.cursor.authority_id.to_string();
+    let authority_epoch = to_i64(
+        progress.cursor.authority_epoch.get(),
+        "snapshot authority epoch",
+    )?;
     if snapshot_progress_transaction(transaction, progress.cursor.scope)?.is_some() {
         transaction
             .execute(
-                "UPDATE aequora_snapshot_progress SET snapshot_id = $1, cursor_sequence = $2, next_offset = $3 WHERE scope_id = $4",
-                (&snapshot, cursor, offset, &scope),
+                "UPDATE aequora_snapshot_progress SET snapshot_id = $1, cursor_sequence = $2, next_offset = $3, authority_id = $4, authority_epoch = $5 WHERE scope_id = $6",
+                (&snapshot, cursor, offset, &authority_id, authority_epoch, &scope),
             )
             .map_err(stoolap_error)?;
     } else {
         transaction
             .execute(
-                "INSERT INTO aequora_snapshot_progress (scope_id, snapshot_id, cursor_sequence, next_offset) VALUES ($1, $2, $3, $4)",
-                (&scope, &snapshot, cursor, offset),
+                "INSERT INTO aequora_snapshot_progress (scope_id, snapshot_id, cursor_sequence, next_offset, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6)",
+                (&scope, &snapshot, cursor, offset, &authority_id, authority_epoch),
             )
             .map_err(stoolap_error)?;
     }
@@ -2999,10 +3110,7 @@ mod tests {
             rejected: Vec::new(),
             conflicts: Vec::new(),
             changes: Vec::new(),
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(0),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(0)),
             has_more: false,
             server_time: HybridTimestamp {
                 physical_ms: 1,
@@ -3010,6 +3118,31 @@ mod tests {
                 node: NodeId::new(),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn durable_authority_trust_rejects_epoch_rollback_and_identity_change() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let scope = SyncScopeId::new();
+        let trusted = AuthorityId::new();
+        let other = AuthorityId::new();
+        let epoch_two = AuthorityEpoch::new(2).unwrap_or_else(|error| panic!("{error}"));
+        let mut response = empty_sync_response(scope);
+        response.next_cursor = Cursor::new(trusted, epoch_two, scope, Sequence(0));
+        backend
+            .reconcile(&response)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        response.next_cursor = Cursor::new(trusted, AuthorityEpoch::INITIAL, scope, Sequence(0));
+        assert!(backend.reconcile(&response).await.is_err());
+
+        response.next_cursor = Cursor::new(other, epoch_two, scope, Sequence(0));
+        assert!(backend.reconcile(&response).await.is_err());
+        assert_eq!(
+            backend.load_cursor(scope).await,
+            Ok(Some(Cursor::new(trusted, epoch_two, scope, Sequence(0))))
+        );
     }
 
     #[test]
@@ -3445,10 +3578,7 @@ mod tests {
                     message: "attendance changed on another device".into(),
                 }],
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(scope, Sequence(0)),
                 has_more: false,
                 server_time: rejected.created_at,
             })
@@ -3565,10 +3695,7 @@ mod tests {
                 payload: operation.payload.clone(),
                 timestamp: operation.created_at,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(u64::MAX),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(u64::MAX)),
             has_more: false,
             server_time: operation.created_at,
         };
@@ -3645,10 +3772,7 @@ mod tests {
                 payload: operation.payload.clone(),
                 timestamp: operation.created_at,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(1)),
             has_more: false,
             server_time: operation.created_at,
         };
@@ -3694,10 +3818,7 @@ mod tests {
         let installed = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            cursor: Cursor::legacy(scope, Sequence(1)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity,
@@ -3720,10 +3841,7 @@ mod tests {
         let replacement = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(u64::MAX),
-            },
+            cursor: Cursor::legacy(scope, Sequence(u64::MAX)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity,
@@ -3782,10 +3900,7 @@ mod tests {
         let replacement = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(4),
-            },
+            cursor: Cursor::legacy(scope, Sequence(4)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity: entity(),
@@ -3867,10 +3982,7 @@ mod tests {
                 payload: operation.payload.clone(),
                 timestamp,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(1)),
             has_more: false,
             server_time: timestamp,
         };
@@ -3948,10 +4060,7 @@ mod tests {
         assert_eq!(backend.load_cursor(revoked_scope).await, Ok(None));
         assert_eq!(
             backend.load_cursor(retained_scope).await,
-            Ok(Some(Cursor {
-                scope: retained_scope,
-                sequence: Sequence(4),
-            }))
+            Ok(Some(Cursor::legacy(retained_scope, Sequence(4))))
         );
     }
 
@@ -3962,10 +4071,7 @@ mod tests {
         );
         let scope = SyncScopeId::new();
         let entity = entity();
-        let boundary = Cursor {
-            scope,
-            sequence: Sequence(7),
-        };
+        let boundary = Cursor::legacy(scope, Sequence(7));
         store
             .stage_snapshot(&BootstrapResponse {
                 protocol: ProtocolVersion::V1,
