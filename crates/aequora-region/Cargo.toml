@@ -1,0 +1,17 @@
+[package]
+name = "aequora-region"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Epoch-safe regional read routing, residency, and tenant authority discovery for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
