@@ -1,7 +1,8 @@
 //! Checksummed framing and serialization codecs.
 
 use aequora_types::ProtocolVersion;
-use serde::{Serialize, de::DeserializeOwned};
+use bytes::{Bytes, BytesMut};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 /// Frame flag indicating a zstd-compressed Postcard payload.
@@ -103,6 +104,16 @@ pub struct DecodedFrame<'a> {
     pub payload: &'a [u8],
 }
 
+/// Validated fixed header. Reading this before the payload permits an oversized frame to be
+/// rejected without allocating its declared body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrameHeader {
+    pub protocol: ProtocolVersion,
+    pub flags: u8,
+    pub kind: MessageKind,
+    pub payload_len: usize,
+}
+
 /// Wire decoding or encoding failure.
 #[derive(Debug, Error)]
 pub enum CodecError {
@@ -127,6 +138,9 @@ pub enum CodecError {
     /// Frame uses flag bits unknown to this implementation.
     #[error("frame contains unsupported flags {0:#010b}")]
     Flags(u8),
+    /// Borrowed decoding requires the serialized bytes to remain in the caller's stable buffer.
+    #[error("borrowed decode is unavailable for compressed frames")]
+    BorrowedCompressed,
     /// Peer requested compression that was not compiled into this crate.
     #[error("zstd compression support is not enabled")]
     CompressionUnavailable,
@@ -157,7 +171,21 @@ pub fn encode<T: Serialize>(
     kind: MessageKind,
     value: &T,
 ) -> Result<Vec<u8>, CodecError> {
-    encode_with_options(protocol, kind, value, EncodeOptions::default())
+    Ok(encode_bytes(protocol, kind, value)?.to_vec())
+}
+
+/// Encodes directly into immutable reference-counted bytes for transport handoff without a
+/// payload clone.
+///
+/// # Errors
+///
+/// Returns [`CodecError`] when serialization or framing fails.
+pub fn encode_bytes<T: Serialize>(
+    protocol: ProtocolVersion,
+    kind: MessageKind,
+    value: &T,
+) -> Result<Bytes, CodecError> {
+    encode_bytes_with_options(protocol, kind, value, EncodeOptions::default())
 }
 
 /// Encodes a checksummed frame with thresholded negotiated compression.
@@ -171,21 +199,70 @@ pub fn encode_with_options<T: Serialize>(
     value: &T,
     options: EncodeOptions,
 ) -> Result<Vec<u8>, CodecError> {
+    Ok(encode_bytes_with_options(protocol, kind, value, options)?.to_vec())
+}
+
+/// Encodes a checksummed frame into a controlled [`BytesMut`] construction buffer and freezes it
+/// for immutable sharing at the transport boundary.
+///
+/// # Errors
+///
+/// Returns [`CodecError`] for serialization, compression, or length failures.
+pub fn encode_bytes_with_options<T: Serialize>(
+    protocol: ProtocolVersion,
+    kind: MessageKind,
+    value: &T,
+    options: EncodeOptions,
+) -> Result<Bytes, CodecError> {
     let serialized = postcard::to_stdvec(value)?;
     let (flags, payload) = compress_payload(serialized, options)?;
     let length = u32::try_from(payload.len()).map_err(|_| CodecError::PayloadTooLarge {
         actual: payload.len(),
         maximum: u32::MAX as usize,
     })?;
-    let mut frame = Vec::with_capacity(HEADER_LEN + payload.len());
+    let mut frame = BytesMut::with_capacity(HEADER_LEN + payload.len());
     frame.extend_from_slice(&MAGIC);
     frame.extend_from_slice(&protocol.0.to_be_bytes());
-    frame.push(flags);
-    frame.push(kind as u8);
+    frame.extend_from_slice(&[flags, kind as u8]);
     frame.extend_from_slice(&length.to_be_bytes());
     frame.extend_from_slice(blake3::hash(&payload).as_bytes());
     frame.extend_from_slice(&payload);
-    Ok(frame)
+    Ok(frame.freeze())
+}
+
+/// Validates the fixed frame preamble and declared length before callers allocate or read the
+/// payload body.
+///
+/// # Errors
+///
+/// Returns [`CodecError`] for a short or malformed header, unsupported kind/flags, or a declared
+/// payload beyond `max_payload`.
+pub fn inspect_header(header: &[u8], max_payload: usize) -> Result<FrameHeader, CodecError> {
+    if header.len() < HEADER_LEN {
+        return Err(CodecError::Truncated);
+    }
+    if header[..4] != MAGIC {
+        return Err(CodecError::Magic);
+    }
+    let protocol = ProtocolVersion(u16::from_be_bytes([header[4], header[5]]));
+    let flags = header[6];
+    if flags & !KNOWN_FLAGS != 0 {
+        return Err(CodecError::Flags(flags));
+    }
+    let kind = MessageKind::try_from(header[7])?;
+    let payload_len = u32::from_be_bytes([header[8], header[9], header[10], header[11]]) as usize;
+    if payload_len > max_payload {
+        return Err(CodecError::PayloadTooLarge {
+            actual: payload_len,
+            maximum: max_payload,
+        });
+    }
+    Ok(FrameHeader {
+        protocol,
+        flags,
+        kind,
+        payload_len,
+    })
 }
 
 /// Validates and splits a frame without deserializing its payload.
@@ -195,26 +272,8 @@ pub fn encode_with_options<T: Serialize>(
 /// Returns [`CodecError`] for malformed headers, invalid magic or kinds, excessive sizes,
 /// inconsistent lengths, or a payload digest mismatch.
 pub fn decode_frame(frame: &[u8], max_payload: usize) -> Result<DecodedFrame<'_>, CodecError> {
-    if frame.len() < HEADER_LEN {
-        return Err(CodecError::Truncated);
-    }
-    if frame[..4] != MAGIC {
-        return Err(CodecError::Magic);
-    }
-    let protocol = ProtocolVersion(u16::from_be_bytes([frame[4], frame[5]]));
-    let flags = frame[6];
-    if flags & !KNOWN_FLAGS != 0 {
-        return Err(CodecError::Flags(flags));
-    }
-    let kind = MessageKind::try_from(frame[7])?;
-    let declared = u32::from_be_bytes([frame[8], frame[9], frame[10], frame[11]]) as usize;
-    if declared > max_payload {
-        return Err(CodecError::PayloadTooLarge {
-            actual: declared,
-            maximum: max_payload,
-        });
-    }
-    if frame.len() != HEADER_LEN + declared {
+    let header = inspect_header(frame, max_payload)?;
+    if frame.len() != HEADER_LEN + header.payload_len {
         return Err(CodecError::Length);
     }
     let payload = &frame[HEADER_LEN..];
@@ -223,11 +282,36 @@ pub fn decode_frame(frame: &[u8], max_payload: usize) -> Result<DecodedFrame<'_>
         return Err(CodecError::Integrity);
     }
     Ok(DecodedFrame {
-        protocol,
-        flags,
-        kind,
+        protocol: header.protocol,
+        flags: header.flags,
+        kind: header.kind,
         payload,
     })
+}
+
+/// Deserializes a borrowed typed view directly from an uncompressed stable frame buffer. The
+/// returned value cannot outlive `frame`, keeping borrowed lifetimes away from durable state.
+///
+/// # Errors
+///
+/// Returns [`CodecError`] for invalid framing, a kind mismatch, compression, size, or Postcard
+/// decoding failure.
+pub fn decode_borrowed<'a, T>(
+    frame: &'a [u8],
+    expected_kind: MessageKind,
+    max_payload: usize,
+) -> Result<(ProtocolVersion, T), CodecError>
+where
+    T: Deserialize<'a>,
+{
+    let decoded = decode_frame(frame, max_payload)?;
+    if decoded.kind != expected_kind {
+        return Err(CodecError::MessageKind(decoded.kind as u8));
+    }
+    if decoded.flags & FLAG_ZSTD != 0 {
+        return Err(CodecError::BorrowedCompressed);
+    }
+    Ok((decoded.protocol, postcard::from_bytes(decoded.payload)?))
 }
 
 /// Decodes and deserializes a framed Postcard value of the expected kind.
@@ -369,6 +453,11 @@ mod tests {
         value: u32,
     }
 
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct BorrowedExample<'a> {
+        value: &'a str,
+    }
+
     #[test]
     fn framed_values_round_trip() -> Result<(), CodecError> {
         let frame = encode(
@@ -395,6 +484,35 @@ mod tests {
             decode_frame(&frame, 1_024),
             Err(CodecError::Integrity)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn header_limit_rejects_declared_payload_before_body_is_present() -> Result<(), CodecError> {
+        let frame = encode_bytes(
+            ProtocolVersion::V1,
+            MessageKind::SyncRequest,
+            &Example { value: 42 },
+        )?;
+        let header = inspect_header(&frame[..HEADER_LEN], 1_024)?;
+        assert_eq!(header.kind, MessageKind::SyncRequest);
+        assert!(matches!(
+            inspect_header(&frame[..HEADER_LEN], 0),
+            Err(CodecError::PayloadTooLarge { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn borrowed_postcard_view_lives_in_the_frame_buffer() -> Result<(), CodecError> {
+        let frame = encode_bytes(
+            ProtocolVersion::V1,
+            MessageKind::SyncRequest,
+            &BorrowedExample { value: "borrowed" },
+        )?;
+        let (_, decoded) =
+            decode_borrowed::<BorrowedExample<'_>>(&frame, MessageKind::SyncRequest, 1_024)?;
+        assert_eq!(decoded.value, "borrowed");
         Ok(())
     }
 
