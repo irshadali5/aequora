@@ -1,5 +1,10 @@
 //! Payload-free diagnostics for statically linked Aequora database adapters.
 
+use aequora_authority::{
+    AuthorityController, AuthorityError, AuthorityPromotionPlan, AuthorityPromotionPolicy,
+    AuthorityState, CheckpointComparison, JournalCheckpoint, PromotionEvidence,
+    RecoveryVerification, compare_checkpoints,
+};
 use aequora_bootstrap::{BootstrapError, BootstrapJob, SnapshotManifest};
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CURRENT_INTEGRITY_GENERATION, IntegrityError, IntegritySnapshot,
@@ -16,6 +21,10 @@ use aequora_model::{
 use aequora_queue::{
     CompactionPlan as QueueCompactionPlan, MutationMutability, OptimizationRegistry, QueueEntry,
     QueueError, plan_compaction,
+};
+use aequora_region::{
+    AuthorityLocation, RegionError, RegionalReadRequest, RegionalRouter, RegionalRouterConfig,
+    ReplicaObservation,
 };
 use aequora_schema::{SchemaError, SchemaRegistry};
 use aequora_store::{
@@ -65,6 +74,16 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
         Some("bootstrap") => {
             bootstrap_command(arguments.next().as_deref(), arguments.next().as_deref())
         }
+        Some("authority") => authority_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
+        Some("region") => region_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -72,7 +91,214 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora init <new-directory> <client|server>"
+}
+
+#[derive(serde::Deserialize)]
+struct RegionalTopology {
+    authority: AuthorityLocation,
+    authority_available: bool,
+    config: RegionalRouterConfig,
+    replicas: Vec<ReplicaObservation>,
+}
+
+fn region_command(
+    subject: Option<&str>,
+    path: Option<&str>,
+    request_path: Option<&str>,
+) -> Result<String, CliError> {
+    match subject {
+        Some("status") if request_path.is_none() => {
+            let topology = read_region_topology(path, "status <topology.ron>")?;
+            let current = topology
+                .replicas
+                .iter()
+                .filter(|replica| {
+                    replica.watermark.authority_id == topology.authority.authority_id
+                        && replica.watermark.authority_epoch == topology.authority.authority_epoch
+                })
+                .count();
+            let wrong_epoch = topology.replicas.len().saturating_sub(current);
+            let _router = build_region_router(topology)?;
+            Ok(format!(
+                "region status: current_replicas={current} wrong_epoch_replicas={wrong_epoch} writes=0"
+            ))
+        }
+        Some("route") => {
+            let topology = read_region_topology(path, "route <topology.ron> <request.ron>")?;
+            let request_path = request_path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora region route <topology.ron> <request.ron>".to_owned(),
+                )
+            })?;
+            let request: RegionalReadRequest = read_ron(request_path, 2 * 1024 * 1024)?;
+            let decision = build_region_router(topology)?.route(request)?;
+            Ok(format!(
+                "region route: target={:?} consistency={:?} downgraded={} wait={:?} writes=0",
+                decision.target,
+                decision.effective_consistency,
+                decision.downgraded,
+                decision.wait_before_fallback.map(|wait| wait.timeout),
+            ))
+        }
+        Some("explain") if path.is_none() && request_path.is_none() => Ok(
+            "region: reads require current-epoch durable apply watermarks; session and AtLeast reads wait only within a bound then fall back by explicit policy; all writes remain authority-only"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora region <status|route|explain> ...".to_owned(),
+        )),
+    }
+}
+
+fn read_region_topology(path: Option<&str>, usage: &str) -> Result<RegionalTopology, CliError> {
+    let path = path.ok_or_else(|| CliError::Usage(format!("usage: aequora region {usage}")))?;
+    read_ron(path, 8 * 1024 * 1024)
+}
+
+fn build_region_router(topology: RegionalTopology) -> Result<RegionalRouter, CliError> {
+    let mut router = RegionalRouter::new(
+        topology.authority,
+        topology.authority_available,
+        topology.config,
+    )?;
+    for replica in topology.replicas {
+        router.observe(replica)?;
+    }
+    Ok(router)
+}
+
+fn authority_command(
+    subject: Option<&str>,
+    path: Option<&str>,
+    peer: Option<&str>,
+) -> Result<String, CliError> {
+    match subject {
+        Some("status") => {
+            let state: AuthorityState = read_authority(path, "status <state.ron>")?;
+            Ok(format!(
+                "authority: id={} epoch={} instance={} role={:?} mode={:?} fence={} transition={} writes=0",
+                state.authority_id,
+                state.epoch.get(),
+                state.instance_id,
+                state.role,
+                state.runtime_mode,
+                state.fence_token.get(),
+                state.transition_id,
+            ))
+        }
+        Some("readiness") => {
+            let evidence: PromotionEvidence = read_authority(path, "readiness <evidence.ron>")?;
+            Ok(format!(
+                "authority readiness: status={:?} lossless_continuity={} external_fence={} lag={:?} writes=0",
+                evidence.readiness(),
+                evidence.proves_lossless(),
+                evidence.old_primary_externally_fenced,
+                evidence.replication_lag,
+            ))
+        }
+        Some("promote") => {
+            let plan: AuthorityPromotionPlan = read_authority(path, "promote <plan.ron>")?;
+            let outcome = plan.evaluate()?;
+            outcome.transition.verify()?;
+            Ok(format!(
+                "authority promotion dry-run: class={:?} old_epoch={} new_epoch={} fence={} mode={:?} approval=validated writes=0",
+                outcome.transition.promotion_class,
+                outcome.transition.old_epoch.get(),
+                outcome.transition.new_epoch.get(),
+                outcome.transition.fence_token.get(),
+                outcome.state.runtime_mode,
+            ))
+        }
+        Some("demote") => {
+            let state: AuthorityState = read_authority(path, "demote <state.ron>")?;
+            let controller = AuthorityController::new(state, AuthorityPromotionPolicy::default());
+            let demoted = controller.demote(state.updated_at_unix_ms.saturating_add(1))?;
+            Ok(format!(
+                "authority demotion dry-run: old_role={:?} new_role={:?} new_fence={} writes=0",
+                state.role,
+                demoted.role,
+                demoted.fence_token.get(),
+            ))
+        }
+        Some("restore-plan") => authority_restore_plan(path),
+        Some("recover") => authority_recover(path, peer),
+        Some("verify") => {
+            let verification: RecoveryVerification =
+                read_authority(path, "verify <verification.ron>")?;
+            if !verification.is_complete() {
+                return Err(AuthorityError::RecoveryVerificationIncomplete.into());
+            }
+            Ok("authority recovery verification: complete=true writes=0".to_owned())
+        }
+        Some("fork-check") => {
+            let local: JournalCheckpoint = read_authority(path, "fork-check <local.ron>")?;
+            let peer: JournalCheckpoint = peer
+                .ok_or_else(|| {
+                    CliError::Usage(
+                        "usage: aequora authority fork-check <local.ron> <peer.ron>".to_owned(),
+                    )
+                })
+                .and_then(|path| read_ron(path, 2 * 1024 * 1024))?;
+            let comparison = compare_checkpoints(local, peer);
+            let action = if comparison == CheckpointComparison::ForkDetected {
+                "WRITES_MUST_STOP"
+            } else {
+                "none"
+            };
+            Ok(format!(
+                "authority fork-check: status={comparison:?} sequence={} action={action} writes=0",
+                local.sequence.0,
+            ))
+        }
+        Some("explain") if path.is_none() && peer.is_none() => Ok(
+            "authority: commands are read-only dry-runs; the host control plane must fence the old primary and atomically persist the approved transition before recovery verification enables writes"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora authority <status|readiness|promote|demote|restore-plan|recover|verify|fork-check|explain> ..."
+                .to_owned(),
+        )),
+    }
+}
+
+fn authority_restore_plan(path: Option<&str>) -> Result<String, CliError> {
+    let state: AuthorityState = read_authority(path, "restore-plan <state.ron>")?;
+    let next = state
+        .epoch
+        .checked_next()
+        .ok_or(AuthorityError::EpochExhausted)?;
+    Ok(format!(
+        "authority restore plan: old_epoch={} required_new_epoch={} mode=ReadOnlyVerification governance_reconciliation=required side_effect_reconciliation=required writes=0",
+        state.epoch.get(),
+        next.get(),
+    ))
+}
+
+fn authority_recover(path: Option<&str>, flag: Option<&str>) -> Result<String, CliError> {
+    let state: AuthorityState = read_authority(path, "recover <state.ron> --new-epoch")?;
+    if flag != Some("--new-epoch") {
+        return Err(CliError::Usage(
+            "usage: aequora authority recover <state.ron> --new-epoch".to_owned(),
+        ));
+    }
+    let next = state
+        .epoch
+        .checked_next()
+        .ok_or(AuthorityError::EpochExhausted)?;
+    Ok(format!(
+        "authority recovery dry-run: old_epoch={} new_epoch={} mode=ReadOnlyVerification verification=required writes=0",
+        state.epoch.get(),
+        next.get(),
+    ))
+}
+
+fn read_authority<T: serde::de::DeserializeOwned>(
+    path: Option<&str>,
+    usage: &str,
+) -> Result<T, CliError> {
+    let path = path.ok_or_else(|| CliError::Usage(format!("usage: aequora authority {usage}")))?;
+    read_ron(path, 2 * 1024 * 1024)
 }
 
 fn bootstrap_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
@@ -622,6 +848,10 @@ enum CliError {
     Cutover(#[from] CutoverBlocker),
     #[error(transparent)]
     Bootstrap(#[from] BootstrapError),
+    #[error(transparent)]
+    Authority(#[from] AuthorityError),
+    #[error(transparent)]
+    Region(#[from] RegionError),
     #[error("starter target already exists: {0}")]
     TargetExists(String),
     #[error("starter parent directory does not exist: {0}")]
