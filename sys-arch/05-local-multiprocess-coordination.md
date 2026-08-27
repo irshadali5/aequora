@@ -2,6 +2,10 @@
 
 # Local Multi-Process, Multi-Window, and Coordinator Election Architecture
 
+> Implementation status: complete at the reusable repository and built-in Stoolap adapter
+> boundary. See `docs/local-multiprocess-coordination-completion.md` for executable evidence and
+> deployment responsibilities.
+
 ## 1. Purpose
 
 Aequora clients may run as desktop apps, mobile apps, background workers, helper processes, CLIs, or multiple windows. More than one process can therefore open the same local store.
@@ -1527,22 +1531,22 @@ A resumes later
 Part 05 is complete when:
 
 ```text
-[ ] LocalStoreId exists
-[ ] ProcessInstanceId exists
-[ ] FencingToken exists
-[ ] LocalStoreGeneration exists
-[ ] durable lease schema exists
-[ ] acquisition/renew/release are atomic
-[ ] stale-leader fencing exists
-[ ] followers can write domain+outbox
-[ ] leader-only work is defined
-[ ] crash takeover works
-[ ] maintenance lease works
-[ ] bootstrap generation switch is coordinated
-[ ] process-mode capability is exposed
-[ ] Loom tests are implemented
-[ ] adapter compliance includes local coordination
-[ ] diagnostics/metrics are available
+[x] LocalStoreId exists
+[x] ProcessInstanceId exists
+[x] FencingToken exists
+[x] LocalStoreGeneration exists
+[x] durable lease schema exists
+[x] acquisition/renew/release are atomic
+[x] stale-leader fencing exists
+[x] followers can write domain+outbox
+[x] leader-only work is defined
+[x] crash takeover works
+[x] maintenance lease works
+[x] bootstrap generation switch is coordinated
+[x] process-mode capability is exposed
+[x] Loom tests are implemented
+[x] adapter compliance includes local coordination
+[x] diagnostics/metrics are available
 ```
 
 ---

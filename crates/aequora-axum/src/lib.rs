@@ -1,16 +1,18 @@
 //! Thin Axum boundary for framed Postcard exchanges.
 
-use aequora_codec::{CodecError, Compression, DecodeLimits, EncodeOptions, MessageKind};
+use aequora_codec::{
+    CodecError, Compression, DecodeLimits, EncodeOptions, HEADER_LEN, MessageKind, inspect_header,
+};
 use aequora_executor::AuthContext;
 use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, Capability, SyncRequest, SyncResponse};
 use aequora_server::{ExchangeService, ServerError};
 use aequora_store::StoreErrorKind;
-use aequora_types::TenantId;
+use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode, TenantId};
 use async_trait::async_trait;
 use axum::{
     Extension, Router,
-    body::{Bytes, to_bytes},
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
@@ -20,7 +22,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use http_body_util::LengthLimitError;
+use bytes::BytesMut;
+use http_body_util::BodyExt as _;
 use std::{
     collections::HashMap,
     future::Future,
@@ -595,21 +598,16 @@ impl FromRequest<AppState> for SyncBody {
         let (parts, body) = request.into_parts();
         let bytes = match timeout(
             state.config.body_read_timeout,
-            to_bytes(body, state.config.max_body_bytes),
+            read_bounded_body(body, state.config.max_body_bytes),
         )
         .await
         {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(error)) => {
-                let too_large = match std::error::Error::source(&error) {
-                    Some(source) => source.is::<LengthLimitError>(),
-                    None => false,
-                };
-                if too_large {
+                if matches!(error, HttpError::BodyTooLarge) {
                     state.observer.record(MetricEvent::ServerBodyTooLarge);
-                    return Err(HttpError::BodyTooLarge);
                 }
-                return Err(HttpError::BadRequest("sync request body could not be read"));
+                return Err(error);
             }
             Err(_) => {
                 state.observer.record(MetricEvent::ServerBodyReadTimedOut);
@@ -623,6 +621,47 @@ impl FromRequest<AppState> for SyncBody {
             bytes,
         })
     }
+}
+
+async fn read_bounded_body(mut body: Body, max_body_bytes: usize) -> Result<Bytes, HttpError> {
+    if max_body_bytes < HEADER_LEN {
+        return Err(HttpError::BodyTooLarge);
+    }
+    let mut buffer = BytesMut::with_capacity(HEADER_LEN);
+    let mut expected_total = None;
+    while let Some(frame) = body.frame().await {
+        let frame =
+            frame.map_err(|_| HttpError::BadRequest("sync request body could not be read"))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        if buffer.len().saturating_add(data.len()) > max_body_bytes {
+            return Err(HttpError::BodyTooLarge);
+        }
+        buffer.extend_from_slice(&data);
+        if expected_total.is_none() && buffer.len() >= HEADER_LEN {
+            let header = inspect_header(
+                &buffer[..HEADER_LEN],
+                max_body_bytes.saturating_sub(HEADER_LEN),
+            )
+            .map_err(|error| match error {
+                CodecError::PayloadTooLarge { .. } => HttpError::BodyTooLarge,
+                other => HttpError::Codec(other),
+            })?;
+            expected_total = Some(HEADER_LEN.saturating_add(header.payload_len));
+        }
+        if expected_total.is_some_and(|expected| buffer.len() > expected) {
+            return Err(HttpError::Codec(CodecError::Length));
+        }
+    }
+    if expected_total != Some(buffer.len()) {
+        return Err(HttpError::Codec(if buffer.len() < HEADER_LEN {
+            CodecError::Truncated
+        } else {
+            CodecError::Length
+        }));
+    }
+    Ok(buffer.freeze())
 }
 
 async fn exchange(
@@ -644,7 +683,7 @@ async fn exchange(
         &body,
         MessageKind::SyncRequest,
         DecodeLimits {
-            max_wire_bytes: state.config.max_body_bytes,
+            max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
     )?;
@@ -691,7 +730,7 @@ async fn bootstrap(
         &body,
         MessageKind::BootstrapRequest,
         DecodeLimits {
-            max_wire_bytes: state.config.max_body_bytes,
+            max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
     )?;
@@ -710,7 +749,7 @@ async fn bootstrap(
         state.observer.record(MetricEvent::ServerDeadlineExceeded);
         HttpError::DeadlineExceeded(state.config.retry_after_seconds)
     })??;
-    let bytes = aequora_codec::encode_with_options(
+    let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::BootstrapResponse,
         &response,
@@ -753,7 +792,7 @@ fn encode_response(
     observer: &dyn Observer,
     uploaded: usize,
 ) -> Result<Response, HttpError> {
-    let bytes = aequora_codec::encode_with_options(
+    let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::SyncResponse,
         response,
@@ -824,80 +863,140 @@ impl From<ServerError> for HttpError {
 }
 
 impl IntoResponse for HttpError {
+    #[allow(clippy::too_many_lines)]
     fn into_response(self) -> Response {
-        let (status, message, retry_after) = match self {
+        let (status, message, retry_after, code) = match self {
             Self::UnsupportedMediaType => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported sync content type".to_owned(),
                 None,
+                OperationalErrorCode::Protocol,
             ),
-            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message.to_owned(), None),
+            Self::BadRequest(message) => (
+                StatusCode::BAD_REQUEST,
+                message.to_owned(),
+                None,
+                OperationalErrorCode::Validation,
+            ),
             Self::BodyTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "sync request body exceeds the configured wire limit".to_owned(),
                 None,
+                OperationalErrorCode::PayloadLimit,
             ),
             Self::BodyReadTimedOut(seconds) => (
                 StatusCode::REQUEST_TIMEOUT,
                 "sync request body exceeded its receive deadline".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Deadline,
             ),
             Self::MissingAuthentication => (
                 StatusCode::UNAUTHORIZED,
                 "authenticated identity is unavailable".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Overloaded(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync server is at its in-flight request limit".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::TenantOverloaded(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "tenant is at its in-flight sync request limit".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::TenantRateLimited(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "tenant sync request rate limit exceeded".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Overloaded,
             ),
             Self::Draining(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync server is draining".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Draining,
             ),
             Self::DeadlineExceeded(seconds) => (
                 StatusCode::GATEWAY_TIMEOUT,
                 "sync request exceeded its server execution deadline".to_owned(),
                 Some(seconds),
+                OperationalErrorCode::Deadline,
             ),
-            Self::Codec(error) => (StatusCode::BAD_REQUEST, error.to_string(), None),
-            Self::Server(ServerError::Validation(error)) => {
-                (StatusCode::BAD_REQUEST, error.to_string(), None)
+            Self::Codec(error) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Admission(rejection)) => {
+                let status = match rejection {
+                    aequora_admission::AdmissionRejection::TenantBusy { .. }
+                    | aequora_admission::AdmissionRejection::RateLimited { .. } => {
+                        StatusCode::TOO_MANY_REQUESTS
+                    }
+                    aequora_admission::AdmissionRejection::RequestTooLarge => {
+                        StatusCode::PAYLOAD_TOO_LARGE
+                    }
+                    aequora_admission::AdmissionRejection::TooManyDependencies => {
+                        StatusCode::BAD_REQUEST
+                    }
+                    _ => StatusCode::SERVICE_UNAVAILABLE,
+                };
+                let code = if rejection.retryable() {
+                    OperationalErrorCode::Overloaded
+                } else {
+                    OperationalErrorCode::PayloadLimit
+                };
+                let retry_after = rejection
+                    .retry_after_ms()
+                    .map(|milliseconds| milliseconds.div_ceil(1_000).max(1));
+                (status, rejection.to_string(), retry_after, code)
             }
-            Self::Server(ServerError::Dependency(error)) => {
-                (StatusCode::BAD_REQUEST, error.to_string(), None)
-            }
+            Self::Server(ServerError::Validation(error)) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Dependency(error)) => (
+                StatusCode::BAD_REQUEST,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Validation,
+            ),
             Self::Server(ServerError::ResponseLimit) => (
                 StatusCode::BAD_REQUEST,
                 "client response limit is too small".to_owned(),
                 None,
+                OperationalErrorCode::PayloadLimit,
+            ),
+            Self::Server(ServerError::MemoryBudget { .. }) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "typed sync request exceeds the configured memory budget".to_owned(),
+                None,
+                OperationalErrorCode::PayloadLimit,
             ),
             Self::Server(ServerError::IdentityMismatch) => (
                 StatusCode::UNAUTHORIZED,
                 "authenticated identity mismatch".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::ScopeAuthorization(_)) => (
                 StatusCode::FORBIDDEN,
                 "sync scope is not authorized".to_owned(),
                 None,
+                OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::Store(error)) if error.kind == StoreErrorKind::Transient => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "sync storage unavailable".to_owned(),
                 None,
+                OperationalErrorCode::Storage,
             ),
             Self::Server(
                 ServerError::Store(_)
@@ -910,11 +1009,28 @@ impl IntoResponse for HttpError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "sync processing failed".to_owned(),
                 None,
+                OperationalErrorCode::Storage,
             ),
             Self::Server(ServerError::BootstrapUnavailable) => (
                 StatusCode::NOT_IMPLEMENTED,
                 "snapshot bootstrap is not available".to_owned(),
                 None,
+                OperationalErrorCode::Protocol,
+            ),
+            Self::Server(ServerError::Maintenance {
+                retry_after_seconds,
+                ..
+            }) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "sync is temporarily unavailable due to maintenance".to_owned(),
+                Some(retry_after_seconds),
+                OperationalErrorCode::Maintenance,
+            ),
+            Self::Server(ServerError::Authority(error)) => (
+                StatusCode::CONFLICT,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Authority,
             ),
         };
         let mut response = (status, message).into_response();
@@ -923,6 +1039,10 @@ impl IntoResponse for HttpError {
         {
             response.headers_mut().insert(RETRY_AFTER, value);
         }
+        response.headers_mut().insert(
+            OPERATIONAL_ERROR_CODE_HEADER,
+            HeaderValue::from_static(code.as_str()),
+        );
         response
     }
 }
@@ -930,6 +1050,24 @@ impl IntoResponse for HttpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_failures_expose_stable_codes_without_payloads() {
+        let response = HttpError::Server(ServerError::Maintenance {
+            mode: aequora_server::MaintenanceMode::SyncPaused,
+            retry_after_seconds: 17,
+        })
+        .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(OPERATIONAL_ERROR_CODE_HEADER),
+            Some(&HeaderValue::from_static("AEQ-MAINT-001"))
+        );
+        assert_eq!(
+            response.headers().get(RETRY_AFTER),
+            Some(&HeaderValue::from_static("17"))
+        );
+    }
 
     const fn rate_config() -> TenantRateLimitConfig {
         TenantRateLimitConfig {

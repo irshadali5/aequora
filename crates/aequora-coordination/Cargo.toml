@@ -1,0 +1,20 @@
+[package]
+name = "aequora-coordination"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Database-neutral local lease and fencing contracts for Aequora"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+loom.workspace = true
+proptest = "1.6.0"
+
+[lints]
+workspace = true

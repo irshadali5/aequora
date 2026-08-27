@@ -1,29 +1,54 @@
 //! Deterministic, database-free stores and transport for synchronization tests.
 
+pub mod audit;
 pub mod contracts;
+pub mod large_bootstrap;
+pub mod live;
+pub mod migration;
+pub mod profiles;
+pub mod replay;
 
 use aequora_client::{ClientError, ClientSyncEngine, SyncOutcome};
+use aequora_coordination::{
+    CoordinationError, CoordinationSnapshot, LeaseGrant, LeaseRequest, LeaseState,
+    LocalCoordinationSupport, LocalStoreGeneration, LocalStoreId,
+};
 use aequora_executor::{
     AuthContext, AuthenticatedOperation, AuthoritativeMutation, AuthorizedOperation, CurrentEntity,
     ExecutableOperation, ExecutionError, OperationExecutor,
+};
+use aequora_integrity::{
+    CURRENT_HASH_SCHEMA, CanonicalEntity, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
+    PartitionScheme, RepairPlan, RepairStrategy,
 };
 use aequora_protocol::{
     BootstrapRequest, BootstrapResponse, Conflict, OperationAck, OperationEnvelope,
     OperationRejection, Partition, RemoteChange, SnapshotEntity, SyncRequest, SyncResponse,
 };
+use aequora_queue::{
+    CompactionPlan as QueueCompactionPlan, LocalOperationSeq, MutationMutability,
+    OptimizationRegistry, QueueEntry, RebasePlan, RebaseTarget, Supersession, plan_compaction,
+    plan_rebase, semantic_envelope_hash,
+};
+use aequora_scope::{LocalScopeState, ScopeTransition, ScopeTransitionOutcome, Subscription};
 use aequora_server::{ExchangeService, ServerError};
 use aequora_store::{
-    AuditLog, AuditOffset, AuditPage, AuditRecord, ChangeJournal, ChangePage, CommitOperation,
-    CommitOutcome, ConflictInbox, ConflictRecord, ConflictResolution, CursorStore, EntityReader,
-    EntitySnapshot, JournalCompactor, OperationLedger, OutboxState, OutboxStateStore, OutboxStats,
-    OutboxStore, ReconciliationStore, RetryMetadata, SnapshotDescriptor, SnapshotPage,
-    SnapshotProgress, SnapshotStore, StoreError, StoreErrorKind, TransactionCapabilities,
+    AuditLog, AuditOffset, AuditPage, AuditRecord, AuthoritativeIntegritySource, ChangeJournal,
+    ChangePage, CommitOperation, CommitOutcome, ConflictInbox, ConflictRecord, ConflictResolution,
+    CorrelationLog, CursorStore, EntityReader, EntitySnapshot, IntegrityCapabilityProvider,
+    JournalCompactor, LocalCoordinationStore, LocalIntegrityStore, OperationLedger, OutboxState,
+    OutboxStateStore, OutboxStats, OutboxStore, ReconciliationStore, ReplicaRepairReport,
+    RetryMetadata, ScopeStateStore, SnapshotDescriptor, SnapshotPage, SnapshotProgress,
+    SnapshotStore, StoreError, StoreErrorKind, TransactionCapabilities,
     TransactionCapabilityProvider,
 };
 use aequora_transport::{
     SnapshotPageStream, StreamingSyncTransport, SyncTransport, TransportError,
 };
-use aequora_types::{Cursor, EntityRef, OperationId, Sequence, SnapshotId, SyncScopeId, TenantId};
+use aequora_types::{
+    CorrelationId, Cursor, EntityRef, LineageContext, OperationId, OperationalErrorCode, Sequence,
+    SnapshotId, SyncScopeId, TenantId,
+};
 use async_trait::async_trait;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -31,7 +56,7 @@ use std::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 type EntityKey = (TenantId, EntityRef);
@@ -131,6 +156,7 @@ impl OperationExecutor for AllowAllExecutor {
 struct AuthoritativeState {
     entities: HashMap<EntityKey, EntitySnapshot>,
     ledger: HashMap<OperationKey, OperationAck>,
+    operation_lineages: HashMap<OperationKey, LineageContext>,
     journal: Vec<RemoteChange>,
     sequences: HashMap<ScopeKey, Sequence>,
     journal_floors: HashMap<ScopeKey, Sequence>,
@@ -180,6 +206,57 @@ pub struct InMemoryAuthoritativeStore {
 impl TransactionCapabilityProvider for InMemoryAuthoritativeStore {
     fn transaction_capabilities(&self) -> TransactionCapabilities {
         TransactionCapabilities::REFERENCE_AUTHORITATIVE
+    }
+}
+
+impl IntegrityCapabilityProvider for InMemoryAuthoritativeStore {
+    fn integrity_support(&self) -> IntegritySupport {
+        IntegritySupport::SnapshotOnly
+    }
+}
+
+#[async_trait]
+impl AuthoritativeIntegritySource for InMemoryAuthoritativeStore {
+    async fn capture_authoritative_integrity(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        let state = self.state();
+        let head = state
+            .sequences
+            .get(&(tenant, scope))
+            .copied()
+            .unwrap_or(Sequence(0));
+        if boundary.scope != scope || boundary.sequence != head {
+            return Err(StoreError::permanent(
+                "integrity capture requires the current stable scope boundary",
+            ));
+        }
+        let entities = state
+            .entities
+            .iter()
+            .filter(|((entity_tenant, entity), _)| {
+                *entity_tenant == tenant
+                    && state
+                        .entity_scopes
+                        .get(&(tenant, *entity))
+                        .is_some_and(|scopes| scopes.contains(&scope))
+            })
+            .map(|(_, snapshot)| CanonicalEntity {
+                entity: snapshot.entity,
+                version: snapshot.current.version,
+                hash_schema: CURRENT_HASH_SCHEMA,
+                payload: snapshot.current.payload.clone(),
+                tombstone: snapshot.current.tombstone,
+            })
+            .collect::<Vec<_>>();
+        IntegritySnapshot::build(scope, boundary, generation, scheme, entities, max_entities)
+            .map_err(|error| StoreError::permanent(error.to_string()))
     }
 }
 
@@ -244,6 +321,19 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         Ok(self.state().ledger.get(&(tenant, operation_id)).cloned())
     }
 
+    async fn operation_lineage(
+        &self,
+        tenant: TenantId,
+        operation_id: OperationId,
+    ) -> Result<Option<LineageContext>, StoreError> {
+        Ok(self
+            .state()
+            .operation_lineages
+            .get(&(tenant, operation_id))
+            .copied())
+    }
+
+    #[allow(clippy::too_many_lines)]
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError> {
         if !commit.has_valid_version_transition() {
             return Err(StoreError::permanent(
@@ -253,6 +343,11 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         let mut state = self.state();
         let operation_key = (commit.tenant_id, commit.operation_id);
         if let Some(previous) = state.ledger.get(&operation_key) {
+            if state.operation_lineages.get(&operation_key) != Some(&commit.operation_lineage) {
+                return Err(StoreError::permanent(
+                    "retry changed operation lineage for an existing OperationId",
+                ));
+            }
             return Ok(CommitOutcome::Duplicate(previous.clone()));
         }
         let entity_key = (commit.tenant_id, commit.entity);
@@ -288,11 +383,14 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         };
         fail_at(failpoint, CommitFailPoint::AfterWrite)?;
         fail_at(failpoint, CommitFailPoint::BeforeJournal)?;
+        let event_lineage = commit.event_lineage();
         let change = RemoteChange {
             tenant_id: commit.tenant_id,
             scope_id: commit.scope_id,
             sequence: next_sequence,
             operation_id: commit.operation_id,
+            event_id: commit.event_id,
+            lineage: event_lineage,
             entity: commit.entity,
             version: commit.next_version,
             change_kind: commit.change_kind,
@@ -303,6 +401,8 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         fail_at(failpoint, CommitFailPoint::BeforeLedger)?;
         let ack = OperationAck {
             operation_id: commit.operation_id,
+            event_id: commit.event_id,
+            lineage: event_lineage,
             entity_version: commit.next_version,
             sequence: next_sequence,
             duplicate: false,
@@ -310,6 +410,12 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         fail_at(failpoint, CommitFailPoint::AfterLedger)?;
         fail_at(failpoint, CommitFailPoint::BeforeAudit)?;
         let audit = AuditRecord {
+            authority: commit
+                .authority
+                .map(|authority| aequora_types::AuthorityTimeline {
+                    authority_id: authority.authority_id,
+                    epoch: authority.epoch,
+                }),
             offset: AuditOffset(
                 u64::try_from(state.audit.len())
                     .unwrap_or(u64::MAX)
@@ -317,6 +423,8 @@ impl OperationLedger for InMemoryAuthoritativeStore {
             ),
             tenant_id: commit.tenant_id,
             operation_id: commit.operation_id,
+            event_id: commit.event_id,
+            operation_lineage: commit.operation_lineage,
             actor_id: commit.actor_id,
             device_id: commit.device_id,
             operation_kind: commit.operation_kind,
@@ -336,6 +444,9 @@ impl OperationLedger for InMemoryAuthoritativeStore {
             .insert(commit.scope_id);
         state.sequences.insert(scope_key, next_sequence);
         state.journal.push(change);
+        state
+            .operation_lineages
+            .insert(operation_key, commit.operation_lineage);
         state.ledger.insert(operation_key, ack.clone());
         state.audit.push(audit);
         fail_at(failpoint, CommitFailPoint::AfterCommit)?;
@@ -356,6 +467,32 @@ impl AuditLog for InMemoryAuthoritativeStore {
             .audit
             .iter()
             .filter(|record| record.tenant_id == tenant && record.offset > offset);
+        let records: Vec<_> = matching.by_ref().take(limit).cloned().collect();
+        let has_more = matching.next().is_some();
+        let next_offset = records.last().map_or(offset, |record| record.offset);
+        Ok(AuditPage {
+            records,
+            next_offset,
+            has_more,
+        })
+    }
+}
+
+#[async_trait]
+impl CorrelationLog for InMemoryAuthoritativeStore {
+    async fn read_correlation(
+        &self,
+        tenant: TenantId,
+        correlation_id: CorrelationId,
+        offset: AuditOffset,
+        limit: usize,
+    ) -> Result<AuditPage, StoreError> {
+        let state = self.state();
+        let mut matching = state.audit.iter().filter(|record| {
+            record.tenant_id == tenant
+                && record.offset > offset
+                && record.operation_lineage.correlation_id == correlation_id
+        });
         let records: Vec<_> = matching.by_ref().take(limit).cloned().collect();
         let has_more = matching.next().is_some();
         let next_offset = records.last().map_or(offset, |record| record.offset);
@@ -388,14 +525,14 @@ impl SnapshotStore for InMemoryAuthoritativeStore {
         let mut state = self.state();
         let descriptor = SnapshotDescriptor {
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
+            cursor: Cursor::legacy(
                 scope,
-                sequence: state
+                state
                     .sequences
                     .get(&(tenant, scope))
                     .copied()
                     .unwrap_or(Sequence(0)),
-            },
+            ),
         };
         let mut entities: Vec<_> = state
             .entities
@@ -558,6 +695,8 @@ struct LocalState {
     original: HashMap<OperationId, OperationEnvelope>,
     outbox_states: HashMap<OperationId, OutboxState>,
     retry_metadata: HashMap<OperationId, RetryMetadata>,
+    ever_sent: HashSet<OperationId>,
+    supersessions: Vec<Supersession>,
     cursors: HashMap<SyncScopeId, Cursor>,
     entities: HashMap<(SyncScopeId, EntityRef), SnapshotEntity>,
     processed: HashSet<(SyncScopeId, Sequence)>,
@@ -565,6 +704,8 @@ struct LocalState {
     conflicts: Vec<Conflict>,
     conflict_resolutions: HashMap<OperationId, ConflictResolution>,
     staged_snapshots: HashMap<SyncScopeId, StagedSnapshot>,
+    coordination: Option<LeaseState>,
+    scope_state: LocalScopeState,
 }
 
 struct StagedSnapshot {
@@ -582,6 +723,191 @@ impl TransactionCapabilityProvider for InMemoryLocalStore {
     fn transaction_capabilities(&self) -> TransactionCapabilities {
         TransactionCapabilities::REFERENCE_LOCAL
     }
+}
+
+fn reference_coordination(state: &mut LocalState) -> &mut LeaseState {
+    state
+        .coordination
+        .get_or_insert_with(|| LeaseState::new(LocalStoreId::new()))
+}
+
+fn coordination_error(error: CoordinationError) -> StoreError {
+    match error {
+        CoordinationError::LeaseHeld
+        | CoordinationError::StaleFence
+        | CoordinationError::GenerationChanged => StoreError::leadership_lost(error.to_string()),
+        _ => StoreError::permanent(error.to_string()),
+    }
+}
+
+#[async_trait]
+impl LocalCoordinationStore for InMemoryLocalStore {
+    fn coordination_support(&self) -> LocalCoordinationSupport {
+        LocalCoordinationSupport::Full
+    }
+
+    async fn coordination_snapshot(&self) -> Result<CoordinationSnapshot, StoreError> {
+        Ok(reference_coordination(&mut self.state()).snapshot())
+    }
+
+    async fn acquire_lease(&self, request: LeaseRequest) -> Result<LeaseGrant, StoreError> {
+        reference_coordination(&mut self.state())
+            .acquire(request)
+            .map_err(coordination_error)
+    }
+
+    async fn renew_lease(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<LeaseGrant, StoreError> {
+        reference_coordination(&mut self.state())
+            .renew(grant, now_unix_ms, ttl_ms)
+            .map_err(coordination_error)
+    }
+
+    async fn release_lease(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        reference_coordination(&mut self.state())
+            .release(grant, now_unix_ms)
+            .map_err(coordination_error)
+    }
+
+    async fn validate_fence(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        reference_coordination(&mut self.state())
+            .snapshot()
+            .validate(grant, now_unix_ms)
+            .map_err(coordination_error)
+    }
+
+    async fn advance_store_generation(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+    ) -> Result<LocalStoreGeneration, StoreError> {
+        reference_coordination(&mut self.state())
+            .advance_generation(grant, now_unix_ms)
+            .map_err(coordination_error)
+    }
+}
+
+impl IntegrityCapabilityProvider for InMemoryLocalStore {
+    fn integrity_support(&self) -> IntegritySupport {
+        IntegritySupport::Full
+    }
+}
+
+#[async_trait]
+impl LocalIntegrityStore for InMemoryLocalStore {
+    async fn capture_local_integrity(
+        &self,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        let state = self.state();
+        if boundary.scope != scope || state.cursors.get(&scope).copied() != Some(boundary) {
+            return Err(StoreError::permanent(
+                "local integrity capture requires the installed scope cursor boundary",
+            ));
+        }
+        let entities = state
+            .entities
+            .iter()
+            .filter(|((entity_scope, _), _)| *entity_scope == scope)
+            .map(|(_, snapshot)| CanonicalEntity {
+                entity: snapshot.entity,
+                version: snapshot.version,
+                hash_schema: CURRENT_HASH_SCHEMA,
+                payload: snapshot.payload.clone(),
+                tombstone: snapshot.tombstone,
+            })
+            .collect::<Vec<_>>();
+        IntegritySnapshot::build(scope, boundary, generation, scheme, entities, max_entities)
+            .map_err(|error| StoreError::permanent(error.to_string()))
+    }
+
+    async fn repair_local_replica(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        repair_reference_replica(&mut self.state(), plan, replacements, removals)
+    }
+
+    async fn repair_local_replica_fenced(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+        fence: Option<LeaseGrant>,
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        let mut state = self.state();
+        validate_reference_fence(&mut state, fence)?;
+        repair_reference_replica(&mut state, plan, replacements, removals)
+    }
+}
+
+fn repair_reference_replica(
+    state: &mut LocalState,
+    plan: &RepairPlan,
+    replacements: &[CanonicalEntity],
+    removals: &[EntityRef],
+) -> Result<ReplicaRepairReport, StoreError> {
+    if !matches!(plan.strategy, RepairStrategy::ReplaceEntities) {
+        return Err(StoreError::permanent(
+            "this repair plan requires bootstrap or operator quarantine",
+        ));
+    }
+    if state.cursors.get(&plan.boundary.scope).copied() != Some(plan.boundary) {
+        return Err(StoreError::permanent(
+            "repair boundary no longer matches the local synchronization cursor",
+        ));
+    }
+    if replacements
+        .iter()
+        .map(|value| value.entity)
+        .chain(removals.iter().copied())
+        .any(|entity| !plan.affected_entities.contains(&entity))
+    {
+        return Err(StoreError::permanent(
+            "repair payload contains an entity outside the approved plan",
+        ));
+    }
+    let mut preserved_pending_operations = state
+        .pending
+        .iter()
+        .filter(|operation| {
+            state
+                .outbox_states
+                .get(&operation.operation_id)
+                .is_some_and(|status| status.is_replayable())
+        })
+        .map(|operation| operation.operation_id)
+        .collect::<Vec<_>>();
+    preserved_pending_operations.sort_unstable();
+    for entity in removals {
+        state.entities.remove(&(plan.boundary.scope, *entity));
+    }
+    for replacement in replacements {
+        state.entities.insert(
+            (plan.boundary.scope, replacement.entity),
+            SnapshotEntity {
+                entity: replacement.entity,
+                version: replacement.version,
+                payload: replacement.payload.clone(),
+                tombstone: replacement.tombstone,
+            },
+        );
+    }
+    Ok(ReplicaRepairReport {
+        repair_id: plan.repair_id,
+        sync_cursor: plan.boundary,
+        preserved_pending_operations,
+    })
 }
 
 impl InMemoryLocalStore {
@@ -627,6 +953,12 @@ impl InMemoryLocalStore {
     pub fn conflicts(&self) -> Vec<Conflict> {
         self.state().conflicts.clone()
     }
+
+    /// Returns payload-free local compaction history.
+    #[must_use]
+    pub fn supersessions(&self) -> Vec<Supersession> {
+        self.state().supersessions.clone()
+    }
 }
 
 #[async_trait]
@@ -646,6 +978,10 @@ impl OutboxStore for InMemoryLocalStore {
                         .retry_metadata
                         .get(&operation.operation_id)
                         .is_none_or(|retry| retry.next_attempt_unix_ms <= now)
+                    && state
+                        .scope_state
+                        .pending_disposition(operation.operation_id)
+                        .is_none()
             })
             .take(limit)
             .cloned()
@@ -668,13 +1004,135 @@ impl OutboxStore for InMemoryLocalStore {
         state.pending.push(operation);
         Ok(())
     }
+
+    async fn compact_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        let mut state = self.state();
+        compact_reference_outbox(&mut state, registry, max_operations)
+    }
+
+    async fn compact_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        let mut state = self.state();
+        if let Some(grant) = fence {
+            reference_coordination(&mut state)
+                .snapshot()
+                .validate(grant, unix_time_millis())
+                .map_err(coordination_error)?;
+        }
+        compact_reference_outbox(&mut state, registry, max_operations)
+    }
+
+    async fn rebase_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+    ) -> Result<RebasePlan, StoreError> {
+        let mut state = self.state();
+        rebase_reference_outbox(&mut state, registry, targets, max_operations)
+    }
+
+    async fn rebase_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<RebasePlan, StoreError> {
+        let mut state = self.state();
+        validate_reference_fence(&mut state, fence)?;
+        rebase_reference_outbox(&mut state, registry, targets, max_operations)
+    }
+}
+
+#[async_trait]
+impl ScopeStateStore for InMemoryLocalStore {
+    async fn load_scope_state(&self) -> Result<LocalScopeState, StoreError> {
+        Ok(self.state().scope_state.clone())
+    }
+
+    async fn install_subscription(&self, subscription: &Subscription) -> Result<(), StoreError> {
+        self.state()
+            .scope_state
+            .install(subscription.clone())
+            .map_err(|error| StoreError::permanent(error.to_string()))
+    }
+
+    async fn apply_scope_transition(
+        &self,
+        transition: &ScopeTransition,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        self.state()
+            .scope_state
+            .apply(transition)
+            .map_err(|error| StoreError::permanent(error.to_string()))
+    }
+
+    async fn apply_scope_transition_fenced(
+        &self,
+        transition: &ScopeTransition,
+        fence: Option<LeaseGrant>,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        let mut state = self.state();
+        validate_reference_fence(&mut state, fence)?;
+        state
+            .scope_state
+            .apply(transition)
+            .map_err(|error| StoreError::permanent(error.to_string()))
+    }
+}
+
+fn rebase_reference_outbox(
+    state: &mut LocalState,
+    registry: &OptimizationRegistry,
+    targets: &[RebaseTarget],
+    max_operations: usize,
+) -> Result<RebasePlan, StoreError> {
+    let entries = queue_entries(state, max_operations)?;
+    let plan = plan_rebase(&entries, targets, registry)
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+    for rewrite in &plan.rewrites {
+        let operation = {
+            let operation = state
+                .pending
+                .iter_mut()
+                .find(|operation| operation.operation_id == rewrite.operation_id)
+                .ok_or_else(|| StoreError::permanent("rebase operation disappeared"))?;
+            operation.base_version = rewrite.new_base;
+            operation.clone()
+        };
+        state.original.insert(rewrite.operation_id, operation);
+    }
+    Ok(plan)
 }
 
 #[async_trait]
 impl OutboxStateStore for InMemoryLocalStore {
     async fn mark_sending(&self, operations: &[OperationId]) -> Result<(), StoreError> {
         let mut state = self.state();
-        transition_replayable(&mut state, operations, OutboxState::Sending)
+        transition_replayable(&mut state, operations, OutboxState::Sending)?;
+        state.ever_sent.extend(operations.iter().copied());
+        Ok(())
+    }
+
+    async fn mark_sending_fenced(
+        &self,
+        operations: &[OperationId],
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state();
+        validate_reference_fence(&mut state, fence)?;
+        transition_replayable(&mut state, operations, OutboxState::Sending)?;
+        state.ever_sent.extend(operations.iter().copied());
+        Ok(())
     }
 
     async fn mark_retry(
@@ -684,6 +1142,7 @@ impl OutboxStateStore for InMemoryLocalStore {
     ) -> Result<(), StoreError> {
         let mut state = self.state();
         transition_replayable(&mut state, operations, OutboxState::Retry)?;
+        state.ever_sent.extend(operations.iter().copied());
         for operation in operations {
             let attempt_count = state
                 .retry_metadata
@@ -697,6 +1156,20 @@ impl OutboxStateStore for InMemoryLocalStore {
                 },
             );
         }
+        Ok(())
+    }
+
+    async fn mark_retry_fenced(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state();
+        validate_reference_fence(&mut state, fence)?;
+        transition_replayable(&mut state, operations, OutboxState::Retry)?;
+        state.ever_sent.extend(operations.iter().copied());
+        record_reference_retry(&mut state, operations, next_attempt_unix_ms);
         Ok(())
     }
 
@@ -810,6 +1283,64 @@ impl ConflictInbox for InMemoryLocalStore {
     }
 }
 
+fn validate_reference_fence(
+    state: &mut LocalState,
+    fence: Option<LeaseGrant>,
+) -> Result<(), StoreError> {
+    if let Some(grant) = fence {
+        reference_coordination(state)
+            .snapshot()
+            .validate(grant, unix_time_millis())
+            .map_err(coordination_error)?;
+    }
+    Ok(())
+}
+
+fn compact_reference_outbox(
+    state: &mut LocalState,
+    registry: &OptimizationRegistry,
+    max_operations: usize,
+) -> Result<QueueCompactionPlan, StoreError> {
+    let entries = queue_entries(state, max_operations)?;
+    let plan = plan_compaction(&entries, registry, max_operations)
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+    let removed = plan
+        .remove_operations
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    state
+        .pending
+        .retain(|operation| !removed.contains(&operation.operation_id));
+    for operation in &removed {
+        state.original.remove(operation);
+        state.outbox_states.remove(operation);
+        state.retry_metadata.remove(operation);
+    }
+    state.supersessions.extend(plan.supersessions.clone());
+    Ok(plan)
+}
+
+fn record_reference_retry(
+    state: &mut LocalState,
+    operations: &[OperationId],
+    next_attempt_unix_ms: u64,
+) {
+    for operation in operations {
+        let attempt_count = state
+            .retry_metadata
+            .get(operation)
+            .map_or(1, |retry| retry.attempt_count.saturating_add(1));
+        state.retry_metadata.insert(
+            *operation,
+            RetryMetadata {
+                attempt_count,
+                next_attempt_unix_ms,
+            },
+        );
+    }
+}
+
 fn transition_replayable(
     state: &mut LocalState,
     operations: &[OperationId],
@@ -833,6 +1364,38 @@ fn transition_replayable(
     Ok(())
 }
 
+fn queue_entries(state: &LocalState, max_operations: usize) -> Result<Vec<QueueEntry>, StoreError> {
+    state
+        .pending
+        .iter()
+        .take(max_operations)
+        .enumerate()
+        .map(|(index, operation)| {
+            let ever_sent = state.ever_sent.contains(&operation.operation_id);
+            Ok(QueueEntry {
+                local_sequence: LocalOperationSeq(
+                    u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1),
+                ),
+                operation: operation.clone(),
+                mutability: if ever_sent {
+                    MutationMutability::ImmutablePossiblyDelivered
+                } else {
+                    MutationMutability::MutableUnsent
+                },
+                immutable_hash: if ever_sent {
+                    Some(
+                        semantic_envelope_hash(operation)
+                            .map_err(|error| StoreError::permanent(error.to_string()))?,
+                    )
+                } else {
+                    None
+                },
+                cancellation: None,
+            })
+        })
+        .collect()
+}
+
 #[async_trait]
 impl CursorStore for InMemoryLocalStore {
     async fn load_cursor(&self, scope: SyncScopeId) -> Result<Option<Cursor>, StoreError> {
@@ -843,101 +1406,42 @@ impl CursorStore for InMemoryLocalStore {
 #[async_trait]
 impl ReconciliationStore for InMemoryLocalStore {
     async fn reconcile(&self, response: &SyncResponse) -> Result<(), StoreError> {
+        reconcile_reference(&mut self.state(), response)
+    }
+
+    async fn reconcile_fenced(
+        &self,
+        response: &SyncResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
         let mut state = self.state();
-        let current = state.cursors.get(&response.next_cursor.scope).copied();
-        if current.is_some_and(|cursor| cursor.sequence > response.next_cursor.sequence) {
-            return Err(StoreError::permanent(
-                "cursor regression during reconciliation",
-            ));
+        if let Some(grant) = fence {
+            reference_coordination(&mut state)
+                .snapshot()
+                .validate(grant, unix_time_millis())
+                .map_err(coordination_error)?;
         }
-        let terminal: HashSet<_> = response
-            .acknowledged
-            .iter()
-            .map(|ack| ack.operation_id)
-            .chain(response.rejected.iter().map(|item| item.operation_id))
-            .chain(response.conflicts.iter().map(|item| item.operation_id))
-            .collect();
-        for acknowledgement in &response.acknowledged {
-            state
-                .outbox_states
-                .insert(acknowledgement.operation_id, OutboxState::Acknowledged);
-        }
-        for rejection in &response.rejected {
-            state
-                .outbox_states
-                .insert(rejection.operation_id, OutboxState::Rejected);
-        }
-        for conflict in &response.conflicts {
-            state
-                .outbox_states
-                .insert(conflict.operation_id, OutboxState::Conflict);
-        }
-        state
-            .pending
-            .retain(|operation| !terminal.contains(&operation.operation_id));
-        for change in &response.changes {
-            let marker = (change.scope_id, change.sequence);
-            if state.processed.insert(marker) {
-                state.entities.insert(
-                    (change.scope_id, change.entity),
-                    SnapshotEntity {
-                        entity: change.entity,
-                        version: change.version,
-                        payload: change.payload.clone(),
-                        tombstone: matches!(
-                            change.change_kind,
-                            aequora_protocol::ChangeKind::Tombstone
-                        ),
-                    },
-                );
-            }
-        }
-        state.rejections.extend(response.rejected.iter().cloned());
-        state.conflicts.extend(response.conflicts.iter().cloned());
-        state
-            .cursors
-            .insert(response.next_cursor.scope, response.next_cursor);
-        Ok(())
+        reconcile_reference(&mut state, response)
     }
 
     async fn stage_snapshot(&self, response: &BootstrapResponse) -> Result<(), StoreError> {
         let mut state = self.state();
-        let scope = response.cursor.scope;
-        let staged = state
-            .staged_snapshots
-            .entry(scope)
-            .or_insert_with(|| StagedSnapshot {
-                progress: SnapshotProgress {
-                    snapshot_id: response.snapshot_id,
-                    cursor: response.cursor,
-                    next_offset: 0,
-                },
-                entities: Vec::new(),
-            });
-        if staged.progress.snapshot_id != response.snapshot_id
-            || staged.progress.cursor != response.cursor
-            || staged.progress.next_offset != response.offset
-        {
-            return Err(StoreError::permanent(
-                "snapshot page does not match staged progress",
-            ));
+        stage_reference_snapshot(&mut state, response)
+    }
+
+    async fn stage_snapshot_fenced(
+        &self,
+        response: &BootstrapResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state();
+        if let Some(grant) = fence {
+            reference_coordination(&mut state)
+                .snapshot()
+                .validate(grant, unix_time_millis())
+                .map_err(coordination_error)?;
         }
-        staged.entities.extend(response.entities.iter().cloned());
-        staged.progress.next_offset = response.next_offset;
-        if !response.has_more {
-            let staged = state
-                .staged_snapshots
-                .remove(&scope)
-                .ok_or_else(|| StoreError::permanent("snapshot staging disappeared"))?;
-            state
-                .entities
-                .retain(|(entity_scope, _), _| *entity_scope != scope);
-            for entity in staged.entities {
-                state.entities.insert((scope, entity.entity), entity);
-            }
-            state.cursors.insert(scope, response.cursor);
-        }
-        Ok(())
+        stage_reference_snapshot(&mut state, response)
     }
 
     async fn snapshot_progress(
@@ -950,6 +1454,105 @@ impl ReconciliationStore for InMemoryLocalStore {
             .get(&scope)
             .map(|snapshot| snapshot.progress))
     }
+}
+
+fn reconcile_reference(state: &mut LocalState, response: &SyncResponse) -> Result<(), StoreError> {
+    let current = state.cursors.get(&response.next_cursor.scope).copied();
+    if current.is_some_and(|cursor| cursor.sequence > response.next_cursor.sequence) {
+        return Err(StoreError::permanent(
+            "cursor regression during reconciliation",
+        ));
+    }
+    let terminal: HashSet<_> = response
+        .acknowledged
+        .iter()
+        .map(|ack| ack.operation_id)
+        .chain(response.rejected.iter().map(|item| item.operation_id))
+        .chain(response.conflicts.iter().map(|item| item.operation_id))
+        .collect();
+    for acknowledgement in &response.acknowledged {
+        state
+            .outbox_states
+            .insert(acknowledgement.operation_id, OutboxState::Acknowledged);
+    }
+    for rejection in &response.rejected {
+        state
+            .outbox_states
+            .insert(rejection.operation_id, OutboxState::Rejected);
+    }
+    for conflict in &response.conflicts {
+        state
+            .outbox_states
+            .insert(conflict.operation_id, OutboxState::Conflict);
+    }
+    state
+        .pending
+        .retain(|operation| !terminal.contains(&operation.operation_id));
+    for change in &response.changes {
+        let marker = (change.scope_id, change.sequence);
+        if state.processed.insert(marker) {
+            state.entities.insert(
+                (change.scope_id, change.entity),
+                SnapshotEntity {
+                    entity: change.entity,
+                    version: change.version,
+                    payload: change.payload.clone(),
+                    tombstone: matches!(
+                        change.change_kind,
+                        aequora_protocol::ChangeKind::Tombstone
+                    ),
+                },
+            );
+        }
+    }
+    state.rejections.extend(response.rejected.iter().cloned());
+    state.conflicts.extend(response.conflicts.iter().cloned());
+    state
+        .cursors
+        .insert(response.next_cursor.scope, response.next_cursor);
+    Ok(())
+}
+
+fn stage_reference_snapshot(
+    state: &mut LocalState,
+    response: &BootstrapResponse,
+) -> Result<(), StoreError> {
+    let scope = response.cursor.scope;
+    let staged = state
+        .staged_snapshots
+        .entry(scope)
+        .or_insert_with(|| StagedSnapshot {
+            progress: SnapshotProgress {
+                snapshot_id: response.snapshot_id,
+                cursor: response.cursor,
+                next_offset: 0,
+            },
+            entities: Vec::new(),
+        });
+    if staged.progress.snapshot_id != response.snapshot_id
+        || staged.progress.cursor != response.cursor
+        || staged.progress.next_offset != response.offset
+    {
+        return Err(StoreError::permanent(
+            "snapshot page does not match staged progress",
+        ));
+    }
+    staged.entities.extend(response.entities.iter().cloned());
+    staged.progress.next_offset = response.next_offset;
+    if !response.has_more {
+        let staged = state
+            .staged_snapshots
+            .remove(&scope)
+            .ok_or_else(|| StoreError::permanent("snapshot staging disappeared"))?;
+        state
+            .entities
+            .retain(|(entity_scope, _), _| *entity_scope != scope);
+        for entity in staged.entities {
+            state.entities.insert((scope, entity.entity), entity);
+        }
+        state.cursors.insert(scope, response.cursor);
+    }
+    Ok(())
 }
 
 /// Direct transport that invokes a server without network nondeterminism.
@@ -1143,6 +1746,20 @@ fn map_server_error(error: ServerError) -> TransportError {
         ServerError::Store(store) if store.kind == StoreErrorKind::Transient => {
             TransportError::transient(store.message)
         }
+        maintenance @ ServerError::Maintenance { .. } => {
+            TransportError::transient(maintenance.to_string())
+                .with_code(OperationalErrorCode::Maintenance)
+        }
+        admission @ ServerError::Admission(rejection) if rejection.retryable() => {
+            let error = TransportError::transient(admission.to_string())
+                .with_code(OperationalErrorCode::Overloaded);
+            match rejection.retry_after_ms() {
+                Some(delay) => error.with_retry_after(Duration::from_millis(delay)),
+                None => error,
+            }
+        }
+        admission @ ServerError::Admission(_) => TransportError::permanent(admission.to_string())
+            .with_code(OperationalErrorCode::PayloadLimit),
         other => TransportError::permanent(other.to_string()),
     }
 }

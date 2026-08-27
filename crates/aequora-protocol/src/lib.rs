@@ -1,9 +1,9 @@
 //! Stable wire data-transfer objects for synchronization exchanges.
 
 use aequora_types::{
-    ActorId, Cursor, DeviceId, EntityRef, EntityVersion, HybridTimestamp, OperationId,
-    ProtocolVersion, RegionId, RequestId, SchemaVersion, Sequence, SessionId, SnapshotId,
-    SyncScopeId, TenantId,
+    ActorId, AuthorityEpoch, AuthorityId, Cursor, DeviceId, EntityRef, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, OperationId, ProtocolVersion, RegionId, RequestId,
+    SchemaVersion, Sequence, SessionId, SnapshotId, SyncScopeId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -205,6 +205,13 @@ pub struct OperationMetadata {
     /// Operation IDs that must execute before this operation.
     #[serde(deserialize_with = "wire_limits::dependencies")]
     pub dependencies: SmallVec<[OperationId; 4]>,
+    /// Retry-stable root correlation and direct semantic cause.
+    #[serde(default = "legacy_lineage")]
+    pub lineage: LineageContext,
+}
+
+fn legacy_lineage() -> LineageContext {
+    LineageContext::legacy_missing()
 }
 
 /// A domain operation and the synchronization metadata needed to process it safely.
@@ -285,6 +292,22 @@ pub enum Capability {
     Quic,
     /// The peer understands region-routing metadata.
     MultiRegion,
+    /// The peer preserves correlation and direct-causation metadata version one.
+    LineageV1,
+    /// The peer supports canonical integrity generation one and bounded repair negotiation.
+    IntegrityV1,
+    /// The peer can negotiate versioned scope transitions outside the legacy v1 exchange body.
+    ScopeV1,
+    /// The peer can negotiate the additive transport-neutral live control protocol.
+    LiveV1,
+    /// The peer can verify signed snapshot manifests version one.
+    SignedSnapshotV1,
+    /// The peer can decrypt encrypted snapshot chunks version one.
+    EncryptedSnapshotV1,
+    /// The peer can produce or verify device operation signatures version one.
+    DeviceSignatureV1,
+    /// The peer binds every synchronization cursor to an authority ID and epoch.
+    AuthorityEpochV1,
 }
 
 /// Client-enforced response limits advertised to the server.
@@ -331,6 +354,10 @@ pub struct SyncRequest {
 pub struct OperationAck {
     /// Operation that produced this acknowledgement.
     pub operation_id: OperationId,
+    /// Stable authoritative event returned for both first execution and duplicate replay.
+    pub event_id: EventId,
+    /// Original retry-stable operation lineage retained by the idempotency ledger.
+    pub lineage: LineageContext,
     /// Resulting authoritative entity version.
     pub entity_version: EntityVersion,
     /// Journal sequence produced by the operation.
@@ -429,6 +456,10 @@ pub struct RemoteChange {
     pub sequence: Sequence,
     /// Operation that produced the change.
     pub operation_id: OperationId,
+    /// Stable identity of this authoritative event, independent from its journal sequence.
+    pub event_id: EventId,
+    /// Root correlation and direct cause retained across adapters and consumers.
+    pub lineage: LineageContext,
     /// Changed entity.
     pub entity: EntityRef,
     /// Resulting entity version.
@@ -475,6 +506,15 @@ pub enum SyncDirective {
     ResyncRequired {
         /// Stable reason suitable for application policy and diagnostics.
         reason: ResyncReason,
+    },
+    /// The authority timeline advanced and incremental replay must freeze before rebootstrap.
+    AuthorityChanged {
+        /// Logical authority that owns the replacement timeline.
+        authority_id: AuthorityId,
+        /// Epoch supplied by the rejected client cursor.
+        previous_epoch: AuthorityEpoch,
+        /// Current epoch that must be bootstrapped.
+        current_epoch: AuthorityEpoch,
     },
 }
 

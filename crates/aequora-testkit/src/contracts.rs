@@ -3,17 +3,35 @@
 //! These checks mutate their input stores. Callers must supply isolated stores and fixture IDs
 //! that have never previously been used in those stores.
 
+use aequora_coordination::{
+    FencingToken, LeaseKind, LeaseRequest, LocalCoordinationSupport, LocalStoreGeneration,
+    LocalStoreId, ProcessInstanceId,
+};
+use aequora_integrity::{
+    CanonicalEntity, IntegrityComparison, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
+    PartitionScheme, RepairPlan,
+};
 use aequora_protocol::{
-    ChangeKind, OperationAck, OperationEnvelope, RemoteChange, SyncDirective, SyncResponse,
+    ChangeKind, OperationAck, OperationEnvelope, OperationKind, OperationMetadata, RemoteChange,
+    SyncDirective, SyncResponse,
+};
+use aequora_scope::{
+    LocalScopeState, MembershipRecord, ProjectionVersion, ResolvedScope, ScopeCursor,
+    ScopeDefinitionId, ScopeDescriptor, ScopeGeneration, ScopeTransition, ScopeTransitionId,
+    ScopeTransitionKind, ScopeTransitionOutcome, ScopeVersion, Subscription, SubscriptionId,
+    SubscriptionState,
 };
 use aequora_store::{
-    AuditLog, AuditOffset, AuthoritativeStore, ChangeJournal, CommitOperation, CommitOutcome,
-    EntityReader, LocalStore, OutboxState, OutboxStateStore, SnapshotStore, StoreError,
+    AuditLog, AuditOffset, AuthoritativeIntegritySource, AuthoritativeStore, ChangeJournal,
+    CommitOperation, CommitOutcome, CorrelationLog, CursorStore, EntityReader,
+    IntegrityCapabilityProvider, LocalCoordinationStore, LocalIntegrityStore, LocalStore,
+    OutboxState, OutboxStateStore, OutboxStore, ScopeStateStore, SnapshotStore, StoreError,
     TransactionCapabilities, TransactionCapabilityProvider, TransactionGuarantees,
 };
 use aequora_types::{
-    Cursor, EntityId, EntityRef, EntityVersion, HybridTimestamp, OperationId, Sequence, SnapshotId,
-    SyncScopeId,
+    ActorId, CorrelationId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion,
+    EventId, HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, ProtocolVersion,
+    SchemaVersion, Sequence, SnapshotId, SyncScopeId, TenantId,
 };
 use futures_util::future::join;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +57,299 @@ pub struct LocalAdapterContractReport {
     pub cursor: Cursor,
 }
 
+/// Evidence returned after a local adapter passes durable coordination compliance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalCoordinationContractReport {
+    /// Persistent identity retained across election and generation changes.
+    pub store_id: LocalStoreId,
+    /// Highest fencing token allocated during the scenario.
+    pub fencing_token: FencingToken,
+    /// Generation allocated by an exclusive maintenance owner.
+    pub store_generation: LocalStoreGeneration,
+}
+
+/// Evidence returned after a local adapter passes dynamic-scope compliance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScopeStateContractReport {
+    pub subscription: aequora_scope::SubscriptionId,
+    pub transition: aequora_scope::ScopeTransitionId,
+    pub quarantined_operation: OperationId,
+}
+
+/// Produces isolated inputs for [`verify_scope_state_store`].
+///
+/// # Errors
+///
+/// Returns a typed scope error only if a built-in non-zero fixture identifier is invalid.
+pub fn scope_state_contract_fixture()
+-> Result<(Subscription, ScopeTransition, OperationEnvelope), aequora_scope::ScopeError> {
+    let tenant = TenantId::new();
+    let scope_id = SyncScopeId::new();
+    let entity = EntityRef {
+        entity_type: EntityType::new(81).map_err(|_| aequora_scope::ScopeError::ZeroIdentity)?,
+        entity_id: EntityId::new(),
+    };
+    let definition = ScopeDefinitionId::new(1)?;
+    let initial = ResolvedScope {
+        scope_id,
+        version: ScopeVersion::INITIAL,
+        generation: ScopeGeneration::INITIAL,
+        descriptor: ScopeDescriptor {
+            tenant_id: tenant,
+            definition,
+            partitions: std::collections::BTreeSet::new(),
+            policy_version: 1,
+            projection: ProjectionVersion(1),
+        },
+    };
+    let subscription = Subscription {
+        subscription_id: SubscriptionId::new(),
+        scope: initial.clone(),
+        state: SubscriptionState::Resolved,
+        cursor: None,
+        pending_transition: None,
+    };
+    let next_version = initial.version.next()?;
+    let mut target = initial.clone();
+    target.version = next_version;
+    let transition = ScopeTransition {
+        transition_id: ScopeTransitionId::new(),
+        subscription_id: subscription.subscription_id,
+        from_version: initial.version,
+        from_generation: initial.generation,
+        target: Some(target),
+        boundary: Some(ScopeCursor {
+            scope_id,
+            version: next_version,
+            generation: initial.generation,
+            sequence: Sequence(12),
+        }),
+        kind: ScopeTransitionKind::FullBootstrap,
+        additions: vec![MembershipRecord {
+            scope_id,
+            projection: ProjectionVersion(1),
+            entity,
+            membership_version: next_version,
+        }],
+        removals: Vec::new(),
+        affected_pending_operations: Vec::new(),
+        staging_complete: true,
+    };
+    let operation = OperationEnvelope {
+        protocol_version: ProtocolVersion::V1,
+        operation_id: OperationId::new(),
+        tenant_id: tenant,
+        actor_id: ActorId::new(),
+        device_id: DeviceId::new(),
+        entity,
+        base_version: None,
+        created_at: HybridTimestamp {
+            physical_ms: 1,
+            logical: 0,
+            node: NodeId::new(),
+        },
+        schema_version: SchemaVersion(1),
+        operation_kind: OperationKind(1),
+        payload: b"scope contract".to_vec(),
+        metadata: OperationMetadata::default(),
+    };
+    Ok((subscription, transition, operation))
+}
+
+/// Proves durable staging, atomic activation, transition idempotency, and outbox quarantine.
+///
+/// The supplied transition must be a complete bootstrap or expansion from `subscription`, include
+/// at least one membership addition, and use `operation.operation_id` when the generated
+/// revocation is applied.
+///
+/// # Errors
+///
+/// Returns a typed storage failure or semantic contract violation.
+pub async fn verify_scope_state_store<S>(
+    store: &S,
+    subscription: Subscription,
+    mut activation: ScopeTransition,
+    operation: OperationEnvelope,
+) -> Result<ScopeStateContractReport, AdapterContractError>
+where
+    S: ScopeStateStore + OutboxStore,
+{
+    store.install_subscription(&subscription).await?;
+    store.append_operation(operation.clone()).await?;
+
+    activation.staging_complete = false;
+    let staged = store.apply_scope_transition(&activation).await?;
+    let state = store.load_scope_state().await?;
+    if staged.applied
+        || state
+            .subscription(subscription.subscription_id)
+            .is_none_or(|item| {
+                !matches!(
+                    item.state,
+                    SubscriptionState::Bootstrapping | SubscriptionState::Expanding
+                )
+            })
+    {
+        return Err(AdapterContractError::Violation(
+            "incomplete scope staging became active",
+        ));
+    }
+
+    activation.staging_complete = true;
+    let applied = store.apply_scope_transition(&activation).await?;
+    if !applied.applied {
+        return Err(AdapterContractError::Violation(
+            "complete scope transition did not activate",
+        ));
+    }
+    let duplicate = store.apply_scope_transition(&activation).await?;
+    if duplicate.applied {
+        return Err(AdapterContractError::Violation(
+            "scope transition retry was not idempotent",
+        ));
+    }
+
+    let active = store.load_scope_state().await?;
+    let current = active
+        .subscription(subscription.subscription_id)
+        .cloned()
+        .ok_or(AdapterContractError::Violation(
+            "activated subscription disappeared",
+        ))?;
+    if current.state != SubscriptionState::Active {
+        return Err(AdapterContractError::Violation(
+            "complete scope transition did not become active",
+        ));
+    }
+    let revocation = ScopeTransition {
+        transition_id: aequora_scope::ScopeTransitionId::new(),
+        subscription_id: current.subscription_id,
+        from_version: current.scope.version,
+        from_generation: current.scope.generation,
+        target: None,
+        boundary: None,
+        kind: aequora_scope::ScopeTransitionKind::Revocation,
+        additions: Vec::new(),
+        removals: Vec::new(),
+        affected_pending_operations: vec![operation.operation_id],
+        staging_complete: true,
+    };
+    let revoked: ScopeTransitionOutcome = store.apply_scope_transition(&revocation).await?;
+    if !revoked.applied
+        || store
+            .pending_operations(1_024)
+            .await?
+            .iter()
+            .any(|candidate| candidate.operation_id == operation.operation_id)
+    {
+        return Err(AdapterContractError::Violation(
+            "revoked scope operation remained transmittable",
+        ));
+    }
+    let final_state: LocalScopeState = store.load_scope_state().await?;
+    if final_state
+        .pending_disposition(operation.operation_id)
+        .is_none()
+    {
+        return Err(AdapterContractError::Violation(
+            "revocation did not retain pending-intent disposition",
+        ));
+    }
+    Ok(ScopeStateContractReport {
+        subscription: subscription.subscription_id,
+        transition: activation.transition_id,
+        quarantined_operation: operation.operation_id,
+    })
+}
+
+/// Exercises acquisition exclusion, renewal, release, takeover fencing, and generation switching.
+///
+/// # Errors
+///
+/// Returns a typed violation when the adapter advertises no durable coordination or accepts a
+/// stale leader/generation transition.
+pub async fn verify_local_coordination<S>(
+    store: &S,
+) -> Result<LocalCoordinationContractReport, AdapterContractError>
+where
+    S: LocalCoordinationStore,
+{
+    if store.coordination_support() != LocalCoordinationSupport::Full {
+        return Err(AdapterContractError::Violation(
+            "multi-process compliance requires full local coordination support",
+        ));
+    }
+    let initial = store.coordination_snapshot().await?;
+    let first = store
+        .acquire_lease(LeaseRequest {
+            owner_id: ProcessInstanceId::new(),
+            kind: LeaseKind::SyncCoordinator,
+            now_unix_ms: 1_000,
+            ttl_ms: 1_000,
+        })
+        .await?;
+    if store
+        .acquire_lease(LeaseRequest {
+            owner_id: ProcessInstanceId::new(),
+            kind: LeaseKind::SyncCoordinator,
+            now_unix_ms: 1_001,
+            ttl_ms: 1_000,
+        })
+        .await
+        .is_ok()
+    {
+        return Err(AdapterContractError::Violation(
+            "two processes acquired the same unexpired lease",
+        ));
+    }
+    let renewed = store.renew_lease(first, 1_100, 1_000).await?;
+    store.release_lease(renewed, 1_101).await?;
+    let takeover = store
+        .acquire_lease(LeaseRequest {
+            owner_id: ProcessInstanceId::new(),
+            kind: LeaseKind::SyncCoordinator,
+            now_unix_ms: 1_102,
+            ttl_ms: 1_000,
+        })
+        .await?;
+    if takeover.fencing_token <= first.fencing_token
+        || store.validate_fence(first, 1_103).await.is_ok()
+    {
+        return Err(AdapterContractError::Violation(
+            "takeover did not monotonically fence the previous leader",
+        ));
+    }
+    store.release_lease(takeover, 1_104).await?;
+    let maintenance = store
+        .acquire_lease(LeaseRequest {
+            owner_id: ProcessInstanceId::new(),
+            kind: LeaseKind::Maintenance,
+            now_unix_ms: 1_105,
+            ttl_ms: 1_000,
+        })
+        .await?;
+    let generation = store.advance_store_generation(maintenance, 1_106).await?;
+    if initial.store_id != maintenance.store_id || generation <= initial.store_generation {
+        return Err(AdapterContractError::Violation(
+            "maintenance generation switch changed store identity or failed to advance",
+        ));
+    }
+    store
+        .release_lease(
+            aequora_coordination::LeaseGrant {
+                store_generation: generation,
+                ..maintenance
+            },
+            1_107,
+        )
+        .await?;
+    Ok(LocalCoordinationContractReport {
+        store_id: initial.store_id,
+        fencing_token: maintenance.fencing_token,
+        store_generation: generation,
+    })
+}
+
 /// Evidence returned after an authority adapter passes its core behavioral contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthoritativeAdapterContractReport {
@@ -48,6 +359,210 @@ pub struct AuthoritativeAdapterContractReport {
     pub snapshot_id: SnapshotId,
     /// Immutable audit offset containing the committed operation.
     pub audit_offset: AuditOffset,
+}
+
+/// Evidence that two physically independent adapters produced one canonical integrity root.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntegrityAdapterContractReport {
+    /// Canonical authority snapshot.
+    pub authority: IntegritySnapshot,
+    /// Canonical local authoritative-base snapshot.
+    pub local: IntegritySnapshot,
+}
+
+/// Shared boundary and bounds for one cross-adapter integrity contract run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegrityContractRequest {
+    /// Authority tenant whose canonical state is captured.
+    pub tenant: TenantId,
+    /// Synchronization scope represented by both adapters.
+    pub scope: SyncScopeId,
+    /// Exact authority/local cursor boundary.
+    pub boundary: Cursor,
+    /// Canonical hash and partition generation.
+    pub generation: IntegrityGeneration,
+    /// Deterministic bounded partition scheme.
+    pub scheme: PartitionScheme,
+    /// Maximum canonical entities either adapter may scan.
+    pub max_entities: usize,
+}
+
+/// Verifies cross-adapter canonical root equality at exactly one shared boundary.
+///
+/// # Errors
+///
+/// Returns a typed violation when either adapter lacks integrity support or their canonical roots
+/// differ despite representing the same synchronized state.
+pub async fn verify_integrity_pair<A, L>(
+    authority: &A,
+    local: &L,
+    request: IntegrityContractRequest,
+) -> Result<IntegrityAdapterContractReport, AdapterContractError>
+where
+    A: AuthoritativeIntegritySource + IntegrityCapabilityProvider,
+    L: LocalIntegrityStore + IntegrityCapabilityProvider,
+{
+    if authority.integrity_support() == IntegritySupport::None
+        || local.integrity_support() == IntegritySupport::None
+    {
+        return Err(AdapterContractError::Violation(
+            "integrity compliance requires canonical snapshot support",
+        ));
+    }
+    let authority = authority
+        .capture_authoritative_integrity(
+            request.tenant,
+            request.scope,
+            request.boundary,
+            request.generation,
+            request.scheme,
+            request.max_entities,
+        )
+        .await?;
+    let local = local
+        .capture_local_integrity(
+            request.scope,
+            request.boundary,
+            request.generation,
+            request.scheme,
+            request.max_entities,
+        )
+        .await?;
+    if authority.compare(&local).map_err(|_| {
+        AdapterContractError::Violation("integrity manifests are not comparison-compatible")
+    })? != IntegrityComparison::Match
+    {
+        return Err(AdapterContractError::Violation(
+            "canonical roots differ across synchronized adapters",
+        ));
+    }
+    Ok(IntegrityAdapterContractReport { authority, local })
+}
+
+/// Verifies repair preserves pending operations exactly and never advances the sync cursor.
+///
+/// # Errors
+///
+/// Returns a contract violation when the adapter loses/reorders pending intent or changes the
+/// cursor as a side effect of integrity maintenance.
+pub async fn verify_replica_repair<L>(
+    local: &L,
+    plan: &RepairPlan,
+    replacements: &[CanonicalEntity],
+    removals: &[EntityRef],
+) -> Result<(), AdapterContractError>
+where
+    L: LocalIntegrityStore + OutboxStore + CursorStore,
+{
+    let pending_before = local.pending_operations(usize::MAX).await?;
+    let cursor_before = local.load_cursor(plan.boundary.scope).await?;
+    let report = local
+        .repair_local_replica(plan, replacements, removals)
+        .await?;
+    let pending_after = local.pending_operations(usize::MAX).await?;
+    let cursor_after = local.load_cursor(plan.boundary.scope).await?;
+    if pending_before != pending_after {
+        return Err(AdapterContractError::Violation(
+            "integrity repair changed pending operation intent",
+        ));
+    }
+    if cursor_before != cursor_after
+        || cursor_after != Some(plan.boundary)
+        || report.sync_cursor != plan.boundary
+    {
+        return Err(AdapterContractError::Violation(
+            "integrity repair changed the normal synchronization cursor",
+        ));
+    }
+    Ok(())
+}
+
+/// Isolated local-adapter fixture returned by a third-party compliance factory.
+pub struct LocalAdapterContractFixture<S> {
+    /// Fresh adapter instance or isolated namespace.
+    pub store: S,
+    /// Fresh operation envelope.
+    pub operation: OperationEnvelope,
+    /// Fresh synchronization scope.
+    pub scope: SyncScopeId,
+    /// Deterministic server timestamp used by reconciliation.
+    pub server_time: HybridTimestamp,
+}
+
+/// Factory used by [`crate::aequora_local_store_compliance!`] in third-party adapter crates.
+#[async_trait::async_trait]
+pub trait LocalAdapterContractFactory {
+    /// Concrete local adapter being certified.
+    type Store: LocalStore + TransactionCapabilityProvider;
+
+    /// Creates an isolated store and unique fixture identifiers.
+    ///
+    /// # Errors
+    ///
+    /// Returns setup/storage failures or a typed fixture invariant failure.
+    async fn setup() -> Result<LocalAdapterContractFixture<Self::Store>, AdapterContractError>;
+}
+
+/// Isolated authority-adapter fixture returned by a third-party compliance factory.
+pub struct AuthoritativeAdapterContractFixture<S> {
+    /// Fresh adapter instance or isolated namespace.
+    pub store: S,
+    /// Fresh first-version authoritative commit.
+    pub commit: CommitOperation,
+}
+
+/// Factory used by [`crate::aequora_authoritative_store_compliance!`] in adapter crates.
+#[async_trait::async_trait]
+pub trait AuthoritativeAdapterContractFactory {
+    /// Concrete authority adapter being certified.
+    type Store: AuthoritativeStore + TransactionCapabilityProvider;
+
+    /// Creates an isolated store and unique first-version commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns setup/storage failures or a typed fixture invariant failure.
+    async fn setup()
+    -> Result<AuthoritativeAdapterContractFixture<Self::Store>, AdapterContractError>;
+}
+
+/// Generates one Tokio test that runs the complete public local-store compliance contract.
+///
+/// The downstream adapter's dev-dependencies must include Tokio with macro/runtime support.
+#[macro_export]
+macro_rules! aequora_local_store_compliance {
+    ($test_name:ident, $factory:ty) => {
+        #[tokio::test]
+        async fn $test_name() -> Result<(), Box<dyn std::error::Error>> {
+            let fixture =
+                <$factory as $crate::contracts::LocalAdapterContractFactory>::setup().await?;
+            $crate::contracts::verify_local_store(
+                &fixture.store,
+                fixture.operation,
+                fixture.scope,
+                fixture.server_time,
+            )
+            .await?;
+            Ok(())
+        }
+    };
+}
+
+/// Generates one Tokio test that runs the complete public authoritative-store contract.
+///
+/// The downstream adapter's dev-dependencies must include Tokio with macro/runtime support.
+#[macro_export]
+macro_rules! aequora_authoritative_store_compliance {
+    ($test_name:ident, $factory:ty) => {
+        #[tokio::test]
+        async fn $test_name() -> Result<(), Box<dyn std::error::Error>> {
+            let fixture =
+                <$factory as $crate::contracts::AuthoritativeAdapterContractFactory>::setup()
+                    .await?;
+            $crate::contracts::verify_authoritative_store(&fixture.store, fixture.commit).await?;
+            Ok(())
+        }
+    };
 }
 
 /// Exercises the durable outbox state machine and idempotent reconciliation contract.
@@ -88,17 +603,30 @@ where
             "a newly appended operation must appear exactly once in the replayable outbox",
         ));
     }
+    if pending
+        .iter()
+        .find(|candidate| candidate.operation_id == operation_id)
+        != Some(&operation)
+    {
+        return Err(AdapterContractError::Violation(
+            "the replayable outbox must preserve operation lineage losslessly",
+        ));
+    }
 
     store.mark_sending(&[operation_id]).await?;
     verify_state(store, operation_id, OutboxState::Sending).await?;
     verify_retry_schedule(store, operation_id).await?;
 
-    let cursor = Cursor {
-        scope,
-        sequence: Sequence(1),
-    };
+    let cursor = Cursor::legacy(scope, Sequence(1));
+    let event_id = EventId::new();
+    let event_lineage = operation
+        .metadata
+        .lineage
+        .derived(LineageRef::Operation(operation_id));
     let acknowledgement = OperationAck {
         operation_id,
+        event_id,
+        lineage: event_lineage,
         entity_version: aequora_types::EntityVersion::INITIAL,
         sequence: cursor.sequence,
         duplicate: false,
@@ -114,6 +642,8 @@ where
             scope_id: scope,
             sequence: cursor.sequence,
             operation_id,
+            event_id,
+            lineage: event_lineage,
             entity: operation.entity,
             version: aequora_types::EntityVersion::INITIAL,
             change_kind: ChangeKind::Upsert,
@@ -250,6 +780,18 @@ where
             "a duplicate commit must return the original logical result",
         ));
     }
+    let altered_retry = CommitOperation {
+        operation_lineage: LineageContext {
+            correlation_id: CorrelationId::new(),
+            caused_by: commit.operation_lineage.caused_by,
+        },
+        ..commit.clone()
+    };
+    if store.commit_operation(altered_retry).await.is_ok() {
+        return Err(AdapterContractError::Violation(
+            "a retry must not change lineage for an existing operation ID",
+        ));
+    }
     let stored_acknowledgement = store
         .operation_result(commit.tenant_id, commit.operation_id)
         .await?
@@ -265,6 +807,7 @@ where
     verify_authoritative_entity(store, &commit).await?;
     verify_authoritative_journal(store, &commit, &acknowledgement).await?;
     let audit_offset = verify_authoritative_audit(store, &commit).await?;
+    verify_correlation_lookup(store, &commit).await?;
     let snapshot_id = verify_authoritative_snapshot(store, &commit).await?;
     verify_invalid_version_transition(store, &commit).await?;
     verify_concurrent_duplicate(store, &commit).await?;
@@ -275,6 +818,45 @@ where
         snapshot_id,
         audit_offset,
     })
+}
+
+async fn verify_correlation_lookup<S>(
+    store: &S,
+    commit: &CommitOperation,
+) -> Result<(), AdapterContractError>
+where
+    S: CorrelationLog,
+{
+    let page = store
+        .read_correlation(
+            commit.tenant_id,
+            commit.operation_lineage.correlation_id,
+            AuditOffset(0),
+            1_024,
+        )
+        .await?;
+    if page.records.len() != 1
+        || page.records[0].operation_id != commit.operation_id
+        || page.records[0].operation_lineage != commit.operation_lineage
+    {
+        return Err(AdapterContractError::Violation(
+            "correlation lookup must return the exact durable lineage record",
+        ));
+    }
+    let other_tenant = store
+        .read_correlation(
+            TenantId::new(),
+            commit.operation_lineage.correlation_id,
+            AuditOffset(0),
+            1_024,
+        )
+        .await?;
+    if !other_tenant.records.is_empty() {
+        return Err(AdapterContractError::Violation(
+            "correlation lookup must not cross tenant boundaries",
+        ));
+    }
+    Ok(())
 }
 
 async fn verify_invalid_version_transition<S>(
@@ -291,6 +873,7 @@ where
                 "the conformance fixture cannot create an invalid version transition",
             ))?;
     let invalid = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         entity: EntityRef {
             entity_type: baseline.entity.entity_type,
@@ -376,6 +959,7 @@ where
         ))?;
     let operation_id = OperationId::new();
     let commit = CommitOperation {
+        authority: None,
         operation_id,
         expected_version: Some(expected_version),
         next_version,
@@ -427,6 +1011,7 @@ where
         entity_id: EntityId::new(),
     };
     let mut left_commit = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         entity,
         expected_version: None,
@@ -436,6 +1021,7 @@ where
     };
     left_commit.command_digest[0] ^= 1;
     let mut right_commit = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         payload: [baseline.payload.as_slice(), b"-race-right"].concat(),
         ..left_commit.clone()
@@ -605,6 +1191,8 @@ where
 
 fn same_acknowledgement(left: &OperationAck, right: &OperationAck) -> bool {
     left.operation_id == right.operation_id
+        && left.event_id == right.event_id
+        && left.lineage == right.lineage
         && left.entity_version == right.entity_version
         && left.sequence == right.sequence
 }
@@ -658,6 +1246,10 @@ where
         .collect();
     if matching.len() != 1
         || matching[0].sequence != acknowledgement.sequence
+        || matching[0].event_id != acknowledgement.event_id
+        || matching[0].lineage != acknowledgement.lineage
+        || matching[0].event_id != commit.event_id
+        || matching[0].lineage != commit.event_lineage()
         || matching[0].entity != commit.entity
         || matching[0].payload != commit.payload
     {
@@ -683,7 +1275,11 @@ where
         .iter()
         .filter(|record| record.operation_id == commit.operation_id)
         .collect();
-    if matching.len() != 1 || matching[0].command_digest != commit.command_digest {
+    if matching.len() != 1
+        || matching[0].event_id != commit.event_id
+        || matching[0].operation_lineage != commit.operation_lineage
+        || matching[0].command_digest != commit.command_digest
+    {
         return Err(AdapterContractError::Violation(
             "one authoritative commit must produce exactly one matching audit record",
         ));

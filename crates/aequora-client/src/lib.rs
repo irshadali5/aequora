@@ -1,23 +1,200 @@
 //! One-shot client synchronization and atomic reconciliation.
 
-use aequora_observability::{MetricEvent, NoopObserver, Observer, OutcomeKind, TraceContext};
+/// Stable plug-and-play entry point for constructing a client engine.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AequoraClient;
+
+impl AequoraClient {
+    /// Starts the type-state client builder.
+    #[must_use]
+    pub fn builder() -> ClientSyncEngineBuilder {
+        ClientSyncEngineBuilder::new()
+    }
+}
+
+/// Focused imports for application client integrations.
+pub mod prelude {
+    pub use crate::{
+        AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, BootstrapOutcome, ClientBuildError,
+        ClientConfig, ClientError, ClientReadSession, ClientSyncEngine, ClientSyncEngineBuilder,
+        CoordinatorClosed, CoordinatorStatus, MultiProcessCoordinatorConfig, RetryConfig,
+        SyncCoordinator, SyncCoordinatorConfig, SyncCoordinatorHandle, SyncHealth, SyncOutcome,
+        SyncStatus, SyncSummary, SyncTrigger,
+    };
+    pub use aequora_coordination::{
+        FencingToken, LocalProcessMode, LocalStoreGeneration, LocalStoreId, ProcessInstanceId,
+    };
+    pub use aequora_live::{HintWakeOutcome, HintWakeTracker, SyncHint};
+    pub use aequora_protocol::{ClientLimits, SessionMetadata, SnapshotLimits};
+    pub use aequora_scheduler::{
+        AppActivity, NetworkContext, PowerContext, SchedulerPolicy, SchedulerState,
+        SchedulingContext, SyncProfile, WorkClass,
+    };
+    pub use aequora_scope::{
+        LocalScopeState, ScopeTransition, ScopeTransitionOutcome, Subscription,
+    };
+    pub use aequora_store::{
+        AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRequirements,
+        AdapterRole, AdapterTier, LocalStore, ProductionAdapterPair, ScopeStateStore,
+    };
+    pub use aequora_transport::{StreamingSyncTransport, SyncTransport};
+    pub use aequora_types::{DeviceId, SyncScopeId, TenantId};
+}
+
+use aequora_coordination::{
+    LeaseGrant, LeaseKind, LeaseRequest, LocalCoordinationSupport, LocalProcessMode,
+    ProcessInstanceId,
+};
+use aequora_live::{HintWakeOutcome, HintWakeTracker, SyncHint};
+use aequora_observability::{
+    LocalCoordinationEventKind, MetricEvent, NoopObserver, Observer, OutcomeKind,
+    SchedulerEventKind, ScopeEventKind, TraceContext,
+};
 use aequora_protocol::{
     BootstrapRequest, BootstrapResponse, Capability, ClientLimits, PushHint, ResyncReason,
     SessionMetadata, SnapshotLimits, SyncDirective, SyncRequest, SyncResponse,
 };
-use aequora_store::StoreErrorKind;
-use aequora_store::{LocalStore, StoreError};
+use aequora_queue::OptimizationRegistry;
+use aequora_region::{ReadResponseMetadata, RegionError, SessionWatermark};
+use aequora_scheduler::{
+    AdaptiveScheduler, DeferralReason, SchedulerPolicy, SchedulerState, SchedulingContext,
+    WorkClass, WorkDescriptor, WorkId, WorkKind,
+};
+use aequora_scope::{ScopeTransition, ScopeTransitionKind, ScopeTransitionOutcome, Subscription};
+use aequora_store::{
+    AdapterCompatibilityError, AdapterManifestProvider, AdapterRequirements,
+    LocalCoordinationStore, LocalStore, ScopeStateStore, StoreError, StoreErrorKind,
+};
 use aequora_transport::{
     StreamingSyncTransport, SyncTransport, TransportError, TransportErrorKind,
 };
-use aequora_types::{Cursor, OperationId, ProtocolVersion, RequestId, SnapshotId};
+use aequora_types::{
+    AuthorityEpoch, AuthorityId, Cursor, OperationId, ProtocolVersion, RequestId, Sequence,
+    SnapshotId,
+};
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
+
+trait ReservationFlag {
+    fn try_set(&self) -> bool;
+    fn clear(&self);
+}
+
+/// Session/read-your-writes lower bound for web or nonreplicated regional API reads.
+///
+/// Native synchronized datasets continue to read from their local store. This tracker is for
+/// server reads whose response metadata carries an authoritative epoch and served sequence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ClientReadSession {
+    watermark: Option<SessionWatermark>,
+}
+
+impl ClientReadSession {
+    /// Current lower bound to attach to a `Session` regional read.
+    #[must_use]
+    pub const fn watermark(self) -> Option<SessionWatermark> {
+        self.watermark
+    }
+
+    /// Advances read-your-writes after an authoritative operation commits.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an authority change or epoch rollback until Part 16 transition handling completes.
+    pub fn observe_commit(
+        &mut self,
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        sequence: Sequence,
+    ) -> Result<(), RegionError> {
+        self.observe(authority_id, authority_epoch, sequence)
+    }
+
+    /// Advances session consistency after a guarded regional or authority read.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an authority change or epoch rollback.
+    pub fn observe_read(&mut self, metadata: ReadResponseMetadata) -> Result<(), RegionError> {
+        self.observe(
+            metadata.authority_id,
+            metadata.authority_epoch,
+            metadata.served_sequence,
+        )
+    }
+
+    fn observe(
+        &mut self,
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        sequence: Sequence,
+    ) -> Result<(), RegionError> {
+        if let Some(watermark) = &mut self.watermark {
+            watermark.observe(authority_id, authority_epoch, sequence)
+        } else {
+            self.watermark = Some(SessionWatermark::new(
+                authority_id,
+                authority_epoch,
+                sequence,
+            ));
+            Ok(())
+        }
+    }
+}
+
+impl ReservationFlag for AtomicBool {
+    fn try_set(&self) -> bool {
+        self.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    fn clear(&self) {
+        self.store(false, Ordering::Release);
+    }
+}
+
+struct ReservationCore<F> {
+    flag: F,
+}
+
+impl<F> ReservationCore<F>
+where
+    F: ReservationFlag,
+{
+    const fn new(flag: F) -> Self {
+        Self { flag }
+    }
+
+    fn try_acquire(&self) -> Option<ReservationGuard<'_, F>> {
+        self.flag
+            .try_set()
+            .then_some(ReservationGuard { reservation: self })
+    }
+}
+
+struct ReservationGuard<'a, F>
+where
+    F: ReservationFlag,
+{
+    reservation: &'a ReservationCore<F>,
+}
+
+impl<F> Drop for ReservationGuard<'_, F>
+where
+    F: ReservationFlag,
+{
+    fn drop(&mut self) {
+        self.reservation.flag.clear();
+    }
+}
 
 /// Bounded exponential retry policy with symmetric jitter.
 #[derive(Clone, Copy, Debug)]
@@ -65,6 +242,34 @@ impl RetryConfig {
         };
         let jittered = base_ms.saturating_sub(radius).saturating_add(offset);
         Duration::from_millis(u64::try_from(jittered).unwrap_or(u64::MAX))
+    }
+
+    /// Applies a capped server `Retry-After` floor while retaining non-negative client jitter.
+    #[must_use]
+    pub fn delay_with_server(
+        self,
+        retry: u32,
+        entropy: u64,
+        server_retry_after: Option<Duration>,
+    ) -> Duration {
+        let local = self.delay(retry, entropy);
+        let Some(server) = server_retry_after else {
+            return local;
+        };
+        let floor_ms = server.as_millis().min(self.max_delay.as_millis());
+        if floor_ms <= local.as_millis() {
+            return local;
+        }
+        let jitter_window = floor_ms.saturating_mul(u128::from(self.jitter_percent.min(100))) / 100;
+        let extra = if jitter_window == 0 {
+            0
+        } else {
+            u128::from(entropy) % jitter_window.saturating_add(1)
+        };
+        let delayed = floor_ms
+            .saturating_add(extra)
+            .min(self.max_delay.as_millis());
+        Duration::from_millis(u64::try_from(delayed).unwrap_or(u64::MAX))
     }
 }
 
@@ -155,6 +360,8 @@ pub struct ClientConfig {
     pub snapshot_limits: SnapshotLimits,
     /// Optional latency-driven tuning. `None` retains static deterministic batching.
     pub adaptive_batching: Option<AdaptiveBatchConfig>,
+    /// Platform-neutral `QoS` profile and hard scheduling limits.
+    pub scheduler: SchedulerPolicy,
 }
 
 impl ClientConfig {
@@ -167,11 +374,18 @@ impl ClientConfig {
             push_batch_size: 256,
             push_batch_bytes: 1_024 * 1_024,
             limits: ClientLimits::default(),
-            capabilities: vec![Capability::PostcardV1, Capability::Tombstones],
+            capabilities: vec![
+                Capability::PostcardV1,
+                Capability::Tombstones,
+                Capability::LineageV1,
+                Capability::IntegrityV1,
+                Capability::AuthorityEpochV1,
+            ],
             retry: RetryConfig::default(),
             max_exchanges_per_sync: 1_024,
             snapshot_limits: SnapshotLimits::default(),
             adaptive_batching: None,
+            scheduler: SchedulerPolicy::default(),
         }
     }
 }
@@ -263,6 +477,27 @@ pub enum SyncStatus {
     Shutdown,
 }
 
+/// Observable local-process election role, independent of synchronization health.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoordinatorStatus {
+    /// The host selected the legacy one-process coordinator path.
+    SingleProcess,
+    /// This process owns the current durable sync lease.
+    Leader {
+        token: aequora_coordination::FencingToken,
+    },
+    /// Another process owns the lease or this process is awaiting takeover.
+    Follower,
+    /// Read-only process that does not participate in election.
+    Observer,
+    /// An exclusive maintenance lease currently blocks normal synchronization.
+    Maintenance,
+    /// No healthy leader is currently visible.
+    NoLeader,
+    /// The local coordinator stopped gracefully.
+    Shutdown,
+}
+
 /// Observable UI-independent synchronization health and durable queue gauges.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyncHealth {
@@ -291,6 +526,27 @@ pub struct SyncCoordinatorConfig {
     pub mutation_debounce: Duration,
 }
 
+/// Durable multi-process election timing and runtime identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MultiProcessCoordinatorConfig {
+    /// Ephemeral identity generated once for this runtime process.
+    pub process_id: ProcessInstanceId,
+    /// Lease duration. Must exceed twice the heartbeat interval.
+    pub lease_ttl: Duration,
+    /// Renewal and follower election interval.
+    pub heartbeat_interval: Duration,
+}
+
+impl Default for MultiProcessCoordinatorConfig {
+    fn default() -> Self {
+        Self {
+            process_id: ProcessInstanceId::new(),
+            lease_ttl: Duration::from_secs(15),
+            heartbeat_interval: Duration::from_secs(5),
+        }
+    }
+}
+
 impl Default for SyncCoordinatorConfig {
     fn default() -> Self {
         Self {
@@ -313,6 +569,7 @@ pub struct SyncCoordinatorHandle {
     triggers: mpsc::Sender<SyncTrigger>,
     status: watch::Receiver<SyncStatus>,
     health: watch::Receiver<SyncHealth>,
+    coordinator_status: watch::Receiver<CoordinatorStatus>,
 }
 
 impl SyncCoordinatorHandle {
@@ -326,6 +583,24 @@ impl SyncCoordinatorHandle {
             .send(trigger)
             .await
             .map_err(|_| CoordinatorClosed)
+    }
+
+    /// Validates and coalesces one advisory live hint, then schedules only the normal durable
+    /// exchange path. The tracker has no access to cursor or replica mutation APIs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoordinatorClosed`] when a valid new wake cannot reach the coordinator.
+    pub async fn observe_live_hint(
+        &self,
+        tracker: &HintWakeTracker,
+        hint: SyncHint,
+    ) -> Result<HintWakeOutcome, CoordinatorClosed> {
+        let outcome = tracker.observe(hint);
+        if matches!(outcome, HintWakeOutcome::Wake { .. }) {
+            self.trigger(SyncTrigger::PushHint).await?;
+        }
+        Ok(outcome)
     }
 
     /// Subscribes to status changes without coupling the engine to a UI framework.
@@ -351,6 +626,18 @@ impl SyncCoordinatorHandle {
     pub fn health(&self) -> SyncHealth {
         *self.health.borrow()
     }
+
+    /// Subscribes to durable local-process leadership changes.
+    #[must_use]
+    pub fn subscribe_coordinator_status(&self) -> watch::Receiver<CoordinatorStatus> {
+        self.coordinator_status.clone()
+    }
+
+    /// Returns the current local-process leadership role.
+    #[must_use]
+    pub fn coordinator_status(&self) -> CoordinatorStatus {
+        *self.coordinator_status.borrow()
+    }
 }
 
 /// Generic background worker that drains the same verified [`ClientSyncEngine`] API used by
@@ -361,6 +648,7 @@ pub struct SyncCoordinator<L, T> {
     triggers: mpsc::Receiver<SyncTrigger>,
     status: watch::Sender<SyncStatus>,
     health: watch::Sender<SyncHealth>,
+    coordinator_status: watch::Sender<CoordinatorStatus>,
     online: bool,
     last_successful_sync_unix_ms: Option<u64>,
 }
@@ -381,6 +669,8 @@ impl<L, T> SyncCoordinator<L, T> {
             conflicts_pending: 0,
             last_successful_sync_unix_ms: None,
         });
+        let (coordinator_status, coordinator_status_receiver) =
+            watch::channel(CoordinatorStatus::SingleProcess);
         (
             Self {
                 engine,
@@ -388,6 +678,7 @@ impl<L, T> SyncCoordinator<L, T> {
                 triggers,
                 status,
                 health,
+                coordinator_status,
                 online: true,
                 last_successful_sync_unix_ms: None,
             },
@@ -395,6 +686,7 @@ impl<L, T> SyncCoordinator<L, T> {
                 triggers: trigger_sender,
                 status: status_receiver,
                 health: health_receiver,
+                coordinator_status: coordinator_status_receiver,
             },
         )
     }
@@ -408,6 +700,7 @@ where
     /// Runs until shutdown is requested or every control handle is dropped.
     pub async fn run(mut self) {
         if self.config.sync_on_start {
+            self.engine.request_work_class(WorkClass::Normal);
             self.synchronize().await;
         }
         let mut periodic = self
@@ -419,7 +712,10 @@ where
             let trigger = match &mut periodic {
                 Some(timer) => tokio::select! {
                     trigger = self.triggers.recv() => trigger,
-                    _instant = timer.tick() => Some(SyncTrigger::Manual),
+                    _instant = timer.tick() => {
+                        self.engine.request_work_class(WorkClass::Background);
+                        Some(SyncTrigger::Manual)
+                    },
                 },
                 None => self.triggers.recv().await,
             };
@@ -434,6 +730,7 @@ where
                 }
                 SyncTrigger::NetworkAvailable => {
                     self.online = true;
+                    self.engine.request_work_class(WorkClass::Normal);
                     self.synchronize().await;
                 }
                 SyncTrigger::Shutdown => {
@@ -441,9 +738,15 @@ where
                     return;
                 }
                 SyncTrigger::Manual | SyncTrigger::PushHint if self.online => {
+                    if trigger == SyncTrigger::PushHint
+                        || *self.engine.requested_work_class() != WorkClass::Background
+                    {
+                        self.engine.request_work_class(WorkClass::Interactive);
+                    }
                     self.synchronize().await;
                 }
                 SyncTrigger::LocalMutation if self.online => {
+                    self.engine.request_work_class(WorkClass::Interactive);
                     if !self.debounce_local_mutations().await {
                         return;
                     }
@@ -451,6 +754,234 @@ where
                 SyncTrigger::LocalMutation | SyncTrigger::Manual | SyncTrigger::PushHint => {}
             }
         }
+    }
+
+    /// Runs durable local election, heartbeat renewal, follower takeover, and leader-only sync.
+    ///
+    /// Followers remain idle sync observers; application repositories may continue committing
+    /// domain state plus outbox operations through the shared local store.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an unsupported adapter or unsafe timing configuration. Permanent storage failures
+    /// during election are also returned; ordinary lease contention remains follower state.
+    pub async fn run_multi_process(
+        mut self,
+        election: MultiProcessCoordinatorConfig,
+    ) -> Result<(), ClientError>
+    where
+        L: LocalCoordinationStore,
+    {
+        if self.engine.store().coordination_support() != LocalCoordinationSupport::Full {
+            return Err(ClientError::CoordinationUnsupported);
+        }
+        if election.heartbeat_interval.is_zero()
+            || election.lease_ttl <= election.heartbeat_interval.saturating_mul(2)
+        {
+            return Err(ClientError::CoordinationConfig);
+        }
+        if matches!(
+            self.engine.process_mode,
+            LocalProcessMode::SingleProcess | LocalProcessMode::Observer
+        ) {
+            return Err(ClientError::CoordinationMode);
+        }
+        self.engine
+            .coordination_required
+            .store(true, Ordering::Release);
+        self.set_coordinator_status(CoordinatorStatus::NoLeader);
+        let mut lease = None;
+        let mut heartbeat = tokio::time::interval(election.heartbeat_interval);
+        let mut next_periodic = self
+            .config
+            .periodic_interval
+            .map(|period| Instant::now() + period);
+        loop {
+            tokio::select! {
+                trigger = self.triggers.recv() => {
+                    let Some(trigger) = trigger else {
+                        self.release_coordination_lease(&mut lease).await;
+                        return Ok(());
+                    };
+                    if trigger == SyncTrigger::Shutdown {
+                        self.release_coordination_lease(&mut lease).await;
+                        self.set_status(SyncStatus::Shutdown);
+                        return Ok(());
+                    }
+                    match trigger {
+                        SyncTrigger::NetworkUnavailable => {
+                            self.online = false;
+                            self.set_status(SyncStatus::Offline);
+                        }
+                        SyncTrigger::NetworkAvailable => self.online = true,
+                        SyncTrigger::LocalMutation | SyncTrigger::Manual | SyncTrigger::PushHint
+                            if self.online => {
+                                self.engine.request_work_class(match trigger {
+                                    SyncTrigger::LocalMutation | SyncTrigger::Manual => WorkClass::Interactive,
+                                    _ => WorkClass::Normal,
+                                });
+                                self.ensure_coordination_lease(&election, &mut lease).await?;
+                                if lease.is_some() {
+                                    self.synchronize_multi_process(&election, &mut lease).await;
+                                }
+                            }
+                        SyncTrigger::LocalMutation
+                        | SyncTrigger::Manual
+                        | SyncTrigger::PushHint
+                        | SyncTrigger::Shutdown => {}
+                    }
+                }
+                _instant = heartbeat.tick() => {
+                    self.ensure_coordination_lease(&election, &mut lease).await?;
+                    if lease.is_some()
+                        && self.online
+                        && next_periodic.is_some_and(|deadline| Instant::now() >= deadline)
+                    {
+                        self.engine.request_work_class(WorkClass::Background);
+                        self.synchronize_multi_process(&election, &mut lease).await;
+                        next_periodic = self
+                            .config
+                            .periodic_interval
+                            .map(|period| Instant::now() + period);
+                    }
+                }
+            }
+        }
+    }
+
+    async fn ensure_coordination_lease(
+        &self,
+        election: &MultiProcessCoordinatorConfig,
+        lease: &mut Option<LeaseGrant>,
+    ) -> Result<(), ClientError>
+    where
+        L: LocalCoordinationStore,
+    {
+        let now = unix_time_ms();
+        let ttl_ms = u64::try_from(election.lease_ttl.as_millis()).unwrap_or(u64::MAX);
+        if let Some(current) = *lease {
+            if let Ok(renewed) = self.engine.store().renew_lease(current, now, ttl_ms).await {
+                *lease = Some(renewed);
+                self.engine.install_lease(renewed);
+                self.record_coordination(LocalCoordinationEventKind::Renewed);
+                return Ok(());
+            }
+            *lease = None;
+            self.record_coordination(LocalCoordinationEventKind::Lost);
+            self.set_coordinator_status(CoordinatorStatus::Follower);
+        }
+        let request = LeaseRequest {
+            owner_id: election.process_id,
+            kind: LeaseKind::SyncCoordinator,
+            now_unix_ms: now,
+            ttl_ms,
+        };
+        match self.engine.store().acquire_lease(request).await {
+            Ok(acquired) => {
+                self.engine.install_lease(acquired);
+                *lease = Some(acquired);
+                self.record_coordination(LocalCoordinationEventKind::Acquired);
+                self.set_coordinator_status(CoordinatorStatus::Leader {
+                    token: acquired.fencing_token,
+                });
+            }
+            Err(error) if error.reason == aequora_store::StoreErrorReason::LeadershipLost => {
+                let snapshot = self.engine.store().coordination_snapshot().await?;
+                let status = if snapshot.is_active(now) && snapshot.kind == LeaseKind::Maintenance {
+                    CoordinatorStatus::Maintenance
+                } else if snapshot.is_active(now) {
+                    CoordinatorStatus::Follower
+                } else {
+                    CoordinatorStatus::NoLeader
+                };
+                self.set_coordinator_status(status);
+            }
+            Err(error) => return Err(error.into()),
+        }
+        Ok(())
+    }
+
+    async fn synchronize_multi_process(
+        &mut self,
+        election: &MultiProcessCoordinatorConfig,
+        lease: &mut Option<LeaseGrant>,
+    ) where
+        L: LocalCoordinationStore,
+    {
+        self.set_status(SyncStatus::Synchronizing);
+        let mut synchronization = Box::pin(self.engine.sync());
+        let mut heartbeat = tokio::time::interval(election.heartbeat_interval);
+        let _initial_tick = heartbeat.tick().await;
+        let result = loop {
+            tokio::select! {
+                result = &mut synchronization => break Some(result),
+                _instant = heartbeat.tick() => {
+                    let Some(current) = *lease else {
+                        break None;
+                    };
+                    let now = unix_time_ms();
+                    let ttl_ms = u64::try_from(election.lease_ttl.as_millis()).unwrap_or(u64::MAX);
+                    if let Ok(renewed) = self.engine.store().renew_lease(current, now, ttl_ms).await {
+                        *lease = Some(renewed);
+                        self.engine.install_lease(renewed);
+                        self.record_coordination(LocalCoordinationEventKind::Renewed);
+                    } else {
+                        *lease = None;
+                        self.record_coordination(LocalCoordinationEventKind::Lost);
+                        self.set_coordinator_status(CoordinatorStatus::Follower);
+                        break None;
+                    }
+                }
+            }
+        };
+        let status = match result {
+            Some(Ok(summary)) if summary.conflicts > 0 => {
+                self.last_successful_sync_unix_ms = Some(unix_time_ms());
+                SyncStatus::Conflict { summary }
+            }
+            Some(Ok(summary)) => {
+                self.last_successful_sync_unix_ms = Some(unix_time_ms());
+                SyncStatus::Idle {
+                    last_sync: Some(summary),
+                }
+            }
+            Some(Err(error)) => SyncStatus::Error {
+                transient: error.is_transient(),
+            },
+            None => SyncStatus::Idle { last_sync: None },
+        };
+        self.set_status(status);
+        self.refresh_health(status).await;
+        self.engine.request_work_class(WorkClass::Normal);
+    }
+
+    async fn release_coordination_lease(&self, lease: &mut Option<LeaseGrant>)
+    where
+        L: LocalCoordinationStore,
+    {
+        if let Some(current) = lease.take() {
+            if self
+                .engine
+                .store()
+                .release_lease(current, unix_time_ms())
+                .await
+                .is_ok()
+            {
+                self.record_coordination(LocalCoordinationEventKind::Released);
+            }
+        }
+        self.engine.clear_lease();
+        self.set_coordinator_status(CoordinatorStatus::Shutdown);
+    }
+
+    fn set_coordinator_status(&self, status: CoordinatorStatus) {
+        let _previous = self.coordinator_status.send_replace(status);
+    }
+
+    fn record_coordination(&self, kind: LocalCoordinationEventKind) {
+        self.engine
+            .observer
+            .record(MetricEvent::LocalCoordination { kind });
     }
 
     async fn debounce_local_mutations(&mut self) -> bool {
@@ -496,6 +1027,7 @@ where
         };
         self.set_status(status);
         self.refresh_health(status).await;
+        self.engine.request_work_class(WorkClass::Normal);
     }
 
     fn set_status(&self, status: SyncStatus) {
@@ -550,6 +1082,27 @@ where
 /// Client synchronization failure.
 #[derive(Debug, Error)]
 pub enum ClientError {
+    /// Another public synchronization or bootstrap call already owns this engine.
+    #[error("a synchronization call is already running on this client engine")]
+    SyncInProgress,
+    /// Multi-process mode was requested from a single-process-only adapter.
+    #[error("local adapter does not support multi-process coordination")]
+    CoordinationUnsupported,
+    /// Lease TTL and heartbeat timing cannot safely sustain leadership.
+    #[error("local coordination lease TTL must exceed twice the positive heartbeat interval")]
+    CoordinationConfig,
+    /// The selected process mode cannot participate in durable leader election.
+    #[error("selected local process mode cannot run the multi-process coordinator")]
+    CoordinationMode,
+    /// This process does not own the current durable coordinator lease.
+    #[error("leader-only local synchronization requires the current durable lease")]
+    NotLocalLeader,
+    /// Durable work remains queued until one explicit scheduler constraint clears.
+    #[error("sync work deferred by scheduler: {reason:?}")]
+    SchedulerDeferred {
+        /// Stable local-only deferral reason.
+        reason: DeferralReason,
+    },
     /// Local persistence failed.
     #[error("local sync storage failed: {0}")]
     Store(#[from] StoreError),
@@ -573,6 +1126,21 @@ pub enum ClientError {
         /// Stable recovery reason supplied by the server.
         reason: ResyncReason,
     },
+    /// The server moved to a newer authority timeline; pending sent work is frozen for review.
+    #[error(
+        "authority epoch changed from {previous_epoch:?} to {current_epoch:?}; bootstrap and operation recovery are required"
+    )]
+    AuthorityChanged {
+        authority_id: aequora_types::AuthorityId,
+        previous_epoch: aequora_types::AuthorityEpoch,
+        current_epoch: aequora_types::AuthorityEpoch,
+    },
+    /// A server presented an epoch below the highest durable client cursor.
+    #[error("authority rollback detected")]
+    AuthorityRollbackDetected,
+    /// A server endpoint presented a different logical authority identity.
+    #[error("server authority identity does not match the durable client cursor")]
+    AuthorityIdChanged,
     /// Server returned a cursor for another scope.
     #[error("server returned a cursor for another sync scope")]
     CursorScope,
@@ -621,13 +1189,16 @@ impl ClientError {
     /// Returns true only when an unchanged operation is safe and useful to retry.
     #[must_use]
     pub const fn is_transient(&self) -> bool {
-        matches!(
-            self,
-            Self::Store(error) if matches!(error.kind, StoreErrorKind::Transient)
-        ) || matches!(
-            self,
-            Self::Transport(error) if matches!(error.kind, TransportErrorKind::Transient)
-        )
+        matches!(self, Self::SyncInProgress)
+            || matches!(self, Self::SchedulerDeferred { .. })
+            || matches!(
+                self,
+                Self::Store(error) if matches!(error.kind, StoreErrorKind::Transient)
+            )
+            || matches!(
+                self,
+                Self::Transport(error) if matches!(error.kind, TransportErrorKind::Transient)
+            )
     }
 }
 
@@ -637,7 +1208,21 @@ pub struct ClientSyncEngine<L, T> {
     transport: T,
     config: ClientConfig,
     batcher: Mutex<AdaptiveBatcher>,
+    reservation: ReservationCore<AtomicBool>,
     observer: Arc<dyn Observer>,
+    queue_optimization: Option<QueueOptimization>,
+    coordination_lease: Mutex<Option<LeaseGrant>>,
+    process_mode: LocalProcessMode,
+    coordination_required: AtomicBool,
+    scheduler: Mutex<AdaptiveScheduler>,
+    scheduling_context: Mutex<SchedulingContext>,
+    requested_work_class: Mutex<WorkClass>,
+}
+
+#[derive(Clone)]
+struct QueueOptimization {
+    registry: Arc<OptimizationRegistry>,
+    max_operations_per_pass: usize,
 }
 
 /// Marker used only before a client builder receives its local store.
@@ -657,6 +1242,9 @@ pub struct ClientSyncEngineBuilder<L = MissingClientStore, T = MissingClientTran
     transport: T,
     config: Option<ClientConfig>,
     observer: Arc<dyn Observer>,
+    queue_optimization: Option<QueueOptimization>,
+    process_mode: LocalProcessMode,
+    scheduler_state: Option<SchedulerState>,
 }
 
 impl Default for ClientSyncEngineBuilder {
@@ -666,6 +1254,9 @@ impl Default for ClientSyncEngineBuilder {
             transport: MissingClientTransport,
             config: None,
             observer: Arc::new(NoopObserver),
+            queue_optimization: None,
+            process_mode: LocalProcessMode::Auto,
+            scheduler_state: None,
         }
     }
 }
@@ -687,6 +1278,9 @@ impl<L, T> ClientSyncEngineBuilder<L, T> {
             transport: self.transport,
             config: self.config,
             observer: self.observer,
+            queue_optimization: self.queue_optimization,
+            process_mode: self.process_mode,
+            scheduler_state: self.scheduler_state,
         }
     }
 
@@ -698,6 +1292,9 @@ impl<L, T> ClientSyncEngineBuilder<L, T> {
             transport,
             config: self.config,
             observer: self.observer,
+            queue_optimization: self.queue_optimization,
+            process_mode: self.process_mode,
+            scheduler_state: self.scheduler_state,
         }
     }
 
@@ -714,6 +1311,34 @@ impl<L, T> ClientSyncEngineBuilder<L, T> {
         self.observer = observer;
         self
     }
+
+    /// Selects how this runtime may share its local store with other processes.
+    #[must_use]
+    pub fn process_mode(mut self, process_mode: LocalProcessMode) -> Self {
+        self.process_mode = process_mode;
+        self
+    }
+
+    /// Restores bounded persisted controller/backoff state; durable work remains in its stores.
+    #[must_use]
+    pub fn scheduler_state(mut self, scheduler_state: SchedulerState) -> Self {
+        self.scheduler_state = Some(scheduler_state);
+        self
+    }
+
+    /// Enables one bounded deterministic compaction pass before each upload batch is built.
+    #[must_use]
+    pub fn queue_optimization(
+        mut self,
+        registry: Arc<OptimizationRegistry>,
+        max_operations_per_pass: usize,
+    ) -> Self {
+        self.queue_optimization = Some(QueueOptimization {
+            registry,
+            max_operations_per_pass: max_operations_per_pass.max(1),
+        });
+        self
+    }
 }
 
 /// Client builder validation failure.
@@ -722,6 +1347,15 @@ pub enum ClientBuildError {
     /// A session-bearing client configuration was not supplied.
     #[error("client configuration is required")]
     MissingConfig,
+    /// Selected local adapter does not meet production role/tier/capability requirements.
+    #[error(transparent)]
+    Adapter(#[from] AdapterCompatibilityError),
+    /// Multi-process mode requires a manifest with durable local coordination.
+    #[error("multi-process mode requires adapter local-coordination capability")]
+    CoordinationUnsupported,
+    /// Scheduler limits are internally inconsistent.
+    #[error(transparent)]
+    Scheduler(#[from] aequora_scheduler::SchedulerError),
 }
 
 impl<L, T> ClientSyncEngineBuilder<L, T>
@@ -736,7 +1370,51 @@ where
     /// Returns [`ClientBuildError::MissingConfig`] when no session configuration was supplied.
     pub fn build(self) -> Result<ClientSyncEngine<L, T>, ClientBuildError> {
         let config = self.config.ok_or(ClientBuildError::MissingConfig)?;
-        Ok(ClientSyncEngine::new(self.store, self.transport, config).with_observer(self.observer))
+        config.scheduler.validate()?;
+        let scheduler_policy = config.scheduler;
+        let mut engine =
+            ClientSyncEngine::new(self.store, self.transport, config).with_observer(self.observer);
+        engine.queue_optimization = self.queue_optimization;
+        engine.process_mode = self.process_mode;
+        engine.coordination_required.store(
+            self.process_mode == LocalProcessMode::MultiProcess,
+            Ordering::Release,
+        );
+        if let Some(mut state) = self.scheduler_state {
+            if state.policy_version != scheduler_policy.version {
+                return Err(aequora_scheduler::SchedulerError::PolicyVersionMismatch.into());
+            }
+            state.normalize(unix_time_ms(), scheduler_policy.maximum_retry_deferral_ms);
+            engine.scheduler = Mutex::new(AdaptiveScheduler::from_state(scheduler_policy, state));
+        }
+        Ok(engine)
+    }
+}
+
+impl<L, T> ClientSyncEngineBuilder<L, T>
+where
+    L: LocalStore + AdapterManifestProvider,
+    T: SyncTransport,
+{
+    /// Verifies the local adapter's production manifest before building the client.
+    ///
+    /// Reference/test stores should continue to use [`Self::build`]. Production bootstrap should
+    /// use this method so unsupported durability or role combinations fail before synchronization.
+    ///
+    /// # Errors
+    ///
+    /// Returns a missing-config or typed adapter compatibility failure.
+    pub fn build_production(self) -> Result<ClientSyncEngine<L, T>, ClientBuildError> {
+        let manifest = self.store.adapter_manifest();
+        if self.process_mode == LocalProcessMode::MultiProcess
+            && !manifest
+                .capabilities
+                .contains(aequora_store::AdapterCapabilities::LOCAL_COORDINATION)
+        {
+            return Err(ClientBuildError::CoordinationUnsupported);
+        }
+        AdapterRequirements::PRODUCTION_LOCAL.verify(manifest)?;
+        self.build()
     }
 }
 
@@ -748,12 +1426,21 @@ impl<L, T> ClientSyncEngine<L, T> {
             config.push_batch_size,
             config.adaptive_batching,
         ));
+        let scheduler = AdaptiveScheduler::new_or_default(config.scheduler);
         Self {
             store,
             transport,
             config,
             batcher,
+            reservation: ReservationCore::new(AtomicBool::new(false)),
             observer: Arc::new(NoopObserver),
+            queue_optimization: None,
+            coordination_lease: Mutex::new(None),
+            process_mode: LocalProcessMode::Auto,
+            coordination_required: AtomicBool::new(false),
+            scheduler: Mutex::new(scheduler),
+            scheduling_context: Mutex::new(SchedulingContext::default()),
+            requested_work_class: Mutex::new(WorkClass::Normal),
         }
     }
 
@@ -768,6 +1455,139 @@ impl<L, T> ClientSyncEngine<L, T> {
     #[must_use]
     pub const fn store(&self) -> &L {
         &self.store
+    }
+
+    fn current_lease(&self) -> Option<LeaseGrant> {
+        *self
+            .coordination_lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn install_lease(&self, lease: LeaseGrant) {
+        *self
+            .coordination_lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(lease);
+    }
+
+    fn clear_lease(&self) {
+        *self
+            .coordination_lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    fn require_local_leadership(&self) -> Result<(), ClientError> {
+        if self.coordination_required.load(Ordering::Acquire) && self.current_lease().is_none() {
+            return Err(ClientError::NotLocalLeader);
+        }
+        Ok(())
+    }
+
+    /// Pauses network scheduling while preserving local writes and durable work.
+    pub fn pause(&self) {
+        self.scheduling_context().paused = true;
+    }
+
+    /// Clears an explicit pause. Other eligibility constraints still apply.
+    pub fn resume(&self) {
+        self.scheduling_context().paused = false;
+    }
+
+    /// Replaces normalized platform hints used by subsequent scheduler decisions.
+    pub fn update_scheduling_context(&self, context: SchedulingContext) {
+        *self.scheduling_context() = context.normalized();
+    }
+
+    /// Requests a bounded `QoS` class for the next synchronization drain.
+    ///
+    /// This is local scheduling metadata only and cannot bypass authorization or dependencies.
+    pub fn request_work_class(&self, class: WorkClass) {
+        *self.requested_work_class() = class;
+    }
+
+    /// Returns persistable bounded controller/backoff state, excluding durable work payloads.
+    #[must_use]
+    pub fn scheduler_state(&self) -> SchedulerState {
+        self.scheduler().state()
+    }
+
+    fn scheduling_context(&self) -> MutexGuard<'_, SchedulingContext> {
+        self.scheduling_context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn scheduler(&self) -> MutexGuard<'_, AdaptiveScheduler> {
+        self.scheduler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn requested_work_class(&self) -> MutexGuard<'_, WorkClass> {
+        self.requested_work_class
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn scheduler_decision(
+        &self,
+        kind: WorkKind,
+        class: WorkClass,
+    ) -> Result<aequora_scheduler::SchedulingDecision, ClientError> {
+        let mut context = *self.scheduling_context();
+        context.now_unix_ms = unix_time_ms();
+        context.coordinator_leader =
+            !self.coordination_required.load(Ordering::Acquire) || self.current_lease().is_some();
+        let work = WorkDescriptor {
+            work_id: WorkId(0),
+            kind,
+            class,
+            enqueued_at_unix_ms: context.now_unix_ms,
+            earliest_at_unix_ms: context.now_unix_ms,
+            deadline_unix_ms: None,
+            dependencies: Vec::new(),
+            estimated_operations: self.current_batch_limit(),
+            estimated_bytes: self.config.push_batch_bytes,
+            emergency_override: false,
+        };
+        let selected = self
+            .scheduler()
+            .select(&[work], &std::collections::BTreeSet::new(), &context)
+            .map(|selected| selected.decision);
+        if let Some(decision) = selected {
+            self.observer.record(MetricEvent::Scheduler {
+                kind: SchedulerEventKind::Selected,
+                class_rank: decision.priority.0,
+                operations: usize_to_u64(decision.max_batch_ops),
+                bytes: usize_to_u64(decision.max_batch_bytes),
+            });
+            return Ok(decision);
+        }
+        let error = {
+            let reason = if context.paused {
+                DeferralReason::Paused
+            } else if !context.network.online {
+                DeferralReason::Offline
+            } else if !context.coordinator_leader {
+                DeferralReason::NotLeader
+            } else if !context.auth_available {
+                DeferralReason::AuthenticationRequired
+            } else if !context.storage_healthy {
+                DeferralReason::StorageUnhealthy
+            } else {
+                DeferralReason::RetryBackoff
+            };
+            ClientError::SchedulerDeferred { reason }
+        };
+        self.observer.record(MetricEvent::Scheduler {
+            kind: SchedulerEventKind::Deferred,
+            class_rank: class.rank(),
+            operations: 0,
+            bytes: 0,
+        });
+        Err(error)
     }
 
     /// Current push batch limit after any adaptive observations.
@@ -787,6 +1607,87 @@ impl<L, T> ClientSyncEngine<L, T> {
             delay_millis: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
         });
     }
+
+    fn reserve(&self) -> Result<ReservationGuard<'_, AtomicBool>, ClientError> {
+        self.reservation
+            .try_acquire()
+            .ok_or(ClientError::SyncInProgress)
+    }
+}
+
+impl<L, T> ClientSyncEngine<L, T>
+where
+    L: LocalStore + ScopeStateStore,
+{
+    /// Durably installs one server-resolved subscription without activating unbootstrapped data.
+    ///
+    /// # Errors
+    ///
+    /// Returns a leadership or storage failure without changing subscription state.
+    pub async fn install_subscription(
+        &self,
+        subscription: &Subscription,
+    ) -> Result<(), ClientError> {
+        self.require_local_leadership()?;
+        self.store.install_subscription(subscription).await?;
+        let active_scopes = self
+            .store
+            .load_scope_state()
+            .await?
+            .active_subscription_count();
+        self.observer.record(MetricEvent::ScopeTransition {
+            kind: ScopeEventKind::Resolved,
+            entities: 0,
+            active_scopes: usize_to_u64(active_scopes),
+        });
+        Ok(())
+    }
+
+    /// Applies one idempotent, fenced scope transition through the local adapter.
+    ///
+    /// Expansion/bootstrap activation is scheduler-bounded bulk work. Contraction and revocation
+    /// are critical because they close a local authorization boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a scheduler, leadership, or atomic storage error; partial activation is forbidden.
+    pub async fn apply_scope_transition(
+        &self,
+        transition: &ScopeTransition,
+    ) -> Result<ScopeTransitionOutcome, ClientError> {
+        self.require_local_leadership()?;
+        let (class, kind) = match transition.kind {
+            ScopeTransitionKind::Contraction { .. } => {
+                (WorkClass::Critical, ScopeEventKind::Contracted)
+            }
+            ScopeTransitionKind::Revocation => (WorkClass::Critical, ScopeEventKind::Revoked),
+            ScopeTransitionKind::Expansion { .. }
+            | ScopeTransitionKind::FullBootstrap
+            | ScopeTransitionKind::GenerationReset => (WorkClass::Bulk, ScopeEventKind::Expanded),
+            ScopeTransitionKind::Suspension => (WorkClass::Critical, ScopeEventKind::Contracted),
+        };
+        let _decision = self.scheduler_decision(WorkKind::ScopeTransition, class)?;
+        let outcome = self
+            .store
+            .apply_scope_transition_fenced(transition, self.current_lease())
+            .await?;
+        let active_scopes = self
+            .store
+            .load_scope_state()
+            .await?
+            .active_subscription_count();
+        self.observer.record(MetricEvent::ScopeTransition {
+            kind,
+            entities: usize_to_u64(
+                transition
+                    .additions
+                    .len()
+                    .saturating_add(transition.removals.len()),
+            ),
+            active_scopes: usize_to_u64(active_scopes),
+        });
+        Ok(outcome)
+    }
 }
 
 impl<L, T> ClientSyncEngine<L, T>
@@ -801,16 +1702,57 @@ where
     /// Returns [`ClientError`] for local storage or transport failures and for any response
     /// that violates protocol, tenant, scope, cursor, or sequence invariants.
     pub async fn run_once(&self) -> Result<SyncOutcome, ClientError> {
+        let _reservation = self.reserve()?;
+        self.require_local_leadership()?;
         let retry_delay = self.config.retry.delay(0, system_entropy());
         self.run_once_with_retry_delay(retry_delay).await
     }
 
+    async fn compact_outbox_if_configured(&self) -> Result<(), ClientError> {
+        let Some(optimization) = &self.queue_optimization else {
+            return Ok(());
+        };
+        let started = Instant::now();
+        let result = self
+            .store
+            .compact_outbox_fenced(
+                optimization.registry.as_ref(),
+                optimization.max_operations_per_pass,
+                self.current_lease(),
+            )
+            .await;
+        match result {
+            Ok(plan) => self.observer.record(MetricEvent::QueueCompaction {
+                duration_micros: duration_micros(started.elapsed()),
+                operations_before: usize_to_u64(plan.operations_before),
+                operations_after: usize_to_u64(plan.operations_after),
+                bytes_saved: plan.bytes_saved,
+                failed: false,
+            }),
+            Err(error) => {
+                self.observer.record(MetricEvent::QueueCompaction {
+                    duration_micros: duration_micros(started.elapsed()),
+                    operations_before: 0,
+                    operations_after: 0,
+                    bytes_saved: 0,
+                    failed: true,
+                });
+                return Err(error.into());
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
     async fn run_once_with_retry_delay(
         &self,
         retry_delay: Duration,
     ) -> Result<SyncOutcome, ClientError> {
+        let scheduling =
+            self.scheduler_decision(WorkKind::PushOperations, *self.requested_work_class())?;
+        self.compact_outbox_if_configured().await?;
         let cursor = self.store.load_cursor(self.config.session.scope_id).await?;
-        let batch_limit = self.current_batch_limit();
+        let batch_limit = self.current_batch_limit().min(scheduling.max_batch_ops);
         let operations = self.store.pending_operations(batch_limit).await?;
         let request_id = RequestId::new();
         let mut request = SyncRequest {
@@ -828,13 +1770,14 @@ where
                 aequora_codec::MessageKind::SyncRequest,
                 &request,
             )?;
-            if encoded.len() <= self.config.push_batch_bytes {
+            let maximum_batch_bytes = self.config.push_batch_bytes.min(scheduling.max_batch_bytes);
+            if encoded.len() <= maximum_batch_bytes {
                 break;
             }
             if request.operations.len() <= 1 {
                 return Err(ClientError::PushBatchTooLarge {
                     actual: encoded.len(),
-                    maximum: self.config.push_batch_bytes,
+                    maximum: maximum_batch_bytes,
                 });
             }
             let next_len = request.operations.len().div_ceil(2);
@@ -846,7 +1789,9 @@ where
             .iter()
             .map(|operation| operation.operation_id)
             .collect();
-        self.store.mark_sending(&operation_ids).await?;
+        self.store
+            .mark_sending_fenced(&operation_ids, self.current_lease())
+            .await?;
         let trace = trace_context(request.request_id, &request.session);
         let started = Instant::now();
         let response = match self.transport.exchange(request).await {
@@ -854,9 +1799,33 @@ where
             Err(error) => {
                 if error.kind == TransportErrorKind::Transient {
                     self.batcher().record_failure();
+                    let retry_after_ms = error
+                        .retry_after
+                        .map(|delay| u64::try_from(delay.as_millis()).unwrap_or(u64::MAX));
+                    self.scheduler().record_overload(
+                        unix_time_ms(),
+                        aequora_scheduler::ServerSchedulingHints {
+                            retry_after_ms,
+                            ..aequora_scheduler::ServerSchedulingHints::default()
+                        },
+                    );
+                    self.observer.record(MetricEvent::Scheduler {
+                        kind: SchedulerEventKind::OverloadBackoff,
+                        class_rank: WorkClass::Normal.rank(),
+                        operations: usize_to_u64(submitted),
+                        bytes: 0,
+                    });
                 }
+                let durable_retry_delay = error
+                    .retry_after
+                    .map_or(retry_delay, |server| retry_delay.max(server))
+                    .min(self.config.retry.max_delay);
                 self.store
-                    .mark_retry(&operation_ids, retry_not_before(retry_delay))
+                    .mark_retry_fenced(
+                        &operation_ids,
+                        retry_not_before(durable_retry_delay),
+                        self.current_lease(),
+                    )
                     .await?;
                 self.observer.record_with_context(
                     trace,
@@ -879,9 +1848,17 @@ where
         let result = self
             .reconcile_exchange(cursor, response, &operation_ids, latency)
             .await;
-        if result.is_err() {
+        if matches!(&result, Err(ClientError::AuthorityChanged { .. })) {
             self.store
-                .mark_retry(&operation_ids, retry_not_before(retry_delay))
+                .mark_retry_fenced(&operation_ids, u64::MAX, self.current_lease())
+                .await?;
+        } else if result.is_err() {
+            self.store
+                .mark_retry_fenced(
+                    &operation_ids,
+                    retry_not_before(retry_delay),
+                    self.current_lease(),
+                )
                 .await?;
         }
         self.observer.record_with_context(
@@ -905,15 +1882,7 @@ where
         submitted_operations: &[OperationId],
         latency: Duration,
     ) -> Result<SyncOutcome, ClientError> {
-        match response.directive {
-            SyncDirective::Continue => {}
-            SyncDirective::UpgradeRequired { minimum, current } => {
-                return Err(ClientError::UpgradeRequired { minimum, current });
-            }
-            SyncDirective::ResyncRequired { reason } => {
-                return Err(ClientError::ResyncRequired { reason });
-            }
-        }
+        validate_sync_directive(&response.directive)?;
         if response.protocol != self.config.protocol {
             return Err(ClientError::Protocol);
         }
@@ -932,6 +1901,23 @@ where
         }
         if response.next_cursor.scope != self.config.session.scope_id {
             return Err(ClientError::CursorScope);
+        }
+        if let Some(old) = cursor {
+            if old.authority_id != aequora_types::AuthorityId::LEGACY_UNBOUND
+                && response.next_cursor.authority_id != old.authority_id
+            {
+                return Err(ClientError::AuthorityIdChanged);
+            }
+            if response.next_cursor.authority_epoch < old.authority_epoch {
+                return Err(ClientError::AuthorityRollbackDetected);
+            }
+            if response.next_cursor.authority_epoch > old.authority_epoch {
+                return Err(ClientError::AuthorityChanged {
+                    authority_id: response.next_cursor.authority_id,
+                    previous_epoch: old.authority_epoch,
+                    current_epoch: response.next_cursor.authority_epoch,
+                });
+            }
         }
         if cursor.is_some_and(|old| response.next_cursor.sequence < old.sequence) {
             return Err(ClientError::CursorRegression);
@@ -969,7 +1955,9 @@ where
         {
             return Err(ClientError::NoProgress);
         }
-        self.store.reconcile(&response).await?;
+        self.store
+            .reconcile_fenced(&response, self.current_lease())
+            .await?;
         self.batcher().record_success(
             latency,
             submitted_operations.len(),
@@ -978,6 +1966,7 @@ where
                 .saturating_add(outcome.rejected)
                 .saturating_add(outcome.conflicts),
         );
+        self.scheduler().record_success();
         Ok(outcome)
     }
 
@@ -987,14 +1976,28 @@ where
     ///
     /// Returns the final [`ClientError`] after a permanent failure or retry exhaustion.
     pub async fn run_with_retry(&self) -> Result<SyncOutcome, ClientError> {
+        let _reservation = self.reserve()?;
+        self.require_local_leadership()?;
+        self.run_with_retry_unreserved().await
+    }
+
+    async fn run_with_retry_unreserved(&self) -> Result<SyncOutcome, ClientError> {
         let max_attempts = self.config.retry.max_attempts.max(1);
         let mut attempt = 0_u32;
         loop {
             let entropy = system_entropy() ^ u64::from(attempt);
-            let delay = self.config.retry.delay(attempt, entropy);
-            match self.run_once_with_retry_delay(delay).await {
+            let local_delay = self.config.retry.delay(attempt, entropy);
+            match self.run_once_with_retry_delay(local_delay).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if error.is_transient() && attempt + 1 < max_attempts => {
+                    let server_retry_after = match &error {
+                        ClientError::Transport(error) => error.retry_after,
+                        _ => None,
+                    };
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, server_retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -1011,6 +2014,8 @@ where
     /// Returns [`ClientError`] when an exchange fails permanently, retries are exhausted,
     /// local state cannot be read, or the configured exchange safety bound is reached.
     pub async fn sync(&self) -> Result<SyncSummary, ClientError> {
+        let _reservation = self.reserve()?;
+        self.require_local_leadership()?;
         let mut summary = SyncSummary::default();
         if self
             .store
@@ -1018,13 +2023,13 @@ where
             .await?
             .is_none()
         {
-            self.bootstrap().await?;
+            self.bootstrap_unreserved().await?;
         }
         for _ in 0..self.config.max_exchanges_per_sync {
-            let outcome = match self.run_with_retry().await {
+            let outcome = match self.run_with_retry_unreserved().await {
                 Ok(outcome) => outcome,
                 Err(ClientError::ResyncRequired { .. }) => {
-                    self.bootstrap().await?;
+                    self.bootstrap_unreserved().await?;
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -1045,6 +2050,14 @@ where
     /// Returns [`ClientError`] for authorization/transport/storage failures, inconsistent
     /// snapshot pages, retry exhaustion, no-progress pages, or the exchange safety bound.
     pub async fn bootstrap(&self) -> Result<BootstrapOutcome, ClientError> {
+        let _reservation = self.reserve()?;
+        self.require_local_leadership()?;
+        let _decision = self.scheduler_decision(WorkKind::Bootstrap, WorkClass::Interactive)?;
+        self.bootstrap_unreserved().await
+    }
+
+    async fn bootstrap_unreserved(&self) -> Result<BootstrapOutcome, ClientError> {
+        let trusted_cursor = self.store.load_cursor(self.config.session.scope_id).await?;
         let progress = self
             .store
             .snapshot_progress(self.config.session.scope_id)
@@ -1065,6 +2078,16 @@ where
                 capabilities: self.config.capabilities.clone(),
             };
             let response = self.bootstrap_page_with_retry(request).await?;
+            if let Some(trusted) = trusted_cursor {
+                if trusted.authority_id != aequora_types::AuthorityId::LEGACY_UNBOUND
+                    && response.cursor.authority_id != trusted.authority_id
+                {
+                    return Err(ClientError::AuthorityIdChanged);
+                }
+                if response.cursor.authority_epoch < trusted.authority_epoch {
+                    return Err(ClientError::AuthorityRollbackDetected);
+                }
+            }
             validate_snapshot_page(
                 &response,
                 self.config.protocol,
@@ -1080,7 +2103,9 @@ where
             {
                 return Err(ClientError::NoProgress);
             }
-            self.store.stage_snapshot(&response).await?;
+            self.store
+                .stage_snapshot_fenced(&response, self.current_lease())
+                .await?;
             pages = pages.saturating_add(1);
             entities = entities.saturating_add(response.entities.len());
             snapshot_id = Some(response.snapshot_id);
@@ -1152,7 +2177,10 @@ where
                         },
                     );
                     let entropy = system_entropy() ^ u64::from(attempt);
-                    let delay = self.config.retry.delay(attempt, entropy);
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, error.retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -1187,6 +2215,9 @@ where
     /// retries, storage failures, or the configured page safety bound.
     #[allow(clippy::too_many_lines)]
     pub async fn bootstrap_streaming(&self) -> Result<BootstrapOutcome, ClientError> {
+        let _reservation = self.reserve()?;
+        self.require_local_leadership()?;
+        let _decision = self.scheduler_decision(WorkKind::Bootstrap, WorkClass::Interactive)?;
         let progress = self
             .store
             .snapshot_progress(self.config.session.scope_id)
@@ -1220,7 +2251,11 @@ where
                     if error.kind == TransportErrorKind::Transient
                         && attempt + 1 < max_attempts =>
                 {
-                    let delay = self.config.retry.delay(attempt, system_entropy());
+                    let entropy = system_entropy();
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, error.retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -1246,7 +2281,12 @@ where
                                 outcome: OutcomeKind::TransientFailure,
                             },
                         );
-                        let delay = self.config.retry.delay(attempt, system_entropy());
+                        let entropy = system_entropy();
+                        let delay = self.config.retry.delay_with_server(
+                            attempt,
+                            entropy,
+                            error.retry_after,
+                        );
                         self.record_retry(delay);
                         tokio::time::sleep(delay).await;
                         attempt = attempt.saturating_add(1);
@@ -1269,7 +2309,9 @@ where
                 {
                     return Err(ClientError::NoProgress);
                 }
-                self.store.stage_snapshot(&response).await?;
+                self.store
+                    .stage_snapshot_fenced(&response, self.current_lease())
+                    .await?;
                 self.observer.record_with_context(
                     trace,
                     MetricEvent::BootstrapPage {
@@ -1325,6 +2367,28 @@ fn validate_operation_results(
         return Err(ClientError::OperationResults);
     }
     Ok(())
+}
+
+fn validate_sync_directive(directive: &SyncDirective) -> Result<(), ClientError> {
+    match directive {
+        SyncDirective::Continue => Ok(()),
+        SyncDirective::UpgradeRequired { minimum, current } => Err(ClientError::UpgradeRequired {
+            minimum: *minimum,
+            current: *current,
+        }),
+        SyncDirective::ResyncRequired { reason } => {
+            Err(ClientError::ResyncRequired { reason: *reason })
+        }
+        SyncDirective::AuthorityChanged {
+            authority_id,
+            previous_epoch,
+            current_epoch,
+        } => Err(ClientError::AuthorityChanged {
+            authority_id: *authority_id,
+            previous_epoch: *previous_epoch,
+            current_epoch: *current_epoch,
+        }),
+    }
 }
 
 fn trace_context(request_id: RequestId, session: &SessionMetadata) -> TraceContext {
@@ -1419,6 +2483,24 @@ fn unix_time_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loom::{
+        sync::{
+            Arc as LoomArc,
+            atomic::{AtomicBool as LoomAtomicBool, AtomicUsize as LoomAtomicUsize},
+        },
+        thread,
+    };
+
+    impl ReservationFlag for LoomAtomicBool {
+        fn try_set(&self) -> bool {
+            self.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+        }
+
+        fn clear(&self) {
+            self.store(false, Ordering::Release);
+        }
+    }
 
     #[test]
     fn backoff_is_exponential_capped_and_jittered() {
@@ -1432,6 +2514,12 @@ mod tests {
         assert_eq!(retry.delay(0, 20).as_millis(), 100);
         assert!((320..=480).contains(&retry.delay(2, 0).as_millis()));
         assert!((400..=600).contains(&retry.delay(20, u64::MAX).as_millis()));
+        let guided = retry.delay_with_server(0, 20, Some(Duration::from_millis(400)));
+        assert!((400..=480).contains(&guided.as_millis()));
+        assert_eq!(
+            retry.delay_with_server(0, 20, Some(Duration::from_secs(60))),
+            retry.max_delay
+        );
     }
 
     #[test]
@@ -1449,5 +2537,76 @@ mod tests {
         assert_eq!(batcher.limit(), 12);
         batcher.record_failure();
         assert_eq!(batcher.limit(), 8);
+    }
+
+    #[tokio::test]
+    async fn live_hint_handle_coalesces_before_bounded_coordinator_trigger() {
+        let (triggers, mut receiver) = mpsc::channel(1);
+        let (status, status_receiver) = watch::channel(SyncStatus::Idle { last_sync: None });
+        let (health, health_receiver) = watch::channel(SyncHealth {
+            status: SyncStatus::Idle { last_sync: None },
+            pending_operations: 0,
+            oldest_pending_age_ms: None,
+            conflicts_pending: 0,
+            last_successful_sync_unix_ms: None,
+        });
+        let (coordinator_status, coordinator_status_receiver) =
+            watch::channel(CoordinatorStatus::SingleProcess);
+        let handle = SyncCoordinatorHandle {
+            triggers,
+            status: status_receiver,
+            health: health_receiver,
+            coordinator_status: coordinator_status_receiver,
+        };
+        drop((status, health, coordinator_status));
+        let tenant = aequora_types::TenantId::new();
+        let scope = aequora_types::SyncScopeId::new();
+        let tracker = HintWakeTracker::new(tenant, [scope]);
+        let hint = SyncHint::v1(
+            tenant,
+            scope,
+            Some(aequora_types::Sequence(1)),
+            aequora_live::SyncHintReason::NewAuthoritativeChange,
+        );
+        assert_eq!(
+            handle.observe_live_hint(&tracker, hint).await,
+            Ok(HintWakeOutcome::Wake { generation: 1 })
+        );
+        assert_eq!(receiver.recv().await, Some(SyncTrigger::PushHint));
+        assert_eq!(
+            handle.observe_live_hint(&tracker, hint).await,
+            Ok(HintWakeOutcome::Coalesced { generation: 1 })
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn loom_single_flight_reservation_never_has_two_owners() {
+        loom::model(|| {
+            let reservation = LoomArc::new(ReservationCore::new(LoomAtomicBool::new(false)));
+            let active = LoomArc::new(LoomAtomicUsize::new(0));
+            let entered = LoomArc::new(LoomAtomicUsize::new(0));
+            let mut workers = Vec::new();
+            for _ in 0..2 {
+                let reservation = LoomArc::clone(&reservation);
+                let active = LoomArc::clone(&active);
+                let entered = LoomArc::clone(&entered);
+                workers.push(thread::spawn(move || {
+                    if let Some(_guard) = reservation.try_acquire() {
+                        assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
+                        entered.fetch_add(1, Ordering::SeqCst);
+                        thread::yield_now();
+                        assert_eq!(active.fetch_sub(1, Ordering::SeqCst), 1);
+                    }
+                }));
+            }
+            for worker in workers {
+                worker
+                    .join()
+                    .unwrap_or_else(|_| panic!("modeled reservation worker panicked"));
+            }
+            assert_eq!(active.load(Ordering::SeqCst), 0);
+            assert!(entered.load(Ordering::SeqCst) >= 1);
+        });
     }
 }

@@ -2523,21 +2523,21 @@ Add replicas only after observed latency/SLO/residency need.
 Part 17 is complete when:
 
 ```text
-[ ] RegionId and replica roles defined
-[ ] replica watermark defined
-[ ] read consistency levels defined
-[ ] session/read-your-writes semantics defined
-[ ] replica routing/fallback defined
-[ ] authority-only writes preserved
-[ ] regional snapshot/blob delivery defined
-[ ] regional projection architecture defined
-[ ] failover/epoch integration defined
-[ ] cache epoch invalidation defined
-[ ] residency policy defined
-[ ] tenant-sharded authority model defined
-[ ] governance/security interactions defined
-[ ] fault/load tests defined
-[ ] regional correctness invariants added
+[x] RegionId and replica roles defined
+[x] replica watermark defined
+[x] read consistency levels defined
+[x] session/read-your-writes semantics defined
+[x] replica routing/fallback defined
+[x] authority-only writes preserved
+[x] regional snapshot/blob delivery defined
+[x] regional projection architecture defined
+[x] failover/epoch integration defined
+[x] cache epoch invalidation defined
+[x] residency policy defined
+[x] tenant-sharded authority model defined
+[x] governance/security interactions defined
+[x] fault/load tests defined
+[x] regional correctness invariants added
 ```
 
 ---

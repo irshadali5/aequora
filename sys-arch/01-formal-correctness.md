@@ -1,5 +1,25 @@
 # Aequora Sync — Part 01
 
+> The executable registry now also includes Part 08 invariants `AEQ-INV-LIVE001` through
+> `AEQ-INV-LIVE005`: live-hint loss safety, no direct replica/cursor mutation, authorized scope
+> isolation, bounded slow-consumer memory, and leader-handoff catch-up without durable hint replay.
+> Part 09 adds `AEQ-INV-IMP001` through `AEQ-INV-IMP006`: deterministic import identity,
+> checkpoint-after-commit safety, verified cutover, baseline history safety, post-activation journal
+> visibility, and durable quarantine accounting.
+> Part 10 adds `AEQ-INV-BS001` through `AEQ-INV-BS006`: cursor/activation atomicity, one-boundary
+> manifests, staging isolation, chunk retry idempotency, pending-intent preservation, and
+> snapshot-plus-delta convergence.
+> Part 12 adds `AEQ-INV-DET001` through `AEQ-INV-DET006`: equivalent captured inputs produce an
+> equivalent plan, every nondeterministic input is explicit, replay cannot execute side effects,
+> committed inputs cannot drift, and handler plus policy/config versions fail closed.
+> Part 13 adds `AEQ-INV-AUD001` through `AEQ-INV-AUD009`: required audit atomicity, retry
+> deduplication, truthful actor attribution, append-only correction, sensitive-value policy,
+> explanation authorization, chain continuity, visible tamper failure, and accurate field
+> provenance.
+> Part 14 adds `AEQ-INV-GOV001` through `AEQ-INV-GOV009`: tombstone and journal-floor safety,
+> legal-hold precedence, required-evidence preservation, all-surface completion, offboarding write
+> fencing, restore reconciliation, resurrection prevention, and governed-copy coverage.
+
 # Formal Correctness, Invariants, Model Checking, and Deterministic Simulation Architecture
 
 ## 1. Purpose
@@ -1068,20 +1088,57 @@ If crate count becomes excessive, `aequora-invariants` can remain a module withi
 Part 01 is implemented when:
 
 ```text
-[ ] invariant registry exists
-[ ] abstract client/server/network model exists
-[ ] idempotency model check exists
-[ ] cursor-safety model check exists
-[ ] lost-response model check exists
-[ ] duplicate-request model check exists
-[ ] two-client conflict model exists
-[ ] property-based state machine exists
-[ ] Loom covers local concurrency primitives
-[ ] adapter failpoints exist in test builds
-[ ] differential adapter tests exist
-[ ] failures emit replayable RON traces
-[ ] CI tiers execute verification automatically
+[x] invariant registry exists
+[x] abstract client/server/network model exists
+[x] idempotency model check exists
+[x] cursor-safety model check exists
+[x] lost-response model check exists
+[x] duplicate-request model check exists
+[x] two-client conflict model exists
+[x] property-based state machine exists
+[x] Loom covers local concurrency primitives
+[x] adapter failpoints exist in test builds
+[x] differential adapter tests exist
+[x] failures emit replayable RON traces
+[x] CI tiers execute verification automatically
 ```
+
+### Current implementation evidence
+
+```text
+[x] invariant registry exists (`aequora-invariants`, AEQ-INV-001 through AEQ-INV-010)
+[x] abstract client/server/network model exists (`aequora-model`)
+[x] idempotency model check exists
+[x] cursor-safety model check exists
+[x] lost-response model check exists
+[x] duplicate-request model check exists
+[x] two-client conflict model exists
+[x] property-based state machine exists
+[x] Loom covers the client engine's single-flight synchronization reservation
+[x] adapter failpoints exist in TestKit builds
+[x] differential reference/Stoolap/PostgreSQL adapter outcome tests are explicit
+[x] failures emit self-contained replayable RON traces
+[x] pull-request and scheduled correctness CI tiers execute automatically
+```
+
+`aequora verify model` runs the bounded default search. `aequora verify trace <failure.ron>`
+validates the model version and initial-state hash, replays every action, and succeeds only when the
+recorded invariant violation is reproduced. The trace contains abstract structural values, not
+customer payloads.
+
+The local differential test runs the same fixture through the reference and Stoolap stores and
+compares complete contract reports. The authority differential test runs the same commit through
+the reference and PostgreSQL stores and compares its logical acknowledgement; CI supplies a real
+PostgreSQL service. The local offline run compiles that test but does not claim its live result.
+
+Part 01 is complete at the repository boundary. As with the named prerequisites, a skipped live
+database test is not current infrastructure evidence; the configured PostgreSQL CI job is the
+continuous real-adapter gate.
+
+Part 11 extends the normative registry with `AEQ-INV-PROF001` through `AEQ-INV-PROF006` for
+operation/profile compatibility, adapter capability safety, append-only preservation, strong
+aggregate atomicity, derived-authority isolation, and fail-closed unknown operations. The profile
+crate and reusable testkit compliance gate provide their executable evidence.
 
 ---
 

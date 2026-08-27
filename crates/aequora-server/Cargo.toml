@@ -8,13 +8,18 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
+aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-region = { version = "0.1.0", path = "../aequora-region" }
+aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
@@ -25,3 +30,6 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

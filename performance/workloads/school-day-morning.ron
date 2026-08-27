@@ -1,0 +1,15 @@
+(
+    format_version: 1,
+    name: "school-day-morning-v1",
+    profile: SchoolDayMorning,
+    benchmark_kind: EndToEnd,
+    seed: 19001,
+    tenants: 100,
+    clients_per_tenant: 50,
+    operations: 1000000,
+    payload_bytes_p50: 256,
+    payload_bytes_p99: 4096,
+    max_dependency_edges: 2000000,
+    max_runtime_seconds: 1800,
+    durable: true,
+)

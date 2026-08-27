@@ -51,6 +51,7 @@ fn operation(session: &SessionMetadata, dependency: Option<OperationId>) -> Oper
         metadata: OperationMetadata {
             trace_id: None,
             dependencies: dependency.into_iter().collect(),
+            ..OperationMetadata::default()
         },
     }
 }
@@ -83,10 +84,7 @@ fn empty_response(scope: SyncScopeId) -> SyncResponse {
         rejected: Vec::new(),
         conflicts: Vec::new(),
         changes: Vec::new(),
-        next_cursor: Cursor {
-            scope,
-            sequence: Sequence(0),
-        },
+        next_cursor: Cursor::legacy(scope, Sequence(0)),
         has_more: false,
         server_time: HybridTimestamp {
             physical_ms: 1,
@@ -149,6 +147,7 @@ fn core_pipeline(criterion: &mut Criterion) {
     let compute = ComputePool::new(ComputeConfig {
         worker_threads: 2,
         parallel_threshold: 128,
+        max_queued_jobs: 8,
     })
     .unwrap_or_else(|error| panic!("{error}"));
     criterion.bench_function("rayon_threshold_decision", |bencher| {

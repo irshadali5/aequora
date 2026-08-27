@@ -1,0 +1,23 @@
+[package]
+name = "aequora-profile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Validated aggregate and operation consistency profiles for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+
+[lints]
+workspace = true

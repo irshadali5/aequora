@@ -10,8 +10,9 @@ use aequora_store::{
 };
 use aequora_testkit::{InMemoryAuthoritativeStore, InMemoryLocalStore};
 use aequora_types::{
-    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp,
-    NodeId, OperationId, ProtocolVersion, SchemaVersion, Sequence, SyncScopeId, TenantId,
+    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, ProtocolVersion,
+    SchemaVersion, Sequence, SyncScopeId, TenantId,
 };
 use proptest::prelude::*;
 
@@ -71,11 +72,15 @@ fn response(
     entity: EntityRef,
     sequence: u64,
 ) -> SyncResponse {
+    let event_id = EventId::new();
+    let lineage = LineageContext::root().derived(LineageRef::Operation(operation_id));
     SyncResponse {
         protocol: ProtocolVersion::V1,
         directive: SyncDirective::Continue,
         acknowledged: vec![OperationAck {
             operation_id,
+            event_id,
+            lineage,
             entity_version: EntityVersion::INITIAL,
             sequence: Sequence(sequence),
             duplicate: false,
@@ -87,16 +92,15 @@ fn response(
             scope_id: scope,
             sequence: Sequence(sequence),
             operation_id,
+            event_id,
+            lineage,
             entity,
             version: EntityVersion::INITIAL,
             change_kind: ChangeKind::Upsert,
             payload: b"authoritative".to_vec(),
             timestamp: timestamp(2),
         }],
-        next_cursor: Cursor {
-            scope,
-            sequence: Sequence(sequence),
-        },
+        next_cursor: Cursor::legacy(scope, Sequence(sequence)),
         has_more: false,
         server_time: timestamp(2),
     }
@@ -166,7 +170,10 @@ proptest! {
             let operation_id = OperationId::new();
             let payload = b"one logical effect".to_vec();
             let commit = CommitOperation {
+                authority: None,
                 operation_id,
+                event_id: EventId::new(),
+                operation_lineage: LineageContext::root(),
                 actor_id: ActorId::new(),
                 device_id: DeviceId::new(),
                 operation_kind: 1,
@@ -215,14 +222,14 @@ proptest! {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor { scope, sequence: Sequence(regression) },
+                next_cursor: Cursor::legacy(scope, Sequence(regression)),
                 has_more: false,
                 server_time: timestamp(3),
             };
             prop_assert!(store.reconcile(&regressing).await.is_err());
             prop_assert_eq!(
                 store.load_cursor(scope).await.unwrap_or_else(|error| panic!("{error}")),
-                Some(Cursor { scope, sequence: Sequence(start) })
+                Some(Cursor::legacy(scope, Sequence(start)))
             );
             Ok(())
         })?;
@@ -245,6 +252,9 @@ proptest! {
                 operation_ids.push(operation_id);
                 acknowledgements.push(OperationAck {
                     operation_id,
+                    event_id: EventId::new(),
+                    lineage: LineageContext::root()
+                        .derived(LineageRef::Operation(operation_id)),
                     entity_version: EntityVersion::INITIAL,
                     sequence: Sequence(u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1)),
                     duplicate: false,
@@ -257,7 +267,10 @@ proptest! {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor { scope, sequence: Sequence(u64::try_from(count).unwrap_or(u64::MAX)) },
+                next_cursor: Cursor::legacy(
+                    scope,
+                    Sequence(u64::try_from(count).unwrap_or(u64::MAX)),
+                ),
                 has_more: false,
                 server_time: timestamp(3),
             };
@@ -305,7 +318,7 @@ proptest! {
             );
             prop_assert_eq!(
                 store.load_cursor(scope).await.unwrap_or_else(|error| panic!("{error}")),
-                Some(Cursor { scope, sequence: Sequence(1) })
+                Some(Cursor::legacy(scope, Sequence(1)))
             );
             Ok(())
         })?;

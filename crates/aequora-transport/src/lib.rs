@@ -1,7 +1,9 @@
 //! Transport abstraction. The synchronization engine is not coupled to HTTP.
 
 use aequora_protocol::{BootstrapRequest, BootstrapResponse, PushHint, SyncRequest, SyncResponse};
+use aequora_types::OperationalErrorCode;
 use async_trait::async_trait;
+use std::time::Duration;
 use thiserror::Error;
 
 /// Exchange failure and retry semantics.
@@ -10,6 +12,10 @@ use thiserror::Error;
 pub struct TransportError {
     /// Whether an unchanged exchange is worth retrying.
     pub kind: TransportErrorKind,
+    /// Stable operational category, when the transport supplied one.
+    pub code: Option<OperationalErrorCode>,
+    /// Advisory server delay. Client policy must cap it and retain jitter/backoff.
+    pub retry_after: Option<Duration>,
     /// Non-sensitive implementation explanation.
     pub message: String,
 }
@@ -20,6 +26,8 @@ impl TransportError {
     pub fn transient(message: impl Into<String>) -> Self {
         Self {
             kind: TransportErrorKind::Transient,
+            code: None,
+            retry_after: None,
             message: message.into(),
         }
     }
@@ -29,8 +37,24 @@ impl TransportError {
     pub fn permanent(message: impl Into<String>) -> Self {
         Self {
             kind: TransportErrorKind::Permanent,
+            code: None,
+            retry_after: None,
             message: message.into(),
         }
+    }
+
+    /// Attaches a stable payload-free operational category.
+    #[must_use]
+    pub const fn with_code(mut self, code: OperationalErrorCode) -> Self {
+        self.code = Some(code);
+        self
+    }
+
+    /// Attaches advisory server retry timing without changing retry classification.
+    #[must_use]
+    pub const fn with_retry_after(mut self, retry_after: Duration) -> Self {
+        self.retry_after = Some(retry_after);
+        self
     }
 }
 

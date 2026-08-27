@@ -11,8 +11,9 @@ use aequora_protocol::{
 };
 use aequora_server::{ExchangeService, ServerError};
 use aequora_types::{
-    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp,
-    NodeId, OperationId, ProtocolVersion, RequestId, Sequence, SessionId, SyncScopeId, TenantId,
+    ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, ProtocolVersion, RequestId,
+    Sequence, SessionId, SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
 use axum::{
@@ -46,11 +47,14 @@ impl ExchangeService for EchoService {
     ) -> Result<SyncResponse, ServerError> {
         let compressed_response = request.capabilities.contains(&Capability::Zstd);
         let changes = if compressed_response {
+            let operation_id = OperationId::new();
             vec![RemoteChange {
                 tenant_id: request.session.tenant_id,
                 scope_id: request.session.scope_id,
                 sequence: Sequence(1),
-                operation_id: OperationId::new(),
+                operation_id,
+                event_id: EventId::new(),
+                lineage: LineageContext::root().derived(LineageRef::Operation(operation_id)),
                 entity: EntityRef {
                     entity_type: EntityType::new(1).unwrap_or_else(|error| panic!("{error}")),
                     entity_id: EntityId::new(),
@@ -74,14 +78,14 @@ impl ExchangeService for EchoService {
             rejected: Vec::new(),
             conflicts: Vec::new(),
             changes,
-            next_cursor: Cursor {
-                scope: request.session.scope_id,
-                sequence: if compressed_response {
+            next_cursor: Cursor::legacy(
+                request.session.scope_id,
+                if compressed_response {
                     Sequence(1)
                 } else {
                     Sequence(0)
                 },
-            },
+            ),
             has_more: false,
             server_time: HybridTimestamp {
                 physical_ms: 1,
@@ -99,10 +103,7 @@ impl ExchangeService for EchoService {
         Ok(BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: request.snapshot_id.unwrap_or_default(),
-            cursor: Cursor {
-                scope: request.session.scope_id,
-                sequence: Sequence(0),
-            },
+            cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
             offset: request.offset,
             entities: Vec::new(),
             next_offset: request.offset,
@@ -443,10 +444,7 @@ fn empty_response(request: &SyncRequest) -> SyncResponse {
         rejected: Vec::new(),
         conflicts: Vec::new(),
         changes: Vec::new(),
-        next_cursor: Cursor {
-            scope: request.session.scope_id,
-            sequence: Sequence(0),
-        },
+        next_cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
         has_more: false,
         server_time: HybridTimestamp {
             physical_ms: 1,

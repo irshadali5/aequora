@@ -1,0 +1,21 @@
+[package]
+name = "aequora-integrity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Canonical anti-entropy, divergence detection, and repair planning for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+hex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

@@ -2799,23 +2799,38 @@ indexes.
 Part 04 is complete when:
 
 ```text
-[ ] CompactionPolicy defined
-[ ] RebasePolicy defined
-[ ] mutable-unsent boundary defined
-[ ] ever_sent semantics defined
-[ ] payload immutability invariant defined
-[ ] dependency-aware compaction planner defined
-[ ] supersession model defined
-[ ] barrier semantics defined
-[ ] create/update/delete cases defined
-[ ] finance-safe defaults defined
-[ ] rebase-after-bootstrap defined
-[ ] anti-entropy repair integration defined
-[ ] property tests specified
-[ ] crash/failpoint tests specified
-[ ] queue metrics/diagnostics defined
-[ ] adapter requirements defined
+[x] CompactionPolicy defined
+[x] RebasePolicy defined
+[x] mutable-unsent boundary defined
+[x] ever_sent semantics defined
+[x] payload immutability invariant defined
+[x] dependency-aware compaction planner defined
+[x] supersession model defined
+[x] barrier semantics defined
+[x] create/update/delete cases defined
+[x] finance-safe defaults defined
+[x] rebase-after-bootstrap defined
+[x] anti-entropy repair integration defined
+[x] property tests specified
+[x] crash/failpoint tests specified
+[x] queue metrics/diagnostics defined
+[x] adapter requirements defined
 ```
+
+## 164.1 Repository Implementation Evidence
+
+The reusable implementation is mapped in
+[`docs/offline-compaction-rebase-completion.md`](docs/offline-compaction-rebase-completion.md).
+The database-neutral planner lives in `aequora-queue`; transactional adapter hooks live in
+`aequora-store`; Stoolap persists the `ever_sent` boundary, immutable semantic hash,
+supersessions, and rebase history atomically. The reference adapter, client opt-in integration,
+configuration, invariant registry, payload-free metrics, and dry-run CLI diagnostics exercise the
+same contracts.
+
+`Merge` and `Custom` deliberately remain application-certified extension points. Unknown,
+create/delete, append-only, financial, and audit-sensitive semantics remain non-compactable until
+the application explicitly supplies and tests a safe policy. This is the required fail-closed
+behavior, not an incomplete generic payload merger.
 
 ---
 

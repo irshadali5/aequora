@@ -4,7 +4,7 @@
 [![Rust 1.87+](https://img.shields.io/badge/MSRV-1.87.0-blue.svg)](https://www.rust-lang.org)
 [![Edition 2024](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
-[![Workspace](https://img.shields.io/badge/workspace-26%20libraries%20%2B%201%20dev%20tool-purple.svg)](crates/)
+[![Workspace](https://img.shields.io/badge/workspace-44%20libraries%20%2B%201%20dev%20tool-purple.svg)](crates/)
 
 Aequora is a database-neutral, server-authoritative, local-first synchronization engine written in
 Rust. It synchronizes typed domain operations and authoritative state transitions—not SQL,
@@ -38,6 +38,11 @@ Aequora makes those failure boundaries explicit:
 4. client reconciliation transaction
    changes + applied markers + terminal outbox state + conflicts + cursor
 ```
+
+Every root action also receives a retry-stable `CorrelationId`. The authority allocates a distinct
+`EventId`, records the direct `LineageRef`, and returns the same identity and lineage on retry.
+Derived events and durable jobs inherit correlation only after client identity claims have been
+matched to the authenticated server context.
 
 The result is local ACID plus durable eventual convergence. Aequora does not pretend an offline
 client and a remote authority share a distributed transaction.
@@ -218,6 +223,7 @@ Select each deployment axis independently:
 | `testkit` | Deterministic reference components | in-memory stores and adapter contracts |
 | `ron` / `json` | Diagnostic codecs | optional human-readable encodings |
 | `tracing` | Structured payload-free tracing | `TracingObserver` |
+| `record-sync` | Optional canonical record mapping/migration | `SchemaRegistry`, `SchemaMap`, `CanonicalExport` |
 
 Recommended dependencies:
 
@@ -353,21 +359,48 @@ Database URLs, access tokens, and TLS keys do not belong in this object.
 
 ## Workspace map
 
-The workspace contains 26 publishable libraries plus one non-publishable developer utility:
+The workspace package count is reported by `aequora-dev summary`; the major ownership areas are:
 
 | Area | Crates |
 |---|---|
 | Facade | `aequora` |
-| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec` |
+| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-scope`, `aequora-live`, `aequora-bootstrap` |
 | Client/server kernel | `aequora-client`, `aequora-server`, `aequora-executor`, `aequora-validator` |
 | Storage contracts/adapters | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
 | Network boundaries | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic` |
-| Domain policies | `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal` |
-| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-config`, `aequora-observability` |
-| Verification/tooling | `aequora-testkit`, `aequora-dev` |
+| Domain policies | `aequora-crypto`, `aequora-profile`, `aequora-replay`, `aequora-audit`, `aequora-governance`, `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal`, `aequora-queue` |
+| Optional record interoperability | `aequora-schema`, `aequora-mapping`, `aequora-migration` |
+| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-performance`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler` |
+| Verification/tooling | `aequora-invariants`, `aequora-model`, `aequora-testkit`, `aequora-macros`, `aequora-cli`, `aequora-dev` |
 
 Run `cargo run -q -p aequora-dev -- summary` for the live workspace graph or
 `cargo run -q -p aequora-dev -- graph aequora-client` for one crate's dependency direction.
+Use `cargo run -q -p aequora-dev -- profile list`, `profile explain <kind>`, `profile verify
+<manifest.ron>`, or `profile compare <old.ron> <new.ron>` for profile governance.
+Use `cargo run -q -p aequora-dev -- replay explain`, `replay verify <bundle.ron>`, or `replay
+inspect <bundle.ron>` for payload-free deterministic replay diagnostics.
+Use `cargo run -q -p aequora-dev -- audit explain`, `audit verify <chain.ron>`, or `audit
+inspect <chain.ron>` for payload-free audit architecture and chain-integrity diagnostics.
+Use `cargo run -q -p aequora-dev -- governance explain` or `governance verify
+<erasure-plan.ron>` for read-only lifecycle diagnostics.
+Use `cargo run -q -p aequora-dev -- crypto policy` or `crypto registry-verify
+<root-and-registry.ron>` for secret-free cryptographic policy and trust diagnostics.
+Use `cargo run -q -p aequora-dev -- performance explain`, `performance profile <name>`,
+`performance workload-verify <workload.ron>`, or `performance compare <baseline.ron>
+<candidate.ron>` for Part 19 memory budgets and reproducible regression diagnostics.
+
+Payload-free built-in adapter diagnostics are available without database credentials:
+
+```bash
+cargo run -q -p aequora-cli -- doctor adapters
+cargo run -q -p aequora-cli -- inspect adapters
+cargo run -q -p aequora-cli -- inspect adapter stoolap
+cargo run -q -p aequora-cli -- verify pair stoolap postgresql
+cargo run -q -p aequora-cli -- verify export ./export.postcard ./schema.ron
+cargo run -q -p aequora-cli -- verify model
+cargo run -q -p aequora-cli -- verify trace ./failure.ron
+cargo run -q -p aequora-cli -- init ./my-aequora-client client
+```
 
 ## Verification
 
@@ -433,9 +466,26 @@ versioned.
 
 - [Complete developer tutorial](TUTORIAL.md)
 - [Governing implementation plan](plan.md)
-- [Detailed synchronization architecture](next.md)
+- [Architecture specification index](next.md) ([authoritative `sys-arch/` specifications](sys-arch/))
 - [ACID architecture](ACID.md)
 - [ACID compliance evidence](docs/acid-compliance.md)
+- [Enterprise implementation evidence](docs/enterprise-completion.md)
+- [Database interoperability implementation evidence](docs/database-interoperability-completion.md)
+- [Plug-and-play implementation evidence](docs/plug-and-play-completion.md)
+- [Part 03 anti-entropy and self-repair evidence](docs/anti-entropy-self-repair-completion.md)
+- [Part 04 offline compaction and rebase evidence](docs/offline-compaction-rebase-completion.md)
+- [Part 05 local multi-process coordination evidence](docs/local-multiprocess-coordination-completion.md)
+- [Part 06 adaptive scheduler and QoS evidence](docs/adaptive-sync-scheduler-qos-completion.md)
+- [Part 07 subscription, scope, and dynamic dataset evidence](docs/subscription-scope-dynamic-dataset-completion.md)
+- [Part 08 live sync, push hints, and presence evidence](docs/live-sync-push-presence-completion.md)
+- [Part 09 bulk import, export, seed, and migration evidence](docs/bulk-import-export-seed-migration-completion.md)
+- [Part 10 large snapshot and resumable bootstrap evidence](docs/large-snapshot-streaming-bootstrap-completion.md)
+- [Part 11 operation semantics and consistency-profile evidence](docs/operation-semantics-consistency-profiles-completion.md)
+- [Part 12 deterministic execution and replay evidence](docs/deterministic-execution-replay-completion.md)
+- [Part 13 data provenance, auditability, and explainability evidence](docs/data-provenance-auditability-explainability-completion.md)
+- [Part 14 data governance, retention, hold, and erasure evidence](docs/data-governance-retention-erasure-completion.md)
+- [Part 15 cryptographic integrity, key management, and protected payload evidence](docs/cryptographic-integrity-key-management-e2e-completion.md)
+- [Part 19 performance engineering and memory architecture evidence](docs/performance-engineering-memory-architecture-completion.md)
 - [Architecture implementation matrix](docs/next-completion.md)
 - [Plan completion evidence](docs/plan-completion.md)
 - [Custom database adapter guide](docs/custom-database-adapters.md)
@@ -443,7 +493,8 @@ versioned.
 
 ## Project status
 
-The repository-owned implementation described by `plan.md`, `next.md`, and `ACID.md` is present in
+The repository-owned implementation described by the `sys-arch/` specifications, `plan.md`,
+`ACID.md`, and `enterprise.md` is present in
 code, migrations, public contracts, real Stoolap tests, deterministic simulations, model/property
 tests, HTTP/QUIC integration tests, and environment-gated PostgreSQL/Neon suites.
 

@@ -2,6 +2,12 @@
 
 # Adaptive Sync Scheduler and Quality-of-Service Architecture
 
+> **Implementation status (2026-08-20):** Complete at the reusable repository boundary. The
+> database- and platform-neutral scheduler, client integration, profiles, diagnostics, invariants,
+> and deterministic contracts are mapped in
+> [`docs/adaptive-sync-scheduler-qos-completion.md`](docs/adaptive-sync-scheduler-qos-completion.md).
+> Platform signal collection and device-specific deployment acceptance remain host responsibilities.
+
 ## 1. Purpose
 
 Aequora is a local-first synchronization platform.
@@ -2175,22 +2181,22 @@ Advanced policy configuration should remain optional.
 Part 06 is complete when:
 
 ```text
-[ ] WorkClass defined
-[ ] operation priority metadata defined
-[ ] eligibility model defined
-[ ] network/power/activity context normalized
-[ ] adaptive batch controller defined
-[ ] retry/circuit-breaker model defined
-[ ] metered/roaming rules defined
-[ ] fairness/aging defined
-[ ] dependency priority inheritance defined
-[ ] background/interactive separation defined
-[ ] bootstrap/anti-entropy/blob QoS integration defined
-[ ] scheduler state persistence defined
-[ ] server scheduling hints defined
-[ ] deterministic tests specified
-[ ] QoS invariants added
-[ ] profiles and configuration defined
+[x] WorkClass defined
+[x] operation priority metadata defined
+[x] eligibility model defined
+[x] network/power/activity context normalized
+[x] adaptive batch controller defined
+[x] retry/circuit-breaker model defined
+[x] metered/roaming rules defined
+[x] fairness/aging defined
+[x] dependency priority inheritance defined
+[x] background/interactive separation defined
+[x] bootstrap/anti-entropy/blob QoS integration defined
+[x] scheduler state persistence defined
+[x] server scheduling hints defined
+[x] deterministic tests specified
+[x] QoS invariants added
+[x] profiles and configuration defined
 ```
 
 ---

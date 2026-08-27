@@ -1,0 +1,15 @@
+(
+    format_version: 1,
+    name: "low-bandwidth-mobile-v1",
+    profile: LowBandwidthMobile,
+    benchmark_kind: EndToEnd,
+    seed: 19004,
+    tenants: 10,
+    clients_per_tenant: 10,
+    operations: 100000,
+    payload_bytes_p50: 128,
+    payload_bytes_p99: 1024,
+    max_dependency_edges: 100000,
+    max_runtime_seconds: 3600,
+    durable: true,
+)

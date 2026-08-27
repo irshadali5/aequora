@@ -2,6 +2,13 @@
 
 # Bulk Import, Export, Seed, and Initial Migration Architecture
 
+> **Implementation status (2026-08-20):** Complete at the reusable repository boundary. Canonical
+> bundles, deterministic identity, durable jobs, checkpointed batches, quarantine, dependency
+> planning, baseline/cutover policy, CDC contracts, CLI dry runs, tests, metrics, and invariants are
+> mapped in [`docs/bulk-import-export-seed-migration-completion.md`](docs/bulk-import-export-seed-migration-completion.md).
+> Application mappings, authority adapter transactions, real source CDC, and production cutover
+> remain deployment gates.
+
 ## 1. Purpose
 
 Aequora will often be introduced into systems that already contain data.
@@ -2518,23 +2525,23 @@ policy.
 Part 09 is complete when:
 
 ```text
-[ ] migration modes defined
-[ ] ImportJob state machine defined
-[ ] deterministic identity mapping defined
-[ ] source fingerprinting defined
-[ ] mapping/transform/validation separation defined
-[ ] quarantine architecture defined
-[ ] bounded transaction/checkpoint semantics defined
-[ ] dependency-aware import planning defined
-[ ] baseline journal strategy defined
-[ ] entity version seeding policy defined
-[ ] snapshot baseline defined
-[ ] live cutover strategies defined
-[ ] source CDC/catch-up path defined
-[ ] export bundle defined
-[ ] canonical verification defined
-[ ] rollback/split-brain prevention defined
-[ ] CLI/API/testing/invariants defined
+[x] migration modes defined
+[x] ImportJob state machine defined
+[x] deterministic identity mapping defined
+[x] source fingerprinting defined
+[x] mapping/transform/validation separation defined
+[x] quarantine architecture defined
+[x] bounded transaction/checkpoint semantics defined
+[x] dependency-aware import planning defined
+[x] baseline journal strategy defined
+[x] entity version seeding policy defined
+[x] snapshot baseline defined
+[x] live cutover strategies defined
+[x] source CDC/catch-up path defined
+[x] export bundle defined
+[x] canonical verification defined
+[x] rollback/split-brain prevention defined
+[x] CLI/API/testing/invariants defined
 ```
 
 ---

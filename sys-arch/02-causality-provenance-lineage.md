@@ -2360,22 +2360,27 @@ Use stable IDs and look up descriptive metadata when authorized.
 Part 02 is complete when:
 
 ```text
-[ ] CorrelationId defined
-[ ] EventId defined
-[ ] LineageRef defined
-[ ] OperationEnvelope extended
-[ ] authoritative event extended
-[ ] correlation survives retry
-[ ] dependency planner remains separate from causality
-[ ] server derived event API inherits lineage
-[ ] job outbox inherits lineage
-[ ] provenance built from trusted auth context
-[ ] lineage persisted in operation ledger/journal
-[ ] admin correlation query specified
-[ ] adapter compliance includes lineage roundtrip
-[ ] Part 01 invariants extended
-[ ] model tests cover lineage preservation
+[x] CorrelationId defined
+[x] EventId defined
+[x] LineageRef defined
+[x] OperationEnvelope extended
+[x] authoritative event extended
+[x] correlation survives retry
+[x] dependency planner remains separate from causality
+[x] server derived event API inherits lineage
+[x] job outbox inherits lineage
+[x] provenance built from trusted auth context
+[x] lineage persisted in operation ledger/journal
+[x] admin correlation query specified
+[x] adapter compliance includes lineage roundtrip
+[x] Part 01 invariants extended
+[x] model tests cover lineage preservation
 ```
+
+Repository evidence and compatibility boundaries are mapped in
+`docs/causality-provenance-completion.md`. `JobProvenance` is the mandatory metadata contract for
+future durable job/outbox implementations; Part 23 owns the scheduler and worker runtime rather
+than this causality layer.
 
 ---
 

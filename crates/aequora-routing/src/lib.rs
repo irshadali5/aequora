@@ -151,8 +151,8 @@ mod tests {
 
     #[test]
     fn writes_never_route_to_a_low_latency_replica() {
-        let primary = RegionId::new();
-        let replica = RegionId::new();
+        let primary = RegionId::new(1);
+        let replica = RegionId::new(2);
         let mut router = RegionRouter::default();
         router.observe(RegionState {
             region_id: primary,

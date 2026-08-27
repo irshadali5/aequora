@@ -1,0 +1,18 @@
+[package]
+name = "aequora-admission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime-neutral hierarchical admission and overload policy for Aequora"
+
+[dependencies]
+aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

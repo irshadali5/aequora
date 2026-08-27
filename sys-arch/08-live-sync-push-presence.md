@@ -2,6 +2,13 @@
 
 # Live Sync, Push Hints, Presence, and Near-Real-Time Delivery Architecture
 
+> **Implementation status (2026-08-20):** Complete at the reusable repository boundary. The
+> transport-neutral live protocol, authorized fan-out, bounded coalescing, client wake generation,
+> leader fencing, PostgreSQL NOTIFY adapter, fault testkit, presence TTLs, metrics, and invariants
+> are mapped in [`docs/live-sync-push-presence-completion.md`](docs/live-sync-push-presence-completion.md).
+> WebSocket/SSE/mobile-provider wiring, application presence privacy, and deployment load acceptance
+> remain host gates.
+
 ## 1. Purpose
 
 Aequora's correctness model is based on:
@@ -2097,22 +2104,22 @@ and fetch 901.
 Part 08 is complete when:
 
 ```text
-[ ] SyncHint defined
-[ ] live transport abstraction defined
-[ ] WebSocket/SSE roles defined
-[ ] mobile push is hint-only
-[ ] reconnect/catch-up behavior defined
-[ ] hint coalescing defined
-[ ] scope-aware subscriptions defined
-[ ] server fan-out architecture defined
-[ ] broker abstraction defined
-[ ] PostgreSQL NOTIFY initial strategy defined
-[ ] slow-client backpressure defined
-[ ] leader-only live connection defined
-[ ] presence is explicitly ephemeral
-[ ] revocation interaction defined
-[ ] scheduler integration defined
-[ ] test/fault/load scenarios defined
+[x] SyncHint defined
+[x] live transport abstraction defined
+[x] WebSocket/SSE roles defined
+[x] mobile push is hint-only
+[x] reconnect/catch-up behavior defined
+[x] hint coalescing defined
+[x] scope-aware subscriptions defined
+[x] server fan-out architecture defined
+[x] broker abstraction defined
+[x] PostgreSQL NOTIFY initial strategy defined
+[x] slow-client backpressure defined
+[x] leader-only live connection defined
+[x] presence is explicitly ephemeral
+[x] revocation interaction defined
+[x] scheduler integration defined
+[x] test/fault/load scenarios defined
 ```
 
 ---

@@ -9,13 +9,22 @@ repository.workspace = true
 
 [dependencies]
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
+aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
+aequora-region = { version = "0.1.0", path = "../aequora-region" }
+aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
+aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 thiserror.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+loom.workspace = true
 
 [lints]
 workspace = true

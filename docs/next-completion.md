@@ -1,10 +1,11 @@
-# `next.md` implementation completion
+# Historical Aequora implementation completion audit
 
-This matrix reconciles the 184 architecture sections in `next.md` with the implemented Aequora
-workspace. Later, more concrete decisions in `plan.md` take precedence where `next.md` presented
-multiple policies or illustrative shapes.
+This matrix preserves traceability for the former 184-section “Next Architecture” document and
+the implemented Aequora workspace. The numbered `sys-arch/` documents are now authoritative;
+`next.md` is only an index. The section ranges below are historical identifiers, not current
+architecture content.
 
-## Section map
+## Historical section map
 
 | Sections | Architecture area | Current implementation | Status |
 |---|---|---|---|
@@ -36,7 +37,7 @@ multiple policies or illustrative shapes.
 | 180 | production checklist | normal release gates plus conditional PostgreSQL/Neon integration; deployment backup/restore and external load acceptance remain environment-owned | Implemented at repository scope |
 | 181–184 | final boundaries and recommendation | enforced dependency graph, database-neutral traits/profiles, transport-neutral engine, verified synchronization kernel | Implemented |
 
-## Concrete decisions where `next.md` offered alternatives
+## Concrete v1 decisions retained as implementation evidence
 
 ### Cursor generation
 
@@ -64,7 +65,7 @@ still versioned independently.
 ### Operation kind width
 
 Protocol v1 uses a compact non-zero `u16` application registry key. The high/low 16-bit `u32`
-layout in `next.md` was an example namespace, not a v1 compatibility requirement. Expanding it is a
+layout in the former Next Architecture document was an example namespace, not a v1 compatibility requirement. Expanding it is a
 wire-version decision.
 
 ### Multiple events from one command

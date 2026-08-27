@@ -1,0 +1,26 @@
+[package]
+name = "aequora-bootstrap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Database-neutral large snapshot manifests and resumable bootstrap workflow for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest = "=1.6.0"
+tokio.workspace = true
+
+[lints]
+workspace = true

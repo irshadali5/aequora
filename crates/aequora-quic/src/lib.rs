@@ -16,7 +16,7 @@ use aequora_store::StoreErrorKind;
 use aequora_transport::{
     SnapshotPageStream, StreamingSyncTransport, SyncTransport, TransportError,
 };
-use aequora_types::ProtocolVersion;
+use aequora_types::{OperationalErrorCode, ProtocolVersion};
 use async_trait::async_trait;
 use quinn::{Connection, ConnectionError, RecvStream, SendStream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -327,8 +327,13 @@ impl QuicServer {
                 self.write_snapshot_stream(send, auth, request).await
             }
             _ => {
-                let reply = encode_wire_error(false, "unsupported QUIC request message")
-                    .map_err(QuicServerError::new)?;
+                let reply = encode_wire_error(
+                    false,
+                    Some(OperationalErrorCode::Protocol),
+                    None,
+                    "unsupported QUIC request message",
+                )
+                .map_err(QuicServerError::new)?;
                 send.write_all(&reply).await.map_err(QuicServerError::new)?;
                 send.finish().map_err(QuicServerError::new)
             }
@@ -439,10 +444,21 @@ fn decode_reply<T: DeserializeOwned + WireProtocol>(
             },
         )
         .map_err(permanent)?;
-        return Err(if error.transient {
-            TransportError::transient(error.message)
+        let (code, retry_after_ms, message) = split_operational_code(error.message);
+        let transport_error = if error.transient {
+            TransportError::transient(message)
         } else {
-            TransportError::permanent(error.message)
+            TransportError::permanent(message)
+        };
+        let transport_error = match code {
+            Some(code) => transport_error.with_code(code),
+            None => transport_error,
+        };
+        return Err(match retry_after_ms {
+            Some(delay) => {
+                transport_error.with_retry_after(std::time::Duration::from_millis(delay))
+            }
+            None => transport_error,
         });
     }
     let (frame_protocol, value) = decode_with_limits::<T>(
@@ -479,20 +495,88 @@ fn encode_server_error(error: &ServerError) -> Result<Vec<u8>, aequora_codec::Co
     let transient = matches!(
         error,
         ServerError::Store(store) if store.kind == StoreErrorKind::Transient
-    );
-    encode_wire_error(transient, &error.to_string())
+    ) || matches!(error, ServerError::Maintenance { .. })
+        || matches!(error, ServerError::Admission(rejection) if rejection.retryable());
+    let code = match error {
+        ServerError::Admission(rejection) => {
+            if rejection.retryable() {
+                OperationalErrorCode::Overloaded
+            } else {
+                OperationalErrorCode::PayloadLimit
+            }
+        }
+        ServerError::Maintenance { .. } => OperationalErrorCode::Maintenance,
+        ServerError::Store(_) => OperationalErrorCode::Storage,
+        ServerError::IdentityMismatch | ServerError::ScopeAuthorization(_) => {
+            OperationalErrorCode::Authentication
+        }
+        ServerError::Authority(_) => OperationalErrorCode::Authority,
+        ServerError::Validation(_) | ServerError::Codec(_) | ServerError::BootstrapUnavailable => {
+            OperationalErrorCode::Protocol
+        }
+        ServerError::Dependency(_) => OperationalErrorCode::Validation,
+        ServerError::ResponseLimit
+        | ServerError::SnapshotNoProgress
+        | ServerError::MemoryBudget { .. } => OperationalErrorCode::PayloadLimit,
+        ServerError::VersionOverflow | ServerError::Compute(_) | ServerError::Merge(_) => {
+            OperationalErrorCode::Storage
+        }
+    };
+    let retry_after_ms = match error {
+        ServerError::Admission(rejection) => rejection.retry_after_ms(),
+        ServerError::Maintenance {
+            retry_after_seconds,
+            ..
+        } => Some(retry_after_seconds.saturating_mul(1_000)),
+        _ => None,
+    };
+    encode_wire_error(transient, Some(code), retry_after_ms, &error.to_string())
 }
 
-fn encode_wire_error(transient: bool, message: &str) -> Result<Vec<u8>, aequora_codec::CodecError> {
+fn encode_wire_error(
+    transient: bool,
+    code: Option<OperationalErrorCode>,
+    retry_after_ms: Option<u64>,
+    message: &str,
+) -> Result<Vec<u8>, aequora_codec::CodecError> {
+    let retry_prefix =
+        retry_after_ms.map_or_else(String::new, |delay| format!("retry-after-ms={delay}; "));
+    let message = code.map_or_else(
+        || format!("{retry_prefix}{message}"),
+        |code| format!("{code}: {retry_prefix}{message}"),
+    );
     encode_with_options(
         ProtocolVersion::V1,
         MessageKind::TransportError,
-        &WireError {
-            transient,
-            message: message.to_owned(),
-        },
+        &WireError { transient, message },
         EncodeOptions::default(),
     )
+}
+
+fn split_operational_code(message: String) -> (Option<OperationalErrorCode>, Option<u64>, String) {
+    let Some((candidate, detail)) = message.split_once(": ") else {
+        return split_retry_after(None, message);
+    };
+    match OperationalErrorCode::parse(candidate) {
+        Some(code) => split_retry_after(Some(code), detail.to_owned()),
+        None => split_retry_after(None, message),
+    }
+}
+
+fn split_retry_after(
+    code: Option<OperationalErrorCode>,
+    message: String,
+) -> (Option<OperationalErrorCode>, Option<u64>, String) {
+    let Some(rest) = message.strip_prefix("retry-after-ms=") else {
+        return (code, None, message);
+    };
+    let Some((value, detail)) = rest.split_once("; ") else {
+        return (code, None, message);
+    };
+    match value.parse::<u64>() {
+        Ok(delay) => (code, Some(delay), detail.to_owned()),
+        Err(_) => (code, None, message),
+    }
 }
 
 async fn write_length_delimited(
@@ -562,10 +646,7 @@ mod tests {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 has_more: false,
                 server_time: HybridTimestamp {
                     physical_ms: 1,
@@ -584,10 +665,7 @@ mod tests {
             Ok(BootstrapResponse {
                 protocol: request.protocol,
                 snapshot_id,
-                cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 offset: request.offset,
                 entities: vec![SnapshotEntity {
                     entity: EntityRef {
@@ -611,16 +689,23 @@ mod tests {
 
     #[test]
     fn typed_wire_errors_preserve_retry_semantics() {
-        let frame = encode_wire_error(true, "temporarily unavailable")
-            .unwrap_or_else(|error| panic!("{error}"));
+        let frame = encode_wire_error(
+            true,
+            Some(OperationalErrorCode::Maintenance),
+            Some(7_000),
+            "temporarily unavailable",
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let result =
             decode_reply::<SyncResponse>(&frame, MessageKind::SyncResponse, QuicConfig::default());
         assert!(matches!(
             result,
             Err(TransportError {
                 kind: TransportErrorKind::Transient,
+                code: Some(OperationalErrorCode::Maintenance),
+                retry_after: Some(delay),
                 ..
-            })
+            }) if delay == std::time::Duration::from_secs(7)
         ));
 
         let response = SyncResponse {
@@ -630,10 +715,7 @@ mod tests {
             rejected: Vec::new(),
             conflicts: Vec::new(),
             changes: Vec::new(),
-            next_cursor: Cursor {
-                scope: SyncScopeId::new(),
-                sequence: Sequence(0),
-            },
+            next_cursor: Cursor::legacy(SyncScopeId::new(), Sequence(0)),
             has_more: false,
             server_time: HybridTimestamp {
                 physical_ms: 1,

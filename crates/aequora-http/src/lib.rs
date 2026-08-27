@@ -4,10 +4,11 @@ use aequora_codec::{Compression, DecodeLimits, EncodeOptions, MessageKind};
 use aequora_observability::{MetricEvent, NoopObserver, Observer};
 use aequora_protocol::{BootstrapRequest, BootstrapResponse, SyncRequest, SyncResponse};
 use aequora_transport::{SyncTransport, TransportError};
+use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode};
 use async_trait::async_trait;
-use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE};
+use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE, header::RETRY_AFTER};
 use reqwest::{Client, Response, StatusCode, Url};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
 /// Primary synchronization media type.
@@ -155,8 +156,9 @@ impl HttpTransport {
         Request: serde::Serialize + Sync,
         Reply: serde::de::DeserializeOwned + WireProtocol,
     {
-        let frame = aequora_codec::encode_with_options(protocol, request_kind, request, options)
-            .map_err(permanent)?;
+        let frame =
+            aequora_codec::encode_bytes_with_options(protocol, request_kind, request, options)
+                .map_err(permanent)?;
         let uploaded = usize_to_u64(frame.len());
         let mut headers = self.headers.headers()?;
         headers.insert(
@@ -173,8 +175,19 @@ impl HttpTransport {
             .await
             .map_err(map_reqwest_error)?;
         let status = response.status();
+        let operational_code = response
+            .headers()
+            .get(OPERATIONAL_ERROR_CODE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(OperationalErrorCode::parse);
+        let retry_after = response
+            .headers()
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs);
         if !status.is_success() {
-            return Err(status_error(status));
+            return Err(status_error(status, operational_code, retry_after));
         }
         let content_type = response
             .headers()
@@ -296,15 +309,27 @@ async fn read_bounded(mut response: Response, maximum: usize) -> Result<Vec<u8>,
     Ok(body)
 }
 
-fn status_error(status: StatusCode) -> TransportError {
+fn status_error(
+    status: StatusCode,
+    operational_code: Option<OperationalErrorCode>,
+    retry_after: Option<Duration>,
+) -> TransportError {
     let message = format!("HTTP synchronization endpoint returned status {status}");
-    if status == StatusCode::REQUEST_TIMEOUT
+    let error = if status == StatusCode::REQUEST_TIMEOUT
         || status == StatusCode::TOO_MANY_REQUESTS
         || status.is_server_error()
     {
         TransportError::transient(message)
     } else {
         TransportError::permanent(message)
+    };
+    let error = match operational_code {
+        Some(code) => error.with_code(code),
+        None => error,
+    };
+    match retry_after {
+        Some(delay) => error.with_retry_after(delay),
+        None => error,
     }
 }
 
@@ -343,11 +368,32 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             StatusCode::GATEWAY_TIMEOUT,
         ] {
-            assert_eq!(status_error(status).kind, TransportErrorKind::Transient);
+            assert_eq!(
+                status_error(status, None, None).kind,
+                TransportErrorKind::Transient
+            );
         }
         assert_eq!(
-            status_error(StatusCode::PAYLOAD_TOO_LARGE).kind,
+            status_error(StatusCode::PAYLOAD_TOO_LARGE, None, None).kind,
             TransportErrorKind::Permanent
+        );
+        assert_eq!(
+            status_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some(OperationalErrorCode::Maintenance),
+                Some(Duration::from_secs(7)),
+            )
+            .code,
+            Some(OperationalErrorCode::Maintenance)
+        );
+        assert_eq!(
+            status_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some(OperationalErrorCode::Overloaded),
+                Some(Duration::from_secs(7)),
+            )
+            .retry_after,
+            Some(Duration::from_secs(7))
         );
     }
 
@@ -365,10 +411,7 @@ mod tests {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 has_more: false,
                 server_time: HybridTimestamp {
                     physical_ms: 1,

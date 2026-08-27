@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// HTTP header carrying a stable [`OperationalErrorCode`] without exposing domain payloads.
+pub const OPERATIONAL_ERROR_CODE_HEADER: &str = "x-aequora-error-code";
+
 macro_rules! uuid_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -63,8 +66,189 @@ uuid_id!(/// Identity of the node producing a hybrid timestamp.
     NodeId);
 uuid_id!(/// Identity of one consistent bootstrap snapshot.
     SnapshotId);
-uuid_id!(/// Stable identity of a deployment region.
-    RegionId);
+uuid_id!(/// Stable identity shared by every operation, event, and job from one root action.
+    CorrelationId);
+uuid_id!(/// Stable identity of one authoritative journal event.
+    EventId);
+uuid_id!(/// Stable identity of one durable background job.
+    JobId);
+uuid_id!(/// Stable identity of one replica repair attempt.
+    RepairId);
+uuid_id!(/// Stable identity of one bounded anti-entropy exchange.
+    IntegritySessionId);
+uuid_id!(/// Stable identity of one logical authoritative deployment.
+    AuthorityId);
+uuid_id!(/// Identity of one deployed authority server or database instance.
+    AuthorityInstanceId);
+uuid_id!(/// Identity of one promotion, demotion, restore, or migration transition.
+    AuthorityTransitionId);
+
+/// Stable deployment-defined identity used in regional protocol and metric paths.
+///
+/// Region identifiers are deliberately compact and are assigned by the deployment control plane;
+/// they are not generated per process and do not encode a provider or geographic name.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct RegionId(u16);
+
+impl RegionId {
+    /// Creates a region identifier from its deployment registry value.
+    #[must_use]
+    pub const fn new(value: u16) -> Self {
+        Self(value)
+    }
+
+    /// Returns the compact persistent/protocol value.
+    #[must_use]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+impl fmt::Display for RegionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for RegionId {
+    type Err = core::num::ParseIntError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.parse().map(Self)
+    }
+}
+
+impl AuthorityId {
+    /// Sentinel for data written before authority timeline binding was introduced.
+    ///
+    /// It must be upgraded from trusted deployment metadata before serving production traffic.
+    pub const LEGACY_UNBOUND: Self = Self(Uuid::nil());
+    /// Deterministic identity used only by reference/test builders.
+    pub const LOCAL_DEVELOPMENT: Self = Self(Uuid::from_u128(1));
+}
+
+/// Monotonic identity of one authoritative history for an [`AuthorityId`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct AuthorityEpoch(u64);
+
+impl AuthorityEpoch {
+    /// First valid authoritative timeline.
+    pub const INITIAL: Self = Self(1);
+
+    /// Creates a non-zero authority epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError::Zero`] because zero cannot identify a trusted timeline.
+    pub const fn new(value: u64) -> Result<Self, ValueError> {
+        if value == 0 {
+            Err(ValueError::Zero)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    /// Returns the wire value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns the next epoch, or `None` when the representation is exhausted.
+    #[must_use]
+    pub const fn checked_next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+}
+
+impl Default for AuthorityEpoch {
+    fn default() -> Self {
+        Self::INITIAL
+    }
+}
+
+/// Stable namespace shared by all journal and artifact positions in one authority history.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct AuthorityTimeline {
+    pub authority_id: AuthorityId,
+    pub epoch: AuthorityEpoch,
+}
+
+/// Direct causal predecessor of an operation, authoritative event, or durable job.
+///
+/// Causation is intentionally separate from operation dependencies and journal ordering.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum LineageRef {
+    /// A client or server domain operation directly caused this work.
+    Operation(OperationId),
+    /// An authoritative journal event directly caused this work.
+    Event(EventId),
+    /// A durable background job directly caused this work.
+    Job(JobId),
+}
+
+/// Retry-stable correlation and direct-causation metadata.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct LineageContext {
+    /// Root user/system action shared by all descendants.
+    pub correlation_id: CorrelationId,
+    /// Immediate semantic cause, independent from dependency ordering.
+    pub caused_by: Option<LineageRef>,
+}
+
+impl LineageContext {
+    /// Creates lineage for a new root action.
+    #[must_use]
+    pub fn root() -> Self {
+        Self {
+            correlation_id: CorrelationId::new(),
+            caused_by: None,
+        }
+    }
+
+    /// Creates a descendant while preserving the root correlation.
+    #[must_use]
+    pub const fn derived(self, caused_by: LineageRef) -> Self {
+        Self {
+            correlation_id: self.correlation_id,
+            caused_by: Some(caused_by),
+        }
+    }
+
+    /// Sentinel used only while decoding a pre-lineage operation envelope.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn legacy_missing() -> Self {
+        Self {
+            correlation_id: CorrelationId::from_uuid(Uuid::nil()),
+            caused_by: None,
+        }
+    }
+
+    /// Deterministically upgrades a pre-lineage envelope using its stable operation identity.
+    #[must_use]
+    pub fn resolved_for_operation(self, operation_id: OperationId) -> Self {
+        if self.correlation_id.as_uuid().is_nil() {
+            Self {
+                correlation_id: CorrelationId::from_uuid(operation_id.as_uuid()),
+                caused_by: self.caused_by,
+            }
+        } else {
+            self
+        }
+    }
+}
+
+impl Default for LineageContext {
+    fn default() -> Self {
+        Self::root()
+    }
+}
 
 /// Compact, application-defined entity kind. Zero is reserved.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -153,6 +337,60 @@ pub struct Cursor {
     pub scope: SyncScopeId,
     /// Greatest durably applied authoritative sequence.
     pub sequence: Sequence,
+    /// Logical authority whose journal owns this cursor.
+    #[serde(default = "legacy_authority_id")]
+    pub authority_id: AuthorityId,
+    /// Exact authority timeline in which `sequence` is meaningful.
+    #[serde(default)]
+    pub authority_epoch: AuthorityEpoch,
+}
+
+fn legacy_authority_id() -> AuthorityId {
+    AuthorityId::LEGACY_UNBOUND
+}
+
+impl Cursor {
+    /// Constructs a cursor decoded from pre-epoch local state.
+    #[must_use]
+    pub const fn legacy(scope: SyncScopeId, sequence: Sequence) -> Self {
+        Self::new(
+            AuthorityId::LEGACY_UNBOUND,
+            AuthorityEpoch::INITIAL,
+            scope,
+            sequence,
+        )
+    }
+
+    /// Creates a cursor bound to one explicit authority timeline.
+    #[must_use]
+    pub const fn new(
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        scope: SyncScopeId,
+        sequence: Sequence,
+    ) -> Self {
+        Self {
+            scope,
+            sequence,
+            authority_id,
+            authority_epoch,
+        }
+    }
+
+    /// Returns the authority timeline namespace owning this position.
+    #[must_use]
+    pub const fn timeline(self) -> AuthorityTimeline {
+        AuthorityTimeline {
+            authority_id: self.authority_id,
+            epoch: self.authority_epoch,
+        }
+    }
+
+    /// Returns true only when both cursors belong to the same authoritative history.
+    #[must_use]
+    pub fn same_timeline(self, other: Self) -> bool {
+        self.authority_id == other.authority_id && self.authority_epoch == other.authority_epoch
+    }
 }
 
 /// A transport protocol version, separate from domain schema versions.
@@ -181,6 +419,85 @@ pub struct HybridTimestamp {
     pub node: NodeId,
 }
 
+/// Stable, payload-free operational failure category shared across transports and diagnostics.
+///
+/// The textual values are part of the operator-facing compatibility surface. Human-readable error
+/// messages may change without changing these codes.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum OperationalErrorCode {
+    /// Global or tenant admission capacity was exhausted.
+    Overloaded,
+    /// An operator-selected maintenance mode rejected synchronization work.
+    Maintenance,
+    /// The client is outside the supported upgrade window.
+    UpgradeRequired,
+    /// Authentication or authenticated identity validation failed.
+    Authentication,
+    /// Protocol framing, compatibility, or structural validation failed.
+    Protocol,
+    /// Authoritative persistence was unavailable or failed.
+    Storage,
+    /// A domain conflict requires explicit resolution.
+    Conflict,
+    /// Request data failed a non-protocol validation rule.
+    Validation,
+    /// A bounded receive, execution, or dependency deadline elapsed.
+    Deadline,
+    /// The server is draining and no longer admits new work.
+    Draining,
+    /// A wire or decompressed payload exceeded a configured bound.
+    PayloadLimit,
+    /// Authority identity, epoch, role, or fencing rejected the request.
+    Authority,
+}
+
+impl OperationalErrorCode {
+    /// Stable machine-readable code sent through operational boundaries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Overloaded => "AEQ-OVERLOAD-001",
+            Self::Maintenance => "AEQ-MAINT-001",
+            Self::UpgradeRequired => "AEQ-UPGRADE-001",
+            Self::Authentication => "AEQ-AUTH-001",
+            Self::Protocol => "AEQ-PROTO-001",
+            Self::Storage => "AEQ-STORAGE-001",
+            Self::Conflict => "AEQ-CONFLICT-001",
+            Self::Validation => "AEQ-VALIDATION-001",
+            Self::Deadline => "AEQ-DEADLINE-001",
+            Self::Draining => "AEQ-DRAIN-001",
+            Self::PayloadLimit => "AEQ-LIMIT-001",
+            Self::Authority => "AEQ-AUTHORITY-001",
+        }
+    }
+
+    /// Parses a known stable code and rejects unrecognized values.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "AEQ-OVERLOAD-001" => Some(Self::Overloaded),
+            "AEQ-MAINT-001" => Some(Self::Maintenance),
+            "AEQ-UPGRADE-001" => Some(Self::UpgradeRequired),
+            "AEQ-AUTH-001" => Some(Self::Authentication),
+            "AEQ-PROTO-001" => Some(Self::Protocol),
+            "AEQ-STORAGE-001" => Some(Self::Storage),
+            "AEQ-CONFLICT-001" => Some(Self::Conflict),
+            "AEQ-VALIDATION-001" => Some(Self::Validation),
+            "AEQ-DEADLINE-001" => Some(Self::Deadline),
+            "AEQ-DRAIN-001" => Some(Self::Draining),
+            "AEQ-LIMIT-001" => Some(Self::PayloadLimit),
+            "AEQ-AUTHORITY-001" => Some(Self::Authority),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for OperationalErrorCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// Error returned by checked primitive constructors.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum ValueError {
@@ -200,11 +517,57 @@ mod tests {
     }
 
     #[test]
+    fn derived_lineage_preserves_root_correlation() {
+        let root = LineageContext::root();
+        let operation = OperationId::new();
+        let derived = root.derived(LineageRef::Operation(operation));
+        assert_eq!(derived.correlation_id, root.correlation_id);
+        assert_eq!(derived.caused_by, Some(LineageRef::Operation(operation)));
+    }
+
+    #[test]
+    fn legacy_lineage_fallback_is_deterministic_per_operation() {
+        let operation = OperationId::new();
+        let expected = CorrelationId::from_uuid(operation.as_uuid());
+        assert_eq!(
+            LineageContext::legacy_missing()
+                .resolved_for_operation(operation)
+                .correlation_id,
+            expected
+        );
+        assert_eq!(
+            LineageContext::legacy_missing().resolved_for_operation(operation),
+            LineageContext::legacy_missing().resolved_for_operation(operation)
+        );
+    }
+
+    #[test]
     fn versions_never_wrap() {
         let version = match EntityVersion::new(u64::MAX) {
             Ok(version) => version,
             Err(error) => panic!("{error}"),
         };
         assert_eq!(version.checked_next(), None);
+    }
+
+    #[test]
+    fn operational_error_codes_are_stable_and_round_trip() {
+        let codes = [
+            OperationalErrorCode::Overloaded,
+            OperationalErrorCode::Maintenance,
+            OperationalErrorCode::UpgradeRequired,
+            OperationalErrorCode::Authentication,
+            OperationalErrorCode::Protocol,
+            OperationalErrorCode::Storage,
+            OperationalErrorCode::Conflict,
+            OperationalErrorCode::Validation,
+            OperationalErrorCode::Deadline,
+            OperationalErrorCode::Draining,
+            OperationalErrorCode::PayloadLimit,
+        ];
+        for code in codes {
+            assert_eq!(OperationalErrorCode::parse(code.as_str()), Some(code));
+        }
+        assert_eq!(OperationalErrorCode::parse("AEQ-UNKNOWN-001"), None);
     }
 }

@@ -138,6 +138,10 @@ local ACID, durable intent, idempotent authoritative execution, and local reconc
 These boundaries make failure behavior explainable instead of pretending an offline distributed
 system has stronger semantics than it can provide.
 
+For formal correctness proofs, the 138-invariant catalog, and causality DAG specification, see:
+- [`sys-arch/01-formal-correctness.md`](sys-arch/01-formal-correctness.md): Normative invariant registry and verification model.
+- [`sys-arch/02-causality-provenance-lineage.md`](sys-arch/02-causality-provenance-lineage.md): Causal cuts, hybrid logical clocks (HLC), and dependency DAGs.
+
 ---
 
 ## 3. Install Aequora and select features
@@ -613,6 +617,29 @@ Create `config/aequora.ron`:
         periodic_interval_ms: Some(30000),
         sync_on_start: true,
     ),
+    scheduler: (
+        profile: Mobile,
+        batch: (
+            min_ops: 1,
+            target_ops: 32,
+            max_ops: 128,
+            min_bytes: 1024,
+            target_bytes: 262144,
+            max_bytes: 524288,
+            additive_ops: 8,
+            additive_bytes: 32768,
+        ),
+        concurrency: 1,
+        interactive_debounce_ms: 150,
+        aging_quantum_ms: 60000,
+        maximum_age_boost: 5,
+        defer_bulk_on_metered: true,
+        defer_background_on_metered: true,
+        defer_bulk_on_roaming: true,
+        defer_background_on_roaming: true,
+        defer_background_on_low_power: true,
+        maximum_retry_deferral_ms: 1800000,
+    ),
     operational: (
         max_in_flight_requests: 256,
         max_in_flight_per_tenant: 64,
@@ -879,6 +906,12 @@ next.
 
 ## 12. Run background synchronization
 
+Background synchronization orchestrates multi-process coordinator election, QoS rate adaptation,
+and dynamic dataset subscriptions. For the underlying architecture, see:
+- [`sys-arch/05-local-multiprocess-coordination.md`](sys-arch/05-local-multiprocess-coordination.md): Multi-process coordinator election and shared locking.
+- [`sys-arch/06-adaptive-sync-scheduler-qos.md`](sys-arch/06-adaptive-sync-scheduler-qos.md): Priority queuing and battery/network-aware sync policies.
+- [`sys-arch/07-subscription-scope-dynamic-dataset.md`](sys-arch/07-subscription-scope-dynamic-dataset.md): Parameterized scope filters and dynamic subscriptions.
+
 ```rust
 use aequora::client::{SyncCoordinator, SyncTrigger};
 use std::sync::Arc;
@@ -922,6 +955,139 @@ println!("pending operations: {}", health.borrow().pending_operations);
 
 Do not bind the synchronization kernel directly to a particular GUI framework. Translate
 `SyncStatus` and `SyncHealth` into your application's state-management system.
+
+### 12.1 Share one local store across processes
+
+When a desktop app, helper, CLI, or background worker can open the same local store, select a
+process mode and run the durable coordinator. The built-in Stoolap adapter stores the lease,
+monotonic fencing token, and local-store generation in the same database as synchronization state.
+
+```rust
+use aequora::{
+    client::{ClientSyncEngineBuilder, SyncCoordinator, SyncTrigger},
+    coordination::LocalProcessMode,
+};
+use std::sync::Arc;
+
+let client = ClientSyncEngineBuilder::new()
+    .store(local_store)
+    .transport(transport)
+    .config(config.client_config(session)?)
+    .process_mode(LocalProcessMode::MultiProcess)
+    .build_production()?;
+
+let (coordinator, handle) =
+    SyncCoordinator::new(Arc::new(client), config.coordinator_config()?);
+let election = config.multi_process_coordinator_config()?;
+let task = tokio::spawn(coordinator.run_multi_process(election));
+
+println!("local role: {:?}", handle.coordinator_status());
+handle.trigger(SyncTrigger::Shutdown).await?;
+task.await??;
+```
+
+Only the current fenced leader runs sync, reconciliation, bootstrap, compaction, rebase, or repair.
+Followers still commit ordinary domain mutations and the matching outbox row atomically. If a
+leader crashes, its lease expires; a follower acquires a strictly higher token, and the adapter
+rejects any late commit from the old epoch. Use `LocalProcessMode::SingleProcess` only when the host
+can guarantee exclusive ownership, and `Observer` for a read-only process.
+
+### 12.2 Supply scheduling context and persist controller state
+
+The core scheduler does not call an operating-system API. A platform adapter translates local
+connectivity, power, and lifecycle signals into normalized hints:
+
+```rust
+use aequora::scheduler::{
+    AppActivity, NetworkContext, PowerContext, SchedulingContext,
+};
+
+let context = SchedulingContext {
+    network: NetworkContext {
+        online: true,
+        metered: Some(true),
+        roaming: Some(false),
+        ..NetworkContext::default()
+    },
+    power: PowerContext {
+        charging: Some(false),
+        battery_level_percent: Some(34),
+        low_power_mode: Some(true),
+    },
+    activity: AppActivity::Background,
+    ..SchedulingContext::default()
+};
+
+client.update_scheduling_context(context);
+```
+
+Missing signals are safe: synchronization uses conservative defaults and the result of the actual
+transport request remains authoritative. Metering, roaming, low power, and server hints can defer
+eligible bulk/background work or reduce its batch, but cannot delete an outbox item, bypass a
+dependency, enlarge a hard limit, or let a follower execute leader-only work.
+
+Pause and resume only control network work; local transactions remain available:
+
+```rust
+client.pause_sync();
+// Continue committing domain state plus durable outbox intent here.
+client.resume_sync();
+```
+
+Persist `client.scheduler_state()` with application metadata during orderly shutdown or periodic
+checkpointing, and restore it with
+`ClientSyncEngineBuilder::scheduler_state`. The snapshot contains adaptive batch, circuit-breaker,
+backoff, accounting, and fairness state—not operation payloads or a second queue. On restart, the
+builder rejects a mismatched policy version and caps future deadlines to the configured maximum
+deferral. Durable work remains authoritative in the outbox, bootstrap, repair, or blob store.
+
+### 12.3 Subscribe to authorized dynamic datasets
+
+Treat each synchronized subset as a server-issued authorization contract. The client requests a
+registered definition with bounded opaque parameters; the authenticated server resolver produces
+the canonical tenant, partitions, policy/projection version, scope identity, scope version, and
+authority generation. Never turn client parameters into raw SQL or trust a requested campus,
+class, user, or module identifier as authorization.
+
+```rust
+use aequora::scope::{ScopePrincipal, ScopeRegistry, ScopeRequest};
+
+let principal = ScopePrincipal {
+    tenant_id: verified_auth.tenant_id,
+    actor_id: verified_auth.actor_id,
+    device_id: verified_auth.device_id,
+};
+
+// Register application-owned ScopeResolver implementations at startup.
+let resolved = scope_registry.resolve(principal, &scope_request).await?;
+assert_eq!(resolved.descriptor.tenant_id, verified_auth.tenant_id);
+```
+
+Every durable subscription has its own `ScopeCursor`. Its sequence is valid only with the exact
+`scope_id`, `ScopeVersion`, and `ScopeGeneration`. When filtering a global journal, advance the
+cursor through every entry the server evaluated—even entries intentionally excluded from the
+response. `project_filtered_page` implements that watermark rule and rejects unordered input.
+
+For the first production version, prefer a full per-scope bootstrap when membership changes. A
+certified partial expansion uses `ScopeBootstrapPlan`, stages the added partitions, and activates
+them only through one complete `ScopeTransition`. An interrupted stage remains `Bootstrapping` or
+`Expanding`; existing active membership stays coherent.
+
+```rust
+client.install_subscription(&subscription).await?;
+
+// Apply only after the snapshot/partition stage is complete and verified.
+transition.staging_complete = true;
+let outcome = client.apply_scope_transition(&transition).await?;
+assert!(outcome.applied);
+```
+
+Contraction uses `ScopeRemoval`, not a domain tombstone. The local membership map reports physical
+removal only after no active scope references the entity. Revocation deactivates access first,
+clears the scope cursor, and quarantines every explicitly affected pending operation so the normal
+outbox drain cannot transmit it. The built-in Stoolap adapter commits membership, binding/cursor,
+transition identity, and quarantine in one fenced transaction. Applications must also remove or
+gate their own search indexes, caches, derived projections, blobs, and raw repository queries.
 
 ---
 
@@ -996,7 +1162,7 @@ Version comparison is strict:
 - Update/delete requires an exact current `EntityVersion`.
 - An accepted transition advances exactly one version.
 
-The safe default is `RejectConflicts`.
+The safe default is `RejectConflicts`. For operation semantics, aggregate profiles, and consistency policies, see [`sys-arch/11-operation-semantics-consistency-profiles.md`](sys-arch/11-operation-semantics-consistency-profiles.md).
 
 ### 14.1 Register policies by operation type
 
@@ -1062,6 +1228,10 @@ Deletion conflicts are not automatically resolved by the provided CRDT merger.
 
 ## 15. Bootstrap, cursors, scopes, and tombstones
 
+For offline operation log compaction, timeline rebasing, and chunked bootstrap architecture, see:
+- [`sys-arch/04-offline-compaction-rebase.md`](sys-arch/04-offline-compaction-rebase.md): Offline compaction and queue footprint optimization.
+- [`sys-arch/10-large-snapshot-streaming-bootstrap.md`](sys-arch/10-large-snapshot-streaming-bootstrap.md): Chunked snapshot transfer and cold-replica bootstrap.
+
 ### 15.1 Snapshot-first onboarding
 
 A new client should install a consistent snapshot instead of replaying an unbounded history. The
@@ -1100,7 +1270,7 @@ compaction must not delete operation-ledger or audit evidence.
 ## 16. Synchronize large blobs separately
 
 Do not place large files in normal operation batches. Embed a small `BlobRef` in domain state and
-transfer content through a separate bounded blob capability.
+transfer content through a separate bounded blob capability (see [`sys-arch/19-performance-engineering-memory-architecture.md`](sys-arch/19-performance-engineering-memory-architecture.md)).
 
 ```rust
 use aequora::blob::{BlobDigest, BlobManifest, BlobStore, InMemoryBlobStore};
@@ -1180,6 +1350,10 @@ Operational alerts should include:
 Aequora's protocol is database-neutral. SQLite, Redb, a document store, or another database is
 usable only after you implement and verify the required behavioral capabilities. Mentioning a
 database in configuration is not enough.
+
+For the database storage schema and conformance test suite specifications, see:
+- [`sys-arch/22-sync-metadata-schema-internal-persistence.md`](sys-arch/22-sync-metadata-schema-internal-persistence.md): Database schemas, indexes, and persistence specification.
+- [`sys-arch/30-certification-conformance-ecosystem-architecture.md`](sys-arch/30-certification-conformance-ecosystem-architecture.md): Automated compliance test suites and certification profiles.
 
 ### 18.1 Local adapter capabilities
 
@@ -1262,6 +1436,8 @@ reference.
 ---
 
 ## 19. Use QUIC or a custom transport
+
+For protocol negotiation, version handshakes, and compatibility governance, see [`sys-arch/21-protocol-negotiation-compatibility-governance.md`](sys-arch/21-protocol-negotiation-compatibility-governance.md).
 
 ### 19.1 QUIC
 
@@ -1560,12 +1736,250 @@ concurrency, interrupted migration, and snapshot-install tests against the real 
 
 ---
 
+## 23.1 Add optional live acceleration safely
+
+Keep your existing periodic synchronization active. Create one `HintWakeTracker` from the
+authenticated tenant and server-issued active scopes, then pass incoming `SyncHint` values to
+`SyncCoordinatorHandle::observe_live_hint`. A new hint schedules the same authenticated exchange;
+duplicates are coalesced and no hint API can advance a cursor.
+
+On the server, authenticate the live connection, implement `LiveScopeAuthorizer`, and route through
+`LiveRouter`. Publish with `publish_best_effort` only after the journal transaction commits. Use
+`InMemoryHintBroker` for one node or `PostgresNotifyHintBroker` as the initial PostgreSQL
+cross-node adapter. Broker failure must leave ordinary HTTP/QUIC polling healthy.
+
+Only the current Part 05 fenced leader should own the live socket for a shared local store. After
+connect, reconnect, or leadership acquisition, run an immediate normal cursor catch-up. Presence
+belongs in `PresenceDirectory` with a short TTL and application-owned visibility policy; it is not
+a journal entity, authorization signal, or edit lock.
+
+## 23.2 Plan a safe bulk migration
+
+Build and verify a `CanonicalExport` first. Create an `ImportJob` with an immutable
+`SourceFingerprint`, then run two-pass `IdentityPlan` assignment before relationship transforms.
+Use separate mapper, transformer, and validator implementations; invalid rows become durable
+`QuarantineEntry` references rather than silent coercions.
+
+Each bounded `ImportBatch` carries its next `ImportCheckpoint`. Your adapter implements
+`CheckpointedImportSink` so target rows, the import ledger, and that checkpoint commit in one
+transaction. Retry the exact job/root/source keys after interruption. Use
+`aequora-testkit::migration::FaultInjectingImportSink` to prove rollback and response-loss replay.
+
+For an authority seed, publish a `BaselinePlan` with scope snapshots and a declared sequence rather
+than manufacturing historical journal rows. Imported operations and every bridge change after
+activation must use ordinary journal-visible authority semantics. Call `verify_cutover` only after
+fingerprint/root/domain/reference/scope verification, zero source lag, accepted quarantine,
+verified backup and rollback, client bootstrap, and legacy-writer fencing all pass.
+
+The CLI supports read-only planning and evidence checks:
+
+```bash
+aequora import plan export.postcard schema.ron
+aequora import validate export.postcard schema.ron
+aequora import status job.ron
+aequora import cutover evidence.ron
+```
+
+Actual writes and activation remain in the privileged application authority adapter.
+
+## 23.3 Stream and activate a large snapshot
+
+Use `SnapshotManifest::build` when one page-session snapshot is too large for practical transfer.
+It deterministically orders `SnapshotEntity` records, creates bounded chunks, and binds scope
+version/generation, authority epoch, sequence, schema version, totals, ranges, and chunk digests
+into one root. Publish immutable chunks first and the verified manifest last.
+
+Create a durable `BootstrapJob` with a new inactive `ReplicaGeneration` and a
+`PendingIntentPlan`. Before transfer, run `BootstrapPreflight`. Persist every
+`record_chunk_read` result; a resumed range must present the same snapshot, chunk, object identity,
+and contiguous offset. Decode with `SnapshotChunk::decode_verified`, then call your
+`SnapshotSink::install_chunk` in a bounded native transaction that includes installed progress.
+
+After every chunk is installed, verify staging and obtain `VerifiedActivation` through
+`verify_activation`. This rechecks authorization, scope version/generation, authority epoch,
+manifest root, complete chunk membership, retention lease, and unchanged pending intent. The sink
+then atomically switches the active generation and cursor to boundary N. Normal synchronization
+immediately resumes from N+1; partially staged data never becomes application-visible.
+
+Useful read-only diagnostics are:
+
+```bash
+aequora bootstrap inspect manifest.ron
+aequora bootstrap status job.ron
+aequora bootstrap explain
+```
+
+Use `FaultInjectingSnapshotSink` to prove rollback before chunk progress, duplicate-safe response
+loss, pre-activation crash safety, and idempotent activation replay before certifying a real local
+adapter.
+
+## 23.4 Declare consistency profiles before registering handlers
+
+Choose one aggregate profile, then declare each operation's distinct semantic class. The derive API
+publishes stable metadata without bypassing registry validation:
+
+```rust
+use aequora::prelude::*;
+
+#[derive(AequoraAggregate)]
+#[aequora(aggregate = 10, profile = "OptimisticVersioned")]
+struct Student;
+
+#[derive(AequoraOperation, serde::Deserialize)]
+#[aequora(
+    kind = 0x1002,
+    schema = 1,
+    entity = "student",
+    aggregate = 10,
+    semantic = "SetValue"
+)]
+struct UpdateStudentPhone {
+    phone: String,
+}
+```
+
+Build and register the corresponding `AggregateProfile` and `OperationSemanticProfile`, then call
+`validate_capabilities` against the actual adapter declaration before startup. Unknown operations
+fail closed. Finance and workflow aggregates require audit-safe, noncompactable semantics; custom
+dimension overrides require `CustomProfileBuilder::advanced_opt_in()` and compliance evidence.
+
+Persist `ProfileRegistry::manifest()` with each released domain schema. Run `aequora-dev profile
+verify` on candidates and `profile compare` against the released manifest so removals and semantic
+changes without an explicit version increase fail CI.
+
+## 23.5 Make authoritative decisions replayable
+
+Implement new replayable domain logic as `ReplayHandler`. Before `decide`, the authority captures
+one `DomainTimestamp`, labelled retry-stable ID/random seeds, authenticated principal, canonical
+external results, and immutable policy/config versions into `ExecutionInputs`. Supply the exact
+canonical pre-state; never let the handler read a clock, environment variable, database, network,
+filesystem, UUID generator, or external SDK directly.
+
+The handler returns an `ExecutionPlan` containing mutations, events, durable side-effect intents,
+and the canonical operation result. Verify its digest, then implement `PlanCommitter` using one
+native transaction for the plan and operation-ledger replay metadata. A worker executes committed
+intents afterward with their idempotency keys. A lost response followed by a retry must return the
+same committed decision; changed captured inputs must fail closed.
+
+Build an integrity-bound `ReplayBundle` from the operation, inputs, pre-state reference, exact
+handler/profile versions, and expected plan digest. `ReplaySandbox` can verify or differentially
+compare the decision but has no production write or side-effect handle. Before certification run:
+
+```bash
+cargo run -q -p aequora-dev -- replay explain
+cargo test -p aequora-replay
+cargo test -p aequora-testkit --test replay_contracts
+```
+
+Replay bundles are integrity-protected, not automatically confidential. Encrypt them, authorize
+access, redact secrets, and apply tenant retention policy in the host deployment.
+
+## 23.6 Declare canonical business audit explicitly
+
+Do not use sync journal rows or application logs as a business audit trail. Register stable
+`AuditActionId`, `AuditFieldId`, and `ReasonCode` values, then build an `AuditPolicy` for each
+audited action. Choose `RequiredAtomic` for business, finance, security, permission, approval, and
+administrative evidence. Select full, redacted, digest, metadata-only, or omitted values per field;
+unknown fields fail closed.
+
+Add canonical `AuditEvent` values to the deterministic `ExecutionPlan`. Use a truthful
+`AuditActor`: scheduled work is a service/system actor, an import is an import actor, and the
+originating device remains provenance rather than becoming the user. Add structured `AuditOrigin`
+for imports, repairs, scope-only removal, or bootstrap. The native plan transaction must persist
+required audit, its chain sequence/hash, and authoritative field pointers with the mutation,
+journal, and ledger.
+
+Authorize every query with `AuditAccess`; tenant equality and subject restriction are mandatory.
+Verify and checkpoint chains before archive/export:
+
+```bash
+cargo run -q -p aequora-dev -- audit explain
+cargo run -q -p aequora-dev -- audit verify ./audit-chain.ron
+cargo test -p aequora-audit
+cargo test -p aequora-testkit --test audit_contracts
+```
+
+The host still owns encryption, redaction/keyed hashing, current entity authorization, external
+anchor credentials, localization, retention, legal hold, erasure, and regulatory acceptance.
+
+## 23.7 Govern deletion as a distributed workflow
+
+Register versioned `RetentionPolicy` values and every known copy in `GovernanceRegistry`. Resolve
+subjects into an explicit `DataSubjectGraph`; never infer ownership from foreign keys. Verify an
+`ErasurePlan`, then require dry-run review and separate approval before irreversible work.
+
+Tombstone GC requires valid client watermarks and a bootstrap-safe `JournalFloor`. Retired devices
+below the floor rebootstrap, while identity guards prevent stale resurrection. Active holds block
+normal purge, and tenant offboarding removes writes before deletion. Every required store must
+verify before completion; restore remains restricted until erasures, revocations, and holds are
+reconciled.
+
+```bash
+cargo run -q -p aequora-dev -- governance explain
+cargo run -q -p aequora-dev -- governance verify ./erasure-plan.ron
+cargo test -p aequora-governance
+cargo test -p aequora-crypto
+cargo test -p aequora-testkit --test governance_contracts
+```
+
 ## 24. Where to go next
 
-Use these repository resources as deeper references:
+The authoritative system-architecture specifications live in the [`sys-arch/`](sys-arch/README.md) directory. Use these resources as deeper references:
+
+### System Architecture Specifications (`sys-arch/`)
+
+- **[System Architecture Index](sys-arch/README.md)**: Full architecture directory and design roadmap.
+
+#### 🏛️ Tier 1: Core Synchronizer & Data Engine
+- [Part 01: Formal Correctness, Lineage Invariants, and Verification Model](sys-arch/01-formal-correctness.md)
+- [Part 02: Causality, Provenance, Dependency DAGs, and Lineage Architecture](sys-arch/02-causality-provenance-lineage.md)
+- [Part 03: Anti-Entropy, Integrity Verification, Divergence Detection, and Self-Repair](sys-arch/03-anti-entropy-self-repair.md)
+- [Part 04: Offline Operation Compaction, Coalescing, Rebase, and Queue Optimization](sys-arch/04-offline-compaction-rebase.md)
+
+#### 🔄 Tier 2: Local Coordination & Scheduling
+- [Part 05: Local Multi-Process, Multi-Window, and Coordinator Election Architecture](sys-arch/05-local-multiprocess-coordination.md)
+- [Part 06: Adaptive Sync Scheduler and Quality-of-Service Architecture](sys-arch/06-adaptive-sync-scheduler-qos.md)
+- [Part 07: Subscription, Scope, Filter, and Dynamic Dataset Architecture](sys-arch/07-subscription-scope-dynamic-dataset.md)
+- [Part 08: Live Sync, Push Hints, Presence, and Near-Real-Time Delivery Architecture](sys-arch/08-live-sync-push-presence.md)
+
+#### ⚡ Tier 3: Data Transfer & Execution
+- [Part 09: Bulk Import, Export, Seed, and Initial Migration Architecture](sys-arch/09-bulk-import-export-seed-migration.md)
+- [Part 10: Large Snapshot, Streaming Bootstrap, and Resumable Transfer Architecture](sys-arch/10-large-snapshot-streaming-bootstrap.md)
+- [Part 11: Operation Semantics, Aggregate Policies, and Consistency Profiles](sys-arch/11-operation-semantics-consistency-profiles.md)
+- [Part 12: Deterministic Domain Execution, Replay, and Reproducibility Architecture](sys-arch/12-deterministic-execution-replay.md)
+
+#### 🔐 Tier 4: Audit, Governance & Security
+- [Part 13: Data Provenance, Auditability, and Explainability Architecture](sys-arch/13-data-provenance-auditability-explainability.md)
+- [Part 14: Data Governance, Retention, Legal Hold, Erasure, and Lifecycle Architecture](sys-arch/14-data-governance-retention-erasure.md)
+- [Part 15: Cryptographic Integrity, Key Management, Signed Artifacts, and E2E Protection](sys-arch/15-cryptographic-integrity-key-management-e2e.md)
+- [Part 16: Authority Failover, Timeline Epochs, Fork Detection, and Disaster Promotion](sys-arch/16-authority-failover-timeline-epochs-fork-detection.md)
+
+#### 🚀 Tier 5: Scale & High Performance
+- [Part 17: Multi-Region Read Architecture and Future Single-Writer Global Deployment](sys-arch/17-multi-region-read-single-writer-global.md)
+- [Part 18: Backpressure, Admission Control, Fairness, and Overload Architecture](sys-arch/18-backpressure-admission-fairness-overload.md)
+- [Part 19: Performance Engineering, Memory Architecture, and Zero-Copy Boundaries](sys-arch/19-performance-engineering-memory-architecture.md)
+- [Part 20: Resource-Constrained Client Architecture](sys-arch/20-resource-constrained-client-architecture.md)
+
+#### 🛠️ Tier 6: Protocols, Metadata & Workflows
+- [Part 21: Protocol Negotiation, Compatibility Governance, and Evolution Architecture](sys-arch/21-protocol-negotiation-compatibility-governance.md)
+- [Part 22: Sync Metadata Schema and Internal Persistence Specification](sys-arch/22-sync-metadata-schema-internal-persistence.md)
+- [Part 23: Background Jobs, Durable Workflows, and Side-Effect Engine Architecture](sys-arch/23-background-jobs-durable-workflows-side-effects.md)
+- [Part 24: Operational Control Plane and Admin API Architecture](sys-arch/24-operational-control-plane-admin-api.md)
+
+#### 🔍 Tier 7: Diagnostics, Governance & Conformance
+- [Part 25: Diagnostics, Forensics, and Reproducible Incident Bundle Architecture](sys-arch/25-diagnostics-forensics-reproducible-incident-bundles.md)
+- [Part 26: Legacy Application Compatibility and Incremental Adoption Architecture](sys-arch/26-legacy-application-compatibility-incremental-adoption.md)
+- [Part 27: Dedicated Security Threat Model and Abuse Resistance Architecture](sys-arch/27-security-threat-model-abuse-resistance.md)
+- [Part 28: Multi-Consumer Change Feed Architecture](sys-arch/28-multi-consumer-change-feed-architecture.md)
+- [Part 29: Schema, Operation Registry, and Developer Governance Architecture](sys-arch/29-schema-operation-registry-developer-governance.md)
+- [Part 30: Certification, Conformance, and Ecosystem Architecture](sys-arch/30-certification-conformance-ecosystem-architecture.md)
+
+---
+
+### Implementation Evidence & Runnable Examples
 
 - [`plan.md`](plan.md): governing database-neutral architecture and implementation direction.
-- [`next.md`](next.md): detailed synchronization architecture and protocol semantics.
+- [`next.md`](next.md): architecture-specification index pointing to [`sys-arch/`](sys-arch/).
 - [`ACID.md`](ACID.md): transaction, isolation, idempotency, and recovery model.
 - [`docs/next-completion.md`](docs/next-completion.md): architecture-to-code implementation map.
 - [`docs/acid-compliance.md`](docs/acid-compliance.md): ACID requirements mapped to contracts/tests.

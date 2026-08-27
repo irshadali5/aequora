@@ -22,6 +22,12 @@ then Parts 01–30 from aequora-roadmap.md
 the specifications. Completion records under `docs/` connect those specifications to code and
 tests. This tutorial explains how to perform the development; it does not override architecture.
 
+The named prerequisites are complete at the reusable repository boundary. Live database checks,
+application record mappings, deployment drills, and published-package acceptance remain explicit
+environment gates. Parts 01 through 04 are complete at the reusable repository boundary; current
+sequential implementation work therefore starts with Part 05. Each numbered part must satisfy its
+own completion checklist before moving to the next.
+
 The goal is not to teach one particular application.
 
 Instead, the goal is to teach a reusable architecture that you can apply to:
@@ -1920,6 +1926,13 @@ validation
 lineage
 ```
 
+Persist lineage as identifiers, not descriptive personal data. A root operation carries one
+retry-stable `CorrelationId`; each authoritative event gets its own `EventId` and points directly
+to the operation or event that caused it. Build derived event and job metadata from authenticated
+server provenance, and store it atomically with the journal, ledger, audit record, or job payload.
+Operation dependencies remain a separate ordering DAG: “must run after” does not necessarily mean
+“was caused by.”
+
 ---
 
 # 77. Deterministic Domain Execution
@@ -2788,6 +2801,7 @@ aequora/
 │   ├── aequora-jobs/
 │   ├── aequora-audit/
 │   ├── aequora-governance/
+│   ├── aequora-crypto/
 │   ├── aequora-crypto/
 │   ├── aequora-diagnostics/
 │   ├── aequora-registry-types/
@@ -4617,6 +4631,152 @@ Control Plane
  ├── Crypto
  └── Diagnostics
 ```
+
+---
+
+# 192.1 Implementing the Live Acceleration Layer
+
+Part 08 adds `aequora-live` beside the durable protocol rather than inside it. Its `SyncHint` and
+`LiveMessage` types contain only tenant/scope routing, an optional sequence estimate, and a small
+semantic reason. `LiveRouter` performs application-owned scope authorization and keeps a bounded
+latest-only queue per connection. `HintWakeTracker` converts accepted hints into a generation
+change consumed by the existing client coordinator; it has no cursor or replica mutation API.
+
+The broker boundary is `HintBroker`. Single-node deployments can use `InMemoryHintBroker`; the
+PostgreSQL adapter provides `PostgresNotifyHintBroker` for cross-node `LISTEN/NOTIFY`. Both are
+ephemeral. Call `publish_best_effort` after the authoritative commit and retain periodic polling.
+WebSocket, SSE, mobile push, Redis, NATS, and local IPC are edge adapters around the same contracts.
+
+Use `FakeHintBroker` from `aequora-testkit` to inject loss, duplication, reordering, delay, and
+disconnect. The correct final replica must match polling-only execution; live delivery may change
+latency, never the result. Presence uses a bounded `PresenceDirectory` with TTL expiry and a host
+privacy predicate. It must not become a durable business record or lock.
+
+---
+
+# 192.2 Implementing Bulk Import and Cutover
+
+The optional `aequora-migration` crate now separates portable artifacts from migration workflow.
+`CanonicalExport` supplies bounded checksummed chunks; `ImportJob` binds source fingerprint,
+mapping/policy versions, lineage, state, and checkpoint. `IdentityPlan` assigns retry-stable target
+IDs before transformations resolve relationships. Mapper, transformer, validator, quarantine, and
+database transaction boundaries remain distinct.
+
+Implement `CheckpointedImportSink` with a native compare-and-set transaction covering target data,
+import ledger, and checkpoint. For authority migration, implement `AuthorityImportSink`: baseline
+seeding may publish one scope-aware snapshot boundary without synthetic per-row history, whereas
+imported operations and post-activation bridge changes must be journal-visible. `verify_cutover`
+requires zero CDC lag, exact verification, accepted quarantine, recovery evidence, client
+bootstrap, and a fenced legacy writer.
+
+Use `aequora import plan/validate` for zero-write artifact checks and the testkit failpoint sink for
+restart/replay validation. Never activate a generic migration directly from untrusted CLI input;
+the host's privileged adapter and operational approval own the final atomic cutover.
+
+---
+
+# 192.3 Implementing Large Snapshot Bootstrap
+
+The optional transfer path is defined by `aequora-bootstrap`. Build or receive a verified
+`SnapshotManifest`, create a durable `BootstrapJob`, and preserve pending operation identities in a
+`PendingIntentPlan`. Chunk order is deterministic even when transfer order is parallel. Persist
+each bounded range using the stable object identity, verify bytes before decoding, and install only
+into an inactive `ReplicaGeneration`.
+
+An authority adapter implements `SnapshotSource`, `SnapshotReadView`, and optionally
+`SnapshotLeaseStore`. Delivery implements `SnapshotChunkSource` using the ordinary service, HTTP
+range, object storage, or CDN. The local adapter implements `SnapshotSink`; chunk data and progress
+commit together, while `activate` performs one generation/cursor switch after `verify_activation`
+rechecks authorization, scope, authority epoch, lease, root, complete staging, and pending intent.
+
+After activation at sequence N, run the normal journal path from N+1. If the lease expires, scope
+is revoked, or the authority epoch changes, fail closed and restart or quarantine staging. The
+testkit failpoint sink should pass before engine-specific restart, multi-GB, disk-pressure, and
+object-store acceptance.
+
+---
+
+# 192.4 Implementing Consistency Profiles
+
+Define aggregate policy separately from operation meaning. `aequora-profile` provides nine coherent
+built-ins, typed aggregate and profile versions, conservative operation defaults, advanced custom
+opt-in, adapter capability checks, and a fail-closed registry. `AequoraAggregate` declares a stable
+aggregate ID/profile, while `AequoraOperation` can additionally declare its aggregate ID and
+semantic class. Builders remain available when declarations are assembled at application startup.
+
+Register aggregates before operations and validate the registry against the real adapter's
+`AdapterProfileCapabilities`. Never treat an unknown operation as implicit last-writer-wins.
+Finance should use required-audit immutable append-only or strong aggregate semantics; workflow and
+security-sensitive operations remain noncompactable and non-rebasable unless their domain proof
+says otherwise.
+
+Generate a checksummed `ProfileManifest` for each release. Verify it, then compare it with the last
+released manifest in CI. Additive declarations are accepted; retained semantic changes require a
+higher profile version, while removals require an explicit migration rather than silent rollout.
+
+---
+
+# 192.5 Implementing Deterministic Execution and Replay
+
+Implement replayable authority logic through `aequora_replay::ReplayHandler`. Capture one logical
+time, server-trusted principal, deterministic labelled ID/random inputs, canonical external
+results, and immutable policy/config identities before making the decision. Pass only those inputs,
+the canonical operation, and canonical pre-state to `decide`; direct clock, environment, database,
+network, filesystem, random-generator, and provider access makes the path unsupported for full
+replay.
+
+The returned `ExecutionPlan` separates mutations, events, durable side-effect intents, and result.
+Verify it, then use a native `PlanCommitter` transaction to persist the complete plan plus input,
+handler, policy, and plan identity in the operation ledger. Run external workers only after commit.
+On retry, identical identity returns the committed outcome, while changed captured inputs or a
+different plan fail closed.
+
+Retain an integrity-bound `ReplayBundle` with embedded state or a verified immutable
+snapshot/journal reference. `ReplaySandbox` supports decision verification, simulation,
+projection rebuild, historical debugging, and migration comparison without production handles.
+Use `aequora-dev replay verify` for payload-free bundle inspection and run the replay property and
+fault contracts in CI. Bundle integrity is not confidentiality: the deployment must own encryption,
+authorization, redaction, retention, and historical handler availability.
+
+---
+
+# 192.6 Implementing Canonical Audit and Explainability
+
+Treat synchronization journals, operation ledgers, canonical business audit, and operational logs
+as four distinct histories. Register stable action, field, and reason IDs and declare a field-level
+`AuditPolicy`. Required business/security/administrative evidence uses `RequiredAtomic`; sensitive
+fields use redacted, digest, metadata-only, or omitted representations rather than accidental full
+serialization.
+
+Domain decisions add `AuditEvent` declarations to `ExecutionPlan`. Attribute user, service,
+system, and import work truthfully and use structured origin provenance for import, repair,
+scope-only removal, and bootstrap. A native authority transaction persists required events,
+tenant-partition chain metadata, and authoritative field pointers with mutation, journal, ledger,
+and result. Deterministic operation/action/ordinal identities make response-loss retry one logical
+audit effect.
+
+Use `AuditAccess` before every bounded query or explanation. `ChainedAuditRecord` and
+`AuditCheckpoint` detect content, sequence, and previous-hash changes; an application-owned
+`AuditAnchorSink` signs/stores roots externally. The chain is tamper-evident, not confidential or
+tamper-proof. Hosts must provide encryption, keyed hashing, current authorization, access auditing,
+archive/search indexes, localization, retention/legal-hold/erasure policy, and production restart
+and restore evidence.
+
+---
+
+# 192.7 Implementing Governance and Distributed Erasure
+
+Classify primary data, journals, ledgers, audit, tombstones, snapshots, blobs, exports, replay and
+import artifacts, archives, backups, and clients with versioned retention and explicit deletion
+modes. Resolve subjects into owned/referenced/shared/derived relations and build an integrity-bound
+erasure plan with blockers and irreversible markers. Holds take precedence; required evidence is
+minimized rather than silently lost.
+
+Tombstone GC requires active clients beyond deletion, a safe snapshot-backed journal floor, and an
+identity guard. Retired clients below the floor rebootstrap. Revoke tenant writes before purge, run
+only approved non-dry-run plans in bounded idempotent jobs, and require every registered surface to
+verify. After restore, reconcile erasures/revocations and load holds before traffic. Unknown and
+malicious offline copies remain an explicit proof limitation.
 
 ---
 

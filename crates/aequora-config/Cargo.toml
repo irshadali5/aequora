@@ -14,12 +14,17 @@ http-client = ["dep:aequora-http"]
 quic = ["dep:aequora-quic"]
 
 [dependencies]
+aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
+aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
+aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }

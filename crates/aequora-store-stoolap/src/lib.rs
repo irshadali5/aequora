@@ -3,17 +3,33 @@
 //! Domain repositories should use the same Stoolap transaction for their optimistic write
 //! and `aequora_outbox` insert. Reconciliation similarly remains one backend transaction.
 
+use aequora_coordination::{
+    CoordinationSnapshot, FencingToken, LeaseGrant, LeaseKind, LeaseRequest,
+    LocalCoordinationSupport, LocalStoreGeneration, LocalStoreId,
+};
+use aequora_integrity::{
+    CURRENT_HASH_SCHEMA, CanonicalEntity, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
+    PartitionScheme, RepairPlan, RepairStrategy,
+};
 use aequora_protocol::{
     BootstrapResponse, Conflict, OperationEnvelope, SnapshotEntity, SyncResponse,
 };
+use aequora_queue::{
+    CompactionPlan as QueueCompactionPlan, LocalOperationSeq, MutationMutability,
+    OptimizationRegistry, QueueEntry, RebasePlan, RebaseTarget, SupersessionReason,
+    plan_compaction, plan_rebase, semantic_envelope_hash,
+};
+use aequora_scope::{LocalScopeState, ScopeTransition, ScopeTransitionOutcome, Subscription};
 use aequora_store::{
-    ConflictInbox, ConflictRecord, ConflictResolution, CursorStore, OutboxState, OutboxStateStore,
-    OutboxStats, OutboxStore, ReconciliationStore, RetryMetadata, SnapshotProgress, StoreError,
-    TransactionCapabilities, TransactionCapabilityProvider,
+    AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRole, AdapterTier,
+    ConflictInbox, ConflictRecord, ConflictResolution, CursorStore, IntegrityCapabilityProvider,
+    LocalCoordinationStore, LocalIntegrityStore, OutboxState, OutboxStateStore, OutboxStats,
+    OutboxStore, ReconciliationStore, ReplicaRepairReport, RetryMetadata, ScopeStateStore,
+    SnapshotProgress, StoreError, TransactionCapabilities, TransactionCapabilityProvider,
 };
 use aequora_types::{
-    Cursor, EntityId, EntityRef, EntityType, EntityVersion, OperationId, Sequence, SnapshotId,
-    SyncScopeId,
+    AuthorityEpoch, AuthorityId, Cursor, EntityId, EntityRef, EntityType, EntityVersion,
+    OperationId, Sequence, SnapshotId, SyncScopeId,
 };
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
@@ -103,6 +119,81 @@ CREATE INDEX IF NOT EXISTS aequora_retry_schedule_due_idx
     ON aequora_retry_schedule (next_attempt_unix_ms, operation_id);
 ";
 
+/// Adds the immutable-delivery boundary and transactional optimization evidence.
+pub const MIGRATION_0003: &str = r"
+ALTER TABLE aequora_outbox ADD COLUMN ever_sent INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE aequora_outbox ADD COLUMN immutable_hash TEXT;
+CREATE INDEX IF NOT EXISTS aequora_outbox_mutable_idx
+    ON aequora_outbox (state, ever_sent, enqueued_order);
+
+CREATE TABLE IF NOT EXISTS aequora_supersession (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    old_operation_id TEXT NOT NULL UNIQUE,
+    new_operation_id TEXT,
+    reason TEXT NOT NULL,
+    compacted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS aequora_rebase_history (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    operation_id TEXT NOT NULL,
+    old_base_version INTEGER,
+    new_base_version INTEGER,
+    rebased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+";
+
+/// Adds persistent store identity, monotonic generation, and one durable fenced lease row.
+pub const MIGRATION_0004: &str = r"
+CREATE TABLE IF NOT EXISTS aequora_local_store (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    store_id TEXT NOT NULL UNIQUE,
+    store_generation INTEGER NOT NULL CHECK (store_generation > 0),
+    metadata_schema_version INTEGER NOT NULL CHECK (metadata_schema_version > 0)
+);
+
+CREATE TABLE IF NOT EXISTS aequora_coordinator_lease (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    owner_id TEXT,
+    fencing_token INTEGER NOT NULL CHECK (fencing_token >= 0),
+    expires_at_unix_ms INTEGER NOT NULL CHECK (expires_at_unix_ms >= 0),
+    last_heartbeat_unix_ms INTEGER NOT NULL CHECK (last_heartbeat_unix_ms >= 0),
+    lease_kind TEXT NOT NULL CHECK (lease_kind IN ('sync', 'maintenance'))
+);
+";
+
+/// Adds one atomically replaced canonical scope-control state.
+///
+/// The encoded model contains subscription, cursor binding, membership references, applied
+/// transition identities, and pending-intent quarantine without duplicating entity payloads.
+pub const MIGRATION_0005: &str = r"
+CREATE TABLE IF NOT EXISTS aequora_scope_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    encoded_state TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS aequora_scope_quarantine (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    operation_id TEXT NOT NULL UNIQUE,
+    disposition TEXT NOT NULL CHECK (
+        disposition IN ('authorization_lost', 'scope_revoked', 'scope_removed')
+    )
+);
+";
+
+/// Binds durable local cursors and snapshot staging to authority identity and epoch.
+pub const MIGRATION_0006: &str = r"
+ALTER TABLE aequora_cursors ADD COLUMN authority_id TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+ALTER TABLE aequora_cursors ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE aequora_snapshot_progress ADD COLUMN authority_id TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+ALTER TABLE aequora_snapshot_progress ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS aequora_authority_trust (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    authority_id TEXT NOT NULL UNIQUE,
+    highest_epoch INTEGER NOT NULL CHECK (highest_epoch > 0)
+);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -114,7 +205,23 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest Stoolap schema revision understood by this Aequora release.
-pub const STOOLAP_SCHEMA_VERSION: u32 = 2;
+pub const STOOLAP_SCHEMA_VERSION: u32 = 6;
+
+/// Versioned role and capability declaration for the built-in Stoolap local adapter.
+pub const STOOLAP_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
+    name: "stoolap",
+    adapter_version: env!("CARGO_PKG_VERSION"),
+    tested_aequora_version: env!("CARGO_PKG_VERSION"),
+    tested_database_versions: &["0.4.0"],
+    roles: &[
+        AdapterRole::LocalWritable,
+        AdapterRole::ReplicaSink,
+        AdapterRole::SnapshotSink,
+    ],
+    tier: AdapterTier::FullProduction,
+    capabilities: AdapterCapabilities::FULL_LOCAL,
+    limitations: &[],
+};
 
 #[derive(Clone, Copy)]
 struct StoolapMigration {
@@ -133,6 +240,26 @@ const STOOLAP_MIGRATIONS: &[StoolapMigration] = &[
         version: 2,
         name: "durable_retry_schedule",
         sql: MIGRATION_0002,
+    },
+    StoolapMigration {
+        version: 3,
+        name: "offline_queue_optimization",
+        sql: MIGRATION_0003,
+    },
+    StoolapMigration {
+        version: 4,
+        name: "local_multiprocess_coordination",
+        sql: MIGRATION_0004,
+    },
+    StoolapMigration {
+        version: 5,
+        name: "authorized_scope_state",
+        sql: MIGRATION_0005,
+    },
+    StoolapMigration {
+        version: 6,
+        name: "authority_epoch_cursor_binding",
+        sql: MIGRATION_0006,
     },
 ];
 
@@ -222,6 +349,60 @@ pub trait StoolapProjectionHook: Send + Sync {
     ) -> Result<(), StoreError> {
         Ok(())
     }
+
+    /// Starts an atomic authoritative-base repair for application-owned projections.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when application projection repair cannot start safely.
+    fn begin_repair(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _plan: &RepairPlan,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Removes one stale application projection during repair.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the projection cannot be removed atomically.
+    fn remove_repair_entity(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _scope: SyncScopeId,
+        _entity: EntityRef,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Installs one authoritative application projection during repair.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the projection cannot be installed atomically.
+    fn apply_repair_entity(
+        &self,
+        transaction: &mut ApiTransaction,
+        scope: SyncScopeId,
+        entity: &SnapshotEntity,
+    ) -> Result<(), StoreError> {
+        self.apply_snapshot_entity(transaction, scope, entity)
+    }
+
+    /// Finishes application projection repair before the shared transaction commits.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when application projection repair cannot finish safely.
+    fn finish_repair(
+        &self,
+        _transaction: &mut ApiTransaction,
+        _plan: &RepairPlan,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -241,6 +422,260 @@ impl StoolapProjectionHook for NoopStoolapProjectionHook {
 impl TransactionCapabilityProvider for StoolapDatabase {
     fn transaction_capabilities(&self) -> TransactionCapabilities {
         TransactionCapabilities::FULL_LOCAL
+    }
+}
+
+impl IntegrityCapabilityProvider for StoolapDatabase {
+    fn integrity_support(&self) -> IntegritySupport {
+        IntegritySupport::Full
+    }
+}
+
+impl AdapterManifestProvider for StoolapDatabase {
+    fn adapter_manifest(&self) -> AdapterManifest {
+        STOOLAP_ADAPTER_MANIFEST
+    }
+}
+
+fn lease_kind_name(kind: LeaseKind) -> &'static str {
+    match kind {
+        LeaseKind::SyncCoordinator => "sync",
+        LeaseKind::Maintenance => "maintenance",
+    }
+}
+
+#[async_trait]
+impl LocalCoordinationStore for StoolapDatabase {
+    fn coordination_support(&self) -> LocalCoordinationSupport {
+        LocalCoordinationSupport::Full
+    }
+
+    async fn coordination_snapshot(&self) -> Result<CoordinationSnapshot, StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let snapshot = coordination_snapshot_transaction(&mut transaction)?;
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(snapshot)
+    }
+
+    async fn acquire_lease(&self, request: LeaseRequest) -> Result<LeaseGrant, StoreError> {
+        let expires_at = request
+            .expires_at()
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let snapshot = coordination_snapshot_transaction(&mut transaction)?;
+        if snapshot.is_active(request.now_unix_ms) {
+            return Err(StoreError::leadership_lost(
+                "Stoolap coordinator lease is held",
+            ));
+        }
+        let token = snapshot
+            .fencing_token
+            .checked_next()
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+        let changed = transaction
+            .execute(
+                "UPDATE aequora_coordinator_lease SET owner_id=$1, fencing_token=$2, expires_at_unix_ms=$3, last_heartbeat_unix_ms=$4, lease_kind=$5 WHERE singleton=1 AND fencing_token=$6 AND (owner_id IS NULL OR expires_at_unix_ms <= $7)",
+                (
+                    request.owner_id.to_string(),
+                    to_i64(token.0, "fencing token")?,
+                    to_i64(expires_at, "lease expiry")?,
+                    to_i64(request.now_unix_ms, "lease heartbeat")?,
+                    lease_kind_name(request.kind),
+                    to_i64(snapshot.fencing_token.0, "fencing token")?,
+                    to_i64(request.now_unix_ms, "lease acquisition timestamp")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        if changed != 1 {
+            return Err(StoreError::leadership_lost(
+                "Stoolap coordinator lease acquisition lost its compare-and-swap",
+            ));
+        }
+        let grant = LeaseGrant {
+            store_id: snapshot.store_id,
+            owner_id: request.owner_id,
+            fencing_token: token,
+            store_generation: snapshot.store_generation,
+            kind: request.kind,
+            expires_at_unix_ms: expires_at,
+        };
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(grant)
+    }
+
+    async fn renew_lease(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<LeaseGrant, StoreError> {
+        let expires_at = LeaseRequest {
+            owner_id: grant.owner_id,
+            kind: grant.kind,
+            now_unix_ms,
+            ttl_ms,
+        }
+        .expires_at()
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        validate_coordination_fence(&mut transaction, grant, now_unix_ms)?;
+        let changed = transaction
+            .execute(
+                "UPDATE aequora_coordinator_lease SET expires_at_unix_ms=$1, last_heartbeat_unix_ms=$2 WHERE singleton=1 AND owner_id=$3 AND fencing_token=$4 AND expires_at_unix_ms > $2",
+                (
+                    to_i64(expires_at, "lease expiry")?,
+                    to_i64(now_unix_ms, "lease heartbeat")?,
+                    grant.owner_id.to_string(),
+                    to_i64(grant.fencing_token.0, "fencing token")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        if changed != 1 {
+            return Err(StoreError::leadership_lost(
+                "Stoolap lease renewal was fenced",
+            ));
+        }
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(LeaseGrant {
+            expires_at_unix_ms: expires_at,
+            ..grant
+        })
+    }
+
+    async fn release_lease(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        validate_coordination_fence(&mut transaction, grant, now_unix_ms)?;
+        let changed = transaction
+            .execute(
+                "UPDATE aequora_coordinator_lease SET owner_id=NULL, expires_at_unix_ms=0, last_heartbeat_unix_ms=$1 WHERE singleton=1 AND owner_id=$2 AND fencing_token=$3",
+                (
+                    to_i64(now_unix_ms, "lease release timestamp")?,
+                    grant.owner_id.to_string(),
+                    to_i64(grant.fencing_token.0, "fencing token")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        if changed != 1 {
+            return Err(StoreError::leadership_lost(
+                "Stoolap lease release was fenced",
+            ));
+        }
+        transaction.commit().map_err(stoolap_error)
+    }
+
+    async fn validate_fence(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        validate_coordination_fence(&mut transaction, grant, now_unix_ms)?;
+        transaction.commit().map_err(stoolap_error)
+    }
+
+    async fn advance_store_generation(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+    ) -> Result<LocalStoreGeneration, StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        validate_coordination_fence(&mut transaction, grant, now_unix_ms)?;
+        if grant.kind != LeaseKind::Maintenance {
+            return Err(StoreError::permanent(
+                "Stoolap generation change requires a maintenance lease",
+            ));
+        }
+        let generation = grant
+            .store_generation
+            .checked_next()
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+        let changed = transaction
+            .execute(
+                "UPDATE aequora_local_store SET store_generation=$1 WHERE singleton=1 AND store_generation=$2",
+                (
+                    to_i64(generation.0, "store generation")?,
+                    to_i64(grant.store_generation.0, "store generation")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        if changed != 1 {
+            return Err(StoreError::leadership_lost(
+                "Stoolap store generation advance was fenced",
+            ));
+        }
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(generation)
+    }
+}
+
+fn apply_stoolap_scope_transition(
+    database: &StoolapDatabase,
+    transition: &ScopeTransition,
+    fence: Option<LeaseGrant>,
+) -> Result<ScopeTransitionOutcome, StoreError> {
+    let mut transaction = database.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    let mut state = load_scope_state_transaction(&mut transaction)?;
+    let outcome = state
+        .apply(transition)
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+    if outcome.applied {
+        store_scope_state_transaction(&mut transaction, &state)?;
+        let disposition = quarantine_disposition(&transition.kind);
+        for operation in &outcome.quarantined_operations {
+            let changed = transaction
+                .execute(
+                    "UPDATE aequora_scope_quarantine SET disposition=$1 WHERE operation_id=$2",
+                    (disposition, operation.to_string()),
+                )
+                .map_err(stoolap_error)?;
+            if changed == 0 {
+                transaction
+                    .execute(
+                        "INSERT INTO aequora_scope_quarantine (operation_id, disposition) VALUES ($1, $2)",
+                        (operation.to_string(), disposition),
+                    )
+                    .map_err(stoolap_error)?;
+            }
+        }
+    } else {
+        // Incomplete staging changes lifecycle state even though membership is not activated.
+        store_scope_state_transaction(&mut transaction, &state)?;
+    }
+    transaction.commit().map_err(stoolap_error)?;
+    Ok(outcome)
+}
+
+#[async_trait]
+impl ScopeStateStore for StoolapDatabase {
+    async fn load_scope_state(&self) -> Result<LocalScopeState, StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let state = load_scope_state_transaction(&mut transaction)?;
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(state)
+    }
+
+    async fn install_subscription(&self, subscription: &Subscription) -> Result<(), StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        let mut state = load_scope_state_transaction(&mut transaction)?;
+        state
+            .install(subscription.clone())
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+        store_scope_state_transaction(&mut transaction, &state)?;
+        transaction.commit().map_err(stoolap_error)
+    }
+
+    async fn apply_scope_transition(
+        &self,
+        transition: &ScopeTransition,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        apply_stoolap_scope_transition(self, transition, None)
+    }
+
+    async fn apply_scope_transition_fenced(
+        &self,
+        transition: &ScopeTransition,
+        fence: Option<LeaseGrant>,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        apply_stoolap_scope_transition(self, transition, fence)
     }
 }
 
@@ -452,6 +887,18 @@ impl StoolapDatabase {
                 (),
             )
             .map_err(stoolap_error)?;
+        transaction
+            .query(
+                "SELECT encoded_state FROM aequora_scope_state WHERE 1 = 0",
+                (),
+            )
+            .map_err(stoolap_error)?;
+        transaction
+            .query(
+                "SELECT operation_id FROM aequora_scope_quarantine WHERE 1 = 0",
+                (),
+            )
+            .map_err(stoolap_error)?;
         drop(transaction);
         Ok(())
     }
@@ -523,7 +970,100 @@ fn migrate_database(database: &Database) -> Result<(), StoreError> {
             "Stoolap schema migration stopped at version {applied}, expected {STOOLAP_SCHEMA_VERSION}"
         )));
     }
+    ensure_coordination_state(database)?;
     Ok(())
+}
+
+fn ensure_coordination_state(database: &Database) -> Result<(), StoreError> {
+    let mut transaction = database.begin().map_err(stoolap_error)?;
+    if transaction
+        .query_opt::<String, _>(
+            "SELECT store_id FROM aequora_local_store WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .is_none()
+    {
+        transaction
+            .execute(
+                "INSERT INTO aequora_local_store (singleton, store_id, store_generation, metadata_schema_version) VALUES (1, $1, 1, $2)",
+                (LocalStoreId::new().to_string(), i64::from(STOOLAP_SCHEMA_VERSION)),
+            )
+            .map_err(stoolap_error)?;
+    }
+    if transaction
+        .query_opt::<i64, _>(
+            "SELECT fencing_token FROM aequora_coordinator_lease WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .is_none()
+    {
+        transaction
+            .execute(
+                "INSERT INTO aequora_coordinator_lease (singleton, owner_id, fencing_token, expires_at_unix_ms, last_heartbeat_unix_ms, lease_kind) VALUES (1, NULL, 0, 0, 0, 'sync')",
+                (),
+            )
+            .map_err(stoolap_error)?;
+    }
+    transaction.commit().map_err(stoolap_error)
+}
+
+fn coordination_snapshot_transaction(
+    transaction: &mut ApiTransaction,
+) -> Result<CoordinationSnapshot, StoreError> {
+    let store_row = transaction
+        .query(
+            "SELECT store_id, store_generation FROM aequora_local_store WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .next()
+        .ok_or_else(|| StoreError::permanent("Stoolap local-store identity is missing"))?
+        .map_err(stoolap_error)?;
+    let lease_row = transaction
+        .query(
+            "SELECT owner_id, fencing_token, expires_at_unix_ms, lease_kind FROM aequora_coordinator_lease WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .next()
+        .ok_or_else(|| StoreError::permanent("Stoolap coordinator lease row is missing"))?
+        .map_err(stoolap_error)?;
+    let store_id: String = store_row.get(0).map_err(stoolap_error)?;
+    let generation: i64 = store_row.get(1).map_err(stoolap_error)?;
+    let owner_id: Option<String> = lease_row.get(0).map_err(stoolap_error)?;
+    let fencing_token: i64 = lease_row.get(1).map_err(stoolap_error)?;
+    let expires_at_unix_ms: i64 = lease_row.get(2).map_err(stoolap_error)?;
+    let lease_kind: String = lease_row.get(3).map_err(stoolap_error)?;
+    Ok(CoordinationSnapshot {
+        store_id: parse_id(&store_id, "local store ID")?,
+        store_generation: LocalStoreGeneration(from_i64(generation, "store generation")?),
+        fencing_token: FencingToken(from_i64(fencing_token, "fencing token")?),
+        owner_id: owner_id
+            .map(|value| parse_id(&value, "process instance ID"))
+            .transpose()?,
+        kind: match lease_kind.as_str() {
+            "sync" => LeaseKind::SyncCoordinator,
+            "maintenance" => LeaseKind::Maintenance,
+            _ => {
+                return Err(StoreError::permanent(
+                    "invalid Stoolap coordinator lease kind",
+                ));
+            }
+        },
+        expires_at_unix_ms: from_i64(expires_at_unix_ms, "lease expiry")?,
+    })
+}
+
+fn validate_coordination_fence(
+    transaction: &mut ApiTransaction,
+    grant: LeaseGrant,
+    now_unix_ms: u64,
+) -> Result<(), StoreError> {
+    coordination_snapshot_transaction(transaction)?
+        .validate(grant, now_unix_ms)
+        .map_err(|error| StoreError::leadership_lost(error.to_string()))
 }
 
 fn load_migration_history(database: &Database) -> Result<Vec<AppliedMigration>, StoreError> {
@@ -641,6 +1181,51 @@ fn decode<T: DeserializeOwned>(value: &str) -> Result<T, StoreError> {
     })
 }
 
+fn load_scope_state_transaction(
+    transaction: &mut ApiTransaction,
+) -> Result<LocalScopeState, StoreError> {
+    transaction
+        .query_opt::<String, _>(
+            "SELECT encoded_state FROM aequora_scope_state WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .map_or_else(
+            || Ok(LocalScopeState::default()),
+            |encoded| decode(&encoded),
+        )
+}
+
+fn store_scope_state_transaction(
+    transaction: &mut ApiTransaction,
+    state: &LocalScopeState,
+) -> Result<(), StoreError> {
+    let encoded = encode(state)?;
+    let updated = transaction
+        .execute(
+            "UPDATE aequora_scope_state SET encoded_state = $1 WHERE singleton = 1",
+            (&encoded,),
+        )
+        .map_err(stoolap_error)?;
+    if updated == 0 {
+        transaction
+            .execute(
+                "INSERT INTO aequora_scope_state (singleton, encoded_state) VALUES (1, $1)",
+                (&encoded,),
+            )
+            .map_err(stoolap_error)?;
+    }
+    Ok(())
+}
+
+fn quarantine_disposition(kind: &aequora_scope::ScopeTransitionKind) -> &'static str {
+    match kind {
+        aequora_scope::ScopeTransitionKind::Revocation => "scope_revoked",
+        aequora_scope::ScopeTransitionKind::Contraction { .. } => "scope_removed",
+        _ => "authorization_lost",
+    }
+}
+
 fn stoolap_error(error: impl std::fmt::Display) -> StoreError {
     StoreError::transient(format!("Stoolap operation failed: {error}"))
 }
@@ -658,6 +1243,10 @@ where
 fn to_i64(value: u64, field: &str) -> Result<i64, StoreError> {
     i64::try_from(value)
         .map_err(|_| StoreError::permanent(format!("{field} exceeds Stoolap INTEGER range")))
+}
+
+fn from_i64(value: i64, field: &str) -> Result<u64, StoreError> {
+    u64::try_from(value).map_err(|_| StoreError::permanent(format!("negative Stoolap {field}")))
 }
 
 fn state_name(state: OutboxState) -> &'static str {
@@ -691,13 +1280,54 @@ pub trait StoolapBackend: Send + Sync {
     async fn pending_operations(&self, limit: usize) -> Result<Vec<OperationEnvelope>, StoreError>;
     /// Appends an operation within the caller's optimistic domain transaction.
     async fn append_operation(&self, operation: OperationEnvelope) -> Result<(), StoreError>;
+    /// Atomically applies one deterministic local-only compaction plan.
+    async fn compact_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+    ) -> Result<QueueCompactionPlan, StoreError>;
+    /// Compacts only while the supplied coordination fence remains current.
+    async fn compact_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<QueueCompactionPlan, StoreError>;
+    /// Atomically rebases never-sent operations against newly installed authority versions.
+    async fn rebase_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+    ) -> Result<RebasePlan, StoreError>;
+    /// Rebases only while the supplied coordination fence remains current.
+    async fn rebase_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<RebasePlan, StoreError>;
     /// Atomically transitions selected replayable operations to `Sending`.
     async fn mark_sending(&self, operations: &[OperationId]) -> Result<(), StoreError>;
+    /// Marks sending under the current coordination fence.
+    async fn mark_sending_fenced(
+        &self,
+        operations: &[OperationId],
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError>;
     /// Returns in-flight operations to the replayable `Retry` state.
     async fn mark_retry(
         &self,
         operations: &[OperationId],
         next_attempt_unix_ms: u64,
+    ) -> Result<(), StoreError>;
+    /// Marks retry under the current coordination fence.
+    async fn mark_retry_fenced(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+        fence: Option<LeaseGrant>,
     ) -> Result<(), StoreError>;
     /// Loads durable retry scheduling metadata.
     async fn retry_metadata(
@@ -723,10 +1353,46 @@ pub trait StoolapBackend: Send + Sync {
     ) -> Result<(), StoreError>;
     /// Loads a durable scope cursor.
     async fn load_cursor(&self, scope: SyncScopeId) -> Result<Option<Cursor>, StoreError>;
+    /// Computes canonical authoritative-base state at the installed cursor boundary.
+    async fn capture_local_integrity(
+        &self,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError>;
+    /// Atomically repairs local authoritative base without touching replayable outbox intent.
+    async fn repair_local_replica(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+    ) -> Result<ReplicaRepairReport, StoreError>;
+    /// Repairs only while the supplied coordination fence remains current.
+    async fn repair_local_replica_fenced(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+        fence: Option<LeaseGrant>,
+    ) -> Result<ReplicaRepairReport, StoreError>;
     /// Atomically performs all reconciliation effects.
     async fn reconcile(&self, response: &SyncResponse) -> Result<(), StoreError>;
+    /// Atomically verifies a lease fence and performs every reconciliation effect.
+    async fn reconcile_fenced(
+        &self,
+        response: &SyncResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError>;
     /// Stages and, for the final page, atomically installs a bootstrap snapshot.
     async fn stage_snapshot(&self, response: &BootstrapResponse) -> Result<(), StoreError>;
+    /// Atomically verifies a lease fence and stages/installs a bootstrap page.
+    async fn stage_snapshot_fenced(
+        &self,
+        response: &BootstrapResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError>;
     /// Loads crash-recoverable bootstrap staging progress.
     async fn snapshot_progress(
         &self,
@@ -742,7 +1408,7 @@ impl StoolapBackend for StoolapDatabase {
         let rows = self
             .database
             .query(
-                "SELECT envelope FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') AND operation_id NOT IN (SELECT operation_id FROM aequora_retry_schedule WHERE next_attempt_unix_ms > $1) ORDER BY enqueued_order LIMIT $2",
+                "SELECT envelope FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') AND operation_id NOT IN (SELECT operation_id FROM aequora_retry_schedule WHERE next_attempt_unix_ms > $1) AND operation_id NOT IN (SELECT operation_id FROM aequora_scope_quarantine) ORDER BY enqueued_order LIMIT $2",
                 (now, limit),
             )
             .map_err(stoolap_error)?;
@@ -759,8 +1425,52 @@ impl StoolapBackend for StoolapDatabase {
         self.transact_local_mutation(&operation, |_| Ok(()))
     }
 
+    async fn compact_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        compact_stoolap_outbox(self, registry, max_operations, None)
+    }
+
+    async fn compact_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        compact_stoolap_outbox(self, registry, max_operations, fence)
+    }
+
+    async fn rebase_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+    ) -> Result<RebasePlan, StoreError> {
+        rebase_stoolap_outbox(self, registry, targets, max_operations, None)
+    }
+
+    async fn rebase_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<RebasePlan, StoreError> {
+        rebase_stoolap_outbox(self, registry, targets, max_operations, fence)
+    }
+
     async fn mark_sending(&self, operations: &[OperationId]) -> Result<(), StoreError> {
-        transition_operations(&self.database, operations, OutboxState::Sending)
+        transition_operations(&self.database, operations, OutboxState::Sending, None)
+    }
+
+    async fn mark_sending_fenced(
+        &self,
+        operations: &[OperationId],
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        transition_operations(&self.database, operations, OutboxState::Sending, fence)
     }
 
     async fn mark_retry(
@@ -768,7 +1478,16 @@ impl StoolapBackend for StoolapDatabase {
         operations: &[OperationId],
         next_attempt_unix_ms: u64,
     ) -> Result<(), StoreError> {
-        schedule_retry(&self.database, operations, next_attempt_unix_ms)
+        schedule_retry(&self.database, operations, next_attempt_unix_ms, None)
+    }
+
+    async fn mark_retry_fenced(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        schedule_retry(&self.database, operations, next_attempt_unix_ms, fence)
     }
 
     async fn retry_metadata(
@@ -906,177 +1625,71 @@ impl StoolapBackend for StoolapDatabase {
     }
 
     async fn load_cursor(&self, scope: SyncScopeId) -> Result<Option<Cursor>, StoreError> {
-        let sequence = self
+        let mut rows = self
             .database
-            .query_opt::<i64, _>(
-                "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
+            .query(
+                "SELECT sequence, authority_id, authority_epoch FROM aequora_cursors WHERE scope_id = $1",
                 (scope.to_string(),),
             )
             .map_err(stoolap_error)?;
-        sequence
-            .map(|sequence| {
-                Ok(Cursor {
-                    scope,
-                    sequence: Sequence(
-                        u64::try_from(sequence).map_err(|_| {
-                            StoreError::permanent("negative Stoolap cursor sequence")
-                        })?,
-                    ),
-                })
-            })
-            .transpose()
+        let Some(row) = rows.next() else {
+            return Ok(None);
+        };
+        cursor_from_stoolap_row(scope, &row.map_err(stoolap_error)?).map(Some)
+    }
+
+    async fn capture_local_integrity(
+        &self,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        capture_stoolap_integrity(self, scope, boundary, generation, scheme, max_entities)
+    }
+
+    async fn repair_local_replica(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        repair_stoolap_replica(self, plan, replacements, removals, None)
+    }
+
+    async fn repair_local_replica_fenced(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+        fence: Option<LeaseGrant>,
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        repair_stoolap_replica(self, plan, replacements, removals, fence)
     }
 
     async fn reconcile(&self, response: &SyncResponse) -> Result<(), StoreError> {
-        let mut transaction = self.database.begin().map_err(stoolap_error)?;
-        let scope = response.next_cursor.scope;
-        if let Some(current) = load_cursor_transaction(&mut transaction, scope)? {
-            if response.next_cursor.sequence < current.sequence {
-                return Err(StoreError::permanent(
-                    "Stoolap reconciliation cursor would regress",
-                ));
-            }
-        }
-        for change in &response.changes {
-            let sequence = to_i64(change.sequence.0, "change sequence")?;
-            let already_applied = transaction
-                .query_opt::<i64, _>(
-                    "SELECT sequence FROM aequora_applied_events WHERE scope_id = $1 AND sequence = $2",
-                    (scope.to_string(), sequence),
-                )
-                .map_err(stoolap_error)?
-                .is_some();
-            if !already_applied {
-                put_entity(
-                    &mut transaction,
-                    scope,
-                    &SnapshotEntity {
-                        entity: change.entity,
-                        version: change.version,
-                        payload: change.payload.clone(),
-                        tombstone: matches!(
-                            change.change_kind,
-                            aequora_protocol::ChangeKind::Tombstone
-                        ),
-                    },
-                    "aequora_local_entities",
-                )?;
-                self.projection_hook
-                    .apply_change(&mut transaction, scope, change)?;
-                transaction
-                    .execute(
-                        "INSERT INTO aequora_applied_events (scope_id, sequence) VALUES ($1, $2)",
-                        (scope.to_string(), sequence),
-                    )
-                    .map_err(stoolap_error)?;
-            }
-        }
-        for acknowledgement in &response.acknowledged {
-            set_terminal(
-                &mut transaction,
-                acknowledgement.operation_id,
-                OutboxState::Acknowledged,
-                encode(acknowledgement)?,
-            )?;
-        }
-        for rejection in &response.rejected {
-            set_terminal(
-                &mut transaction,
-                rejection.operation_id,
-                OutboxState::Rejected,
-                encode(rejection)?,
-            )?;
-        }
-        for conflict in &response.conflicts {
-            set_terminal(
-                &mut transaction,
-                conflict.operation_id,
-                OutboxState::Conflict,
-                encode(conflict)?,
-            )?;
-            put_conflict(&mut transaction, conflict)?;
-        }
-        set_cursor(&mut transaction, response.next_cursor)?;
-        transaction.commit().map_err(stoolap_error)
+        reconcile_stoolap(self, response, None)
+    }
+
+    async fn reconcile_fenced(
+        &self,
+        response: &SyncResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        reconcile_stoolap(self, response, fence)
     }
 
     async fn stage_snapshot(&self, response: &BootstrapResponse) -> Result<(), StoreError> {
-        let mut transaction = self.database.begin().map_err(stoolap_error)?;
-        let scope = response.cursor.scope;
-        let existing = snapshot_progress_transaction(&mut transaction, scope)?;
-        match existing {
-            Some(progress)
-                if progress.snapshot_id != response.snapshot_id
-                    || progress.next_offset != response.offset =>
-            {
-                return Err(StoreError::permanent(
-                    "Stoolap snapshot page does not match durable staging progress",
-                ));
-            }
-            None if response.offset != 0 => {
-                return Err(StoreError::permanent(
-                    "Stoolap snapshot staging must begin at offset zero",
-                ));
-            }
-            None => {
-                transaction
-                    .execute(
-                        "DELETE FROM aequora_snapshot_staging WHERE scope_id = $1",
-                        (scope.to_string(),),
-                    )
-                    .map_err(stoolap_error)?;
-            }
-            Some(_) => {}
-        }
-        for entity in &response.entities {
-            put_entity(&mut transaction, scope, entity, "aequora_snapshot_staging")?;
-        }
-        if response.has_more {
-            put_snapshot_progress(
-                &mut transaction,
-                SnapshotProgress {
-                    snapshot_id: response.snapshot_id,
-                    cursor: response.cursor,
-                    next_offset: response.next_offset,
-                },
-            )?;
-        } else {
-            transaction
-                .execute(
-                    "DELETE FROM aequora_local_entities WHERE scope_id = $1",
-                    (scope.to_string(),),
-                )
-                .map_err(stoolap_error)?;
-            self.projection_hook
-                .begin_snapshot(&mut transaction, scope)?;
-            let snapshot_entities = load_staged_snapshot_entities(&mut transaction, scope)?;
-            for entity in &snapshot_entities {
-                self.projection_hook
-                    .apply_snapshot_entity(&mut transaction, scope, entity)?;
-            }
-            self.projection_hook
-                .finish_snapshot(&mut transaction, scope)?;
-            transaction
-                .execute(
-                    "INSERT INTO aequora_local_entities (scope_id, entity_type, entity_id, version, payload, tombstone, provisional) SELECT scope_id, entity_type, entity_id, version, payload, tombstone, 0 FROM aequora_snapshot_staging WHERE scope_id = $1",
-                    (scope.to_string(),),
-                )
-                .map_err(stoolap_error)?;
-            transaction
-                .execute(
-                    "DELETE FROM aequora_snapshot_staging WHERE scope_id = $1",
-                    (scope.to_string(),),
-                )
-                .map_err(stoolap_error)?;
-            transaction
-                .execute(
-                    "DELETE FROM aequora_snapshot_progress WHERE scope_id = $1",
-                    (scope.to_string(),),
-                )
-                .map_err(stoolap_error)?;
-            set_cursor(&mut transaction, response.cursor)?;
-        }
-        transaction.commit().map_err(stoolap_error)
+        stage_stoolap_snapshot(self, response, None)
+    }
+
+    async fn stage_snapshot_fenced(
+        &self,
+        response: &BootstrapResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        stage_stoolap_snapshot(self, response, fence)
     }
 
     async fn snapshot_progress(
@@ -1088,6 +1701,186 @@ impl StoolapBackend for StoolapDatabase {
         transaction.commit().map_err(stoolap_error)?;
         Ok(progress)
     }
+}
+
+fn reconcile_stoolap(
+    backend: &StoolapDatabase,
+    response: &SyncResponse,
+    fence: Option<LeaseGrant>,
+) -> Result<(), StoreError> {
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    let scope = response.next_cursor.scope;
+    if let Some(current) = load_cursor_transaction(&mut transaction, scope)? {
+        if current.authority_id != AuthorityId::LEGACY_UNBOUND
+            && (response.next_cursor.authority_id != current.authority_id
+                || response.next_cursor.authority_epoch != current.authority_epoch)
+        {
+            return Err(StoreError::permanent(
+                "Stoolap incremental reconciliation cannot cross authority timelines",
+            ));
+        }
+        if response.next_cursor.sequence < current.sequence {
+            return Err(StoreError::permanent(
+                "Stoolap reconciliation cursor would regress",
+            ));
+        }
+    }
+    validate_authority_trust(&mut transaction, response.next_cursor)?;
+    for change in &response.changes {
+        let sequence = to_i64(change.sequence.0, "change sequence")?;
+        let already_applied = transaction
+            .query_opt::<i64, _>(
+                "SELECT sequence FROM aequora_applied_events WHERE scope_id = $1 AND sequence = $2",
+                (scope.to_string(), sequence),
+            )
+            .map_err(stoolap_error)?
+            .is_some();
+        if !already_applied {
+            put_entity(
+                &mut transaction,
+                scope,
+                &SnapshotEntity {
+                    entity: change.entity,
+                    version: change.version,
+                    payload: change.payload.clone(),
+                    tombstone: matches!(
+                        change.change_kind,
+                        aequora_protocol::ChangeKind::Tombstone
+                    ),
+                },
+                "aequora_local_entities",
+            )?;
+            backend
+                .projection_hook
+                .apply_change(&mut transaction, scope, change)?;
+            transaction
+                .execute(
+                    "INSERT INTO aequora_applied_events (scope_id, sequence) VALUES ($1, $2)",
+                    (scope.to_string(), sequence),
+                )
+                .map_err(stoolap_error)?;
+        }
+    }
+    for acknowledgement in &response.acknowledged {
+        set_terminal(
+            &mut transaction,
+            acknowledgement.operation_id,
+            OutboxState::Acknowledged,
+            encode(acknowledgement)?,
+        )?;
+    }
+    for rejection in &response.rejected {
+        set_terminal(
+            &mut transaction,
+            rejection.operation_id,
+            OutboxState::Rejected,
+            encode(rejection)?,
+        )?;
+    }
+    for conflict in &response.conflicts {
+        set_terminal(
+            &mut transaction,
+            conflict.operation_id,
+            OutboxState::Conflict,
+            encode(conflict)?,
+        )?;
+        put_conflict(&mut transaction, conflict)?;
+    }
+    set_cursor(&mut transaction, response.next_cursor)?;
+    transaction.commit().map_err(stoolap_error)
+}
+
+fn stage_stoolap_snapshot(
+    backend: &StoolapDatabase,
+    response: &BootstrapResponse,
+    fence: Option<LeaseGrant>,
+) -> Result<(), StoreError> {
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    let scope = response.cursor.scope;
+    validate_authority_trust(&mut transaction, response.cursor)?;
+    let existing = snapshot_progress_transaction(&mut transaction, scope)?;
+    match existing {
+        Some(progress)
+            if progress.snapshot_id != response.snapshot_id
+                || progress.next_offset != response.offset =>
+        {
+            return Err(StoreError::permanent(
+                "Stoolap snapshot page does not match durable staging progress",
+            ));
+        }
+        None if response.offset != 0 => {
+            return Err(StoreError::permanent(
+                "Stoolap snapshot staging must begin at offset zero",
+            ));
+        }
+        None => {
+            transaction
+                .execute(
+                    "DELETE FROM aequora_snapshot_staging WHERE scope_id = $1",
+                    (scope.to_string(),),
+                )
+                .map_err(stoolap_error)?;
+        }
+        Some(_) => {}
+    }
+    for entity in &response.entities {
+        put_entity(&mut transaction, scope, entity, "aequora_snapshot_staging")?;
+    }
+    if response.has_more {
+        put_snapshot_progress(
+            &mut transaction,
+            SnapshotProgress {
+                snapshot_id: response.snapshot_id,
+                cursor: response.cursor,
+                next_offset: response.next_offset,
+            },
+        )?;
+    } else {
+        transaction
+            .execute(
+                "DELETE FROM aequora_local_entities WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .map_err(stoolap_error)?;
+        backend
+            .projection_hook
+            .begin_snapshot(&mut transaction, scope)?;
+        let snapshot_entities = load_staged_snapshot_entities(&mut transaction, scope)?;
+        for entity in &snapshot_entities {
+            backend
+                .projection_hook
+                .apply_snapshot_entity(&mut transaction, scope, entity)?;
+        }
+        backend
+            .projection_hook
+            .finish_snapshot(&mut transaction, scope)?;
+        transaction
+            .execute(
+                "INSERT INTO aequora_local_entities (scope_id, entity_type, entity_id, version, payload, tombstone, provisional) SELECT scope_id, entity_type, entity_id, version, payload, tombstone, 0 FROM aequora_snapshot_staging WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .map_err(stoolap_error)?;
+        transaction
+            .execute(
+                "DELETE FROM aequora_snapshot_staging WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .map_err(stoolap_error)?;
+        transaction
+            .execute(
+                "DELETE FROM aequora_snapshot_progress WHERE scope_id = $1",
+                (scope.to_string(),),
+            )
+            .map_err(stoolap_error)?;
+        set_cursor(&mut transaction, response.cursor)?;
+    }
+    transaction.commit().map_err(stoolap_error)
 }
 
 fn load_staged_snapshot_entities(
@@ -1133,30 +1926,395 @@ fn load_staged_snapshot_entities(
     Ok(entities)
 }
 
+fn capture_stoolap_integrity(
+    backend: &StoolapDatabase,
+    scope: SyncScopeId,
+    boundary: Cursor,
+    generation: IntegrityGeneration,
+    scheme: PartitionScheme,
+    max_entities: usize,
+) -> Result<IntegritySnapshot, StoreError> {
+    if boundary.scope != scope {
+        return Err(StoreError::permanent(
+            "integrity boundary belongs to another scope",
+        ));
+    }
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if load_cursor_transaction(&mut transaction, scope)? != Some(boundary) {
+        return Err(StoreError::permanent(
+            "local integrity capture requires the installed scope cursor boundary",
+        ));
+    }
+    let limit = i64::try_from(max_entities.saturating_add(1)).unwrap_or(i64::MAX);
+    let rows = transaction
+        .query(
+            "SELECT entity_type, entity_id, version, payload, tombstone
+               FROM aequora_local_entities
+              WHERE scope_id = $1 AND provisional = 0
+              ORDER BY entity_type, entity_id
+              LIMIT $2",
+            (scope.to_string(), limit),
+        )
+        .map_err(stoolap_error)?;
+    let mut entities = Vec::new();
+    for row in rows {
+        if entities.len() == max_entities {
+            return Err(StoreError::permanent(
+                "integrity input exceeds the configured entity bound",
+            ));
+        }
+        let row = row.map_err(stoolap_error)?;
+        let entity_type = row.get::<i64>(0).map_err(stoolap_error)?;
+        let entity_id = row.get::<String>(1).map_err(stoolap_error)?;
+        let version = row.get::<i64>(2).map_err(stoolap_error)?;
+        let payload = row.get::<String>(3).map_err(stoolap_error)?;
+        entities.push(CanonicalEntity {
+            entity: EntityRef {
+                entity_type: EntityType::new(
+                    u16::try_from(entity_type)
+                        .map_err(|_| StoreError::permanent("invalid local entity type"))?,
+                )
+                .map_err(|_| StoreError::permanent("invalid local entity type"))?,
+                entity_id: EntityId::from_str(&entity_id)
+                    .map_err(|_| StoreError::permanent("invalid local entity ID"))?,
+            },
+            version: EntityVersion::new(
+                u64::try_from(version)
+                    .map_err(|_| StoreError::permanent("invalid local entity version"))?,
+            )
+            .map_err(|_| StoreError::permanent("invalid local entity version"))?,
+            hash_schema: CURRENT_HASH_SCHEMA,
+            payload: hex::decode(payload)
+                .map_err(|_| StoreError::permanent("invalid local entity payload"))?,
+            tombstone: row.get::<bool>(4).map_err(stoolap_error)?,
+        });
+    }
+    let snapshot =
+        IntegritySnapshot::build(scope, boundary, generation, scheme, entities, max_entities)
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+    transaction.commit().map_err(stoolap_error)?;
+    Ok(snapshot)
+}
+
+fn repair_stoolap_replica(
+    backend: &StoolapDatabase,
+    plan: &RepairPlan,
+    replacements: &[CanonicalEntity],
+    removals: &[EntityRef],
+    fence: Option<LeaseGrant>,
+) -> Result<ReplicaRepairReport, StoreError> {
+    if !matches!(plan.strategy, RepairStrategy::ReplaceEntities) {
+        return Err(StoreError::permanent(
+            "this repair plan requires snapshot bootstrap or operator quarantine",
+        ));
+    }
+    if replacements
+        .iter()
+        .map(|value| value.entity)
+        .chain(removals.iter().copied())
+        .any(|entity| !plan.affected_entities.contains(&entity))
+    {
+        return Err(StoreError::permanent(
+            "repair payload contains an entity outside the approved plan",
+        ));
+    }
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    if load_cursor_transaction(&mut transaction, plan.boundary.scope)? != Some(plan.boundary) {
+        return Err(StoreError::permanent(
+            "repair boundary no longer matches the local synchronization cursor",
+        ));
+    }
+    let rows = transaction
+        .query(
+            "SELECT operation_id FROM aequora_outbox
+              WHERE state IN ('pending', 'sending', 'retry')
+              ORDER BY enqueued_order",
+            (),
+        )
+        .map_err(stoolap_error)?;
+    let mut preserved_pending_operations = Vec::new();
+    for row in rows {
+        let operation = row
+            .map_err(stoolap_error)?
+            .get::<String>(0)
+            .map_err(stoolap_error)?;
+        preserved_pending_operations.push(
+            OperationId::from_str(&operation)
+                .map_err(|_| StoreError::permanent("invalid local operation ID"))?,
+        );
+    }
+    backend
+        .projection_hook
+        .begin_repair(&mut transaction, plan)?;
+    for entity in removals {
+        transaction
+            .execute(
+                "DELETE FROM aequora_local_entities
+                  WHERE scope_id = $1 AND entity_type = $2 AND entity_id = $3",
+                (
+                    plan.boundary.scope.to_string(),
+                    i64::from(entity.entity_type.get()),
+                    entity.entity_id.to_string(),
+                ),
+            )
+            .map_err(stoolap_error)?;
+        backend.projection_hook.remove_repair_entity(
+            &mut transaction,
+            plan.boundary.scope,
+            *entity,
+        )?;
+    }
+    for replacement in replacements {
+        let entity = SnapshotEntity {
+            entity: replacement.entity,
+            version: replacement.version,
+            payload: replacement.payload.clone(),
+            tombstone: replacement.tombstone,
+        };
+        put_entity(
+            &mut transaction,
+            plan.boundary.scope,
+            &entity,
+            "aequora_local_entities",
+        )?;
+        backend.projection_hook.apply_repair_entity(
+            &mut transaction,
+            plan.boundary.scope,
+            &entity,
+        )?;
+    }
+    backend
+        .projection_hook
+        .finish_repair(&mut transaction, plan)?;
+    transaction.commit().map_err(stoolap_error)?;
+    Ok(ReplicaRepairReport {
+        repair_id: plan.repair_id,
+        sync_cursor: plan.boundary,
+        preserved_pending_operations,
+    })
+}
+
 fn transition_operations(
     database: &Database,
     operations: &[OperationId],
     next: OutboxState,
+    fence: Option<LeaseGrant>,
 ) -> Result<(), StoreError> {
     let mut transaction = database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
     for operation in operations {
+        let operation_id = operation.to_string();
+        let encoded = transaction
+            .query_opt::<String, _>(
+                "SELECT envelope FROM aequora_outbox WHERE operation_id = $1 AND state IN ('pending', 'sending', 'retry')",
+                (&operation_id,),
+            )
+            .map_err(stoolap_error)?
+            .ok_or_else(|| StoreError::permanent("operation is missing or terminal"))?;
+        let envelope: OperationEnvelope = decode(&encoded)?;
+        let immutable_hash = hex::encode(
+            semantic_envelope_hash(&envelope)
+                .map_err(|error| StoreError::permanent(error.to_string()))?,
+        );
         transaction
             .execute(
-                "UPDATE aequora_outbox SET state = $1 WHERE operation_id = $2 AND state IN ('pending', 'sending', 'retry')",
-                (state_name(next), operation.to_string()),
+                "UPDATE aequora_outbox SET state = $1, ever_sent = 1, immutable_hash = $2 WHERE operation_id = $3 AND state IN ('pending', 'sending', 'retry')",
+                (state_name(next), &immutable_hash, &operation_id),
             )
             .map_err(stoolap_error)?;
     }
     transaction.commit().map_err(stoolap_error)
 }
 
+fn load_queue_entries(
+    database: &Database,
+    max_operations: usize,
+) -> Result<Vec<QueueEntry>, StoreError> {
+    let limit = i64::try_from(max_operations).unwrap_or(i64::MAX);
+    let rows = database
+        .query(
+            "SELECT enqueued_order, envelope, state, ever_sent, immutable_hash FROM aequora_outbox WHERE state IN ('pending', 'sending', 'retry') ORDER BY enqueued_order LIMIT $1",
+            (limit,),
+        )
+        .map_err(stoolap_error)?;
+    let mut entries = Vec::new();
+    for row in rows {
+        let row = row.map_err(stoolap_error)?;
+        let sequence: i64 = row.get(0).map_err(stoolap_error)?;
+        let encoded: String = row.get(1).map_err(stoolap_error)?;
+        let state: String = row.get(2).map_err(stoolap_error)?;
+        let ever_sent: bool = row.get(3).map_err(stoolap_error)?;
+        let stored_hash: Option<String> = row.get(4).map_err(stoolap_error)?;
+        let operation: OperationEnvelope = decode(&encoded)?;
+        let mutability = if state == "pending" && !ever_sent {
+            MutationMutability::MutableUnsent
+        } else {
+            MutationMutability::ImmutablePossiblyDelivered
+        };
+        let immutable_hash = if mutability == MutationMutability::ImmutablePossiblyDelivered {
+            match stored_hash {
+                Some(hash) => Some(decode_hash(&hash)?),
+                None => Some(
+                    semantic_envelope_hash(&operation)
+                        .map_err(|error| StoreError::permanent(error.to_string()))?,
+                ),
+            }
+        } else {
+            None
+        };
+        entries.push(QueueEntry {
+            local_sequence: LocalOperationSeq(
+                u64::try_from(sequence)
+                    .map_err(|_| StoreError::permanent("negative local operation sequence"))?,
+            ),
+            operation,
+            mutability,
+            immutable_hash,
+            cancellation: None,
+        });
+    }
+    Ok(entries)
+}
+
+fn decode_hash(value: &str) -> Result<[u8; 32], StoreError> {
+    let bytes = hex::decode(value)
+        .map_err(|error| StoreError::permanent(format!("invalid immutable hash: {error}")))?;
+    bytes
+        .try_into()
+        .map_err(|_| StoreError::permanent("invalid immutable hash length"))
+}
+
+fn compact_stoolap_outbox(
+    backend: &StoolapDatabase,
+    registry: &OptimizationRegistry,
+    max_operations: usize,
+    fence: Option<LeaseGrant>,
+) -> Result<QueueCompactionPlan, StoreError> {
+    let entries = load_queue_entries(&backend.database, max_operations)?;
+    let plan = plan_compaction(&entries, registry, max_operations)
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    for supersession in &plan.supersessions {
+        let old = supersession.old_operation_id.to_string();
+        let eligible = transaction
+            .query_opt::<i64, _>(
+                "SELECT enqueued_order FROM aequora_outbox WHERE operation_id = $1 AND state = 'pending' AND ever_sent = 0",
+                (&old,),
+            )
+            .map_err(stoolap_error)?
+            .is_some();
+        if !eligible {
+            return Err(StoreError::permanent(
+                "queue changed before compaction transaction committed",
+            ));
+        }
+        let reason = match supersession.reason {
+            SupersessionReason::ReplacedByLatest => "replaced_by_latest",
+            SupersessionReason::CanceledPair => "canceled_pair",
+        };
+        match supersession.new_operation_id {
+            Some(replacement) => transaction
+                .execute(
+                    "INSERT INTO aequora_supersession (old_operation_id, new_operation_id, reason) VALUES ($1, $2, $3)",
+                    (&old, replacement.to_string(), reason),
+                )
+                .map_err(stoolap_error)?,
+            None => transaction
+                .execute(
+                    "INSERT INTO aequora_supersession (old_operation_id, new_operation_id, reason) VALUES ($1, NULL, $2)",
+                    (&old, reason),
+                )
+                .map_err(stoolap_error)?,
+        };
+        transaction
+            .execute(
+                "DELETE FROM aequora_retry_schedule WHERE operation_id = $1",
+                (&old,),
+            )
+            .map_err(stoolap_error)?;
+        transaction
+            .execute(
+                "DELETE FROM aequora_outbox WHERE operation_id = $1",
+                (&old,),
+            )
+            .map_err(stoolap_error)?;
+    }
+    transaction.commit().map_err(stoolap_error)?;
+    Ok(plan)
+}
+
+fn rebase_stoolap_outbox(
+    backend: &StoolapDatabase,
+    registry: &OptimizationRegistry,
+    targets: &[RebaseTarget],
+    max_operations: usize,
+    fence: Option<LeaseGrant>,
+) -> Result<RebasePlan, StoreError> {
+    let entries = load_queue_entries(&backend.database, max_operations)?;
+    let plan = plan_rebase(&entries, targets, registry)
+        .map_err(|error| StoreError::permanent(error.to_string()))?;
+    let by_id = entries
+        .into_iter()
+        .map(|entry| (entry.operation.operation_id, entry.operation))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut transaction = backend.database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
+    for rewrite in &plan.rewrites {
+        let mut operation = by_id
+            .get(&rewrite.operation_id)
+            .cloned()
+            .ok_or_else(|| StoreError::permanent("rebase operation disappeared"))?;
+        operation.base_version = rewrite.new_base;
+        let encoded = encode(&operation)?;
+        let affected = transaction
+            .execute(
+                "UPDATE aequora_outbox SET envelope = $1 WHERE operation_id = $2 AND state = 'pending' AND ever_sent = 0",
+                (&encoded, rewrite.operation_id.to_string()),
+            )
+            .map_err(stoolap_error)?;
+        if affected != 1 {
+            return Err(StoreError::permanent(
+                "queue changed before rebase transaction committed",
+            ));
+        }
+        let old = rewrite.old_base.map(EntityVersion::get);
+        let new = rewrite.new_base.map(EntityVersion::get);
+        transaction
+            .execute(
+                "INSERT INTO aequora_rebase_history (operation_id, old_base_version, new_base_version) VALUES ($1, $2, $3)",
+                (
+                    rewrite.operation_id.to_string(),
+                    old.and_then(|value| i64::try_from(value).ok()),
+                    new.and_then(|value| i64::try_from(value).ok()),
+                ),
+            )
+            .map_err(stoolap_error)?;
+    }
+    transaction.commit().map_err(stoolap_error)?;
+    Ok(plan)
+}
+
 fn schedule_retry(
     database: &Database,
     operations: &[OperationId],
     next_attempt_unix_ms: u64,
+    fence: Option<LeaseGrant>,
 ) -> Result<(), StoreError> {
     let next_attempt = to_i64(next_attempt_unix_ms, "retry timestamp")?;
     let mut transaction = database.begin().map_err(stoolap_error)?;
+    if let Some(grant) = fence {
+        validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+    }
     for operation in operations {
         let operation = operation.to_string();
         let state = transaction
@@ -1171,10 +2329,21 @@ fn schedule_retry(
                 "terminal outbox operation cannot transition back to retry",
             ));
         }
+        let encoded = transaction
+            .query_one::<String, _>(
+                "SELECT envelope FROM aequora_outbox WHERE operation_id = $1",
+                (&operation,),
+            )
+            .map_err(stoolap_error)?;
+        let envelope: OperationEnvelope = decode(&encoded)?;
+        let immutable_hash = hex::encode(
+            semantic_envelope_hash(&envelope)
+                .map_err(|error| StoreError::permanent(error.to_string()))?,
+        );
         transaction
             .execute(
-                "UPDATE aequora_outbox SET state = 'retry' WHERE operation_id = $1",
-                (&operation,),
+                "UPDATE aequora_outbox SET state = 'retry', ever_sent = 1, immutable_hash = $1 WHERE operation_id = $2",
+                (&immutable_hash, &operation),
             )
             .map_err(stoolap_error)?;
         if transaction
@@ -1215,28 +2384,105 @@ fn load_cursor_transaction(
     transaction: &mut ApiTransaction,
     scope: SyncScopeId,
 ) -> Result<Option<Cursor>, StoreError> {
-    let sequence = transaction
-        .query_opt::<i64, _>(
-            "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
+    let mut rows = transaction
+        .query(
+            "SELECT sequence, authority_id, authority_epoch FROM aequora_cursors WHERE scope_id = $1",
             (scope.to_string(),),
         )
         .map_err(stoolap_error)?;
-    sequence
-        .map(|value| {
-            Ok(Cursor {
-                scope,
-                sequence: Sequence(
-                    u64::try_from(value)
-                        .map_err(|_| StoreError::permanent("negative Stoolap cursor sequence"))?,
+    let Some(row) = rows.next() else {
+        return Ok(None);
+    };
+    cursor_from_stoolap_row(scope, &row.map_err(stoolap_error)?).map(Some)
+}
+
+fn validate_authority_trust(
+    transaction: &mut ApiTransaction,
+    cursor: Cursor,
+) -> Result<(), StoreError> {
+    if cursor.authority_id == AuthorityId::LEGACY_UNBOUND {
+        return Ok(());
+    }
+    let mut rows = transaction
+        .query(
+            "SELECT authority_id, highest_epoch FROM aequora_authority_trust",
+            (),
+        )
+        .map_err(stoolap_error)?;
+    let Some(row) = rows.next() else {
+        transaction
+            .execute(
+                "INSERT INTO aequora_authority_trust (singleton, authority_id, highest_epoch) VALUES (1, $1, $2)",
+                (
+                    cursor.authority_id.to_string(),
+                    to_i64(cursor.authority_epoch.get(), "trusted authority epoch")?,
                 ),
-            })
-        })
-        .transpose()
+            )
+            .map_err(stoolap_error)?;
+        return Ok(());
+    };
+    let row = row.map_err(stoolap_error)?;
+    let trusted_id: String = row.get(0).map_err(stoolap_error)?;
+    let trusted_epoch: i64 = row.get(1).map_err(stoolap_error)?;
+    let trusted_id = parse_id::<AuthorityId>(&trusted_id, "trusted authority ID")?;
+    let trusted_epoch = u64::try_from(trusted_epoch)
+        .map_err(|_| StoreError::permanent("invalid trusted authority epoch"))?;
+    if trusted_id != cursor.authority_id {
+        return Err(StoreError::permanent(
+            "Stoolap local store rejected a different authority identity",
+        ));
+    }
+    if cursor.authority_epoch.get() < trusted_epoch {
+        return Err(StoreError::permanent(
+            "Stoolap local store detected authority epoch rollback",
+        ));
+    }
+    if cursor.authority_epoch.get() > trusted_epoch {
+        transaction
+            .execute(
+                "UPDATE aequora_authority_trust SET highest_epoch = $1 WHERE singleton = 1 AND authority_id = $2",
+                (
+                    to_i64(cursor.authority_epoch.get(), "trusted authority epoch")?,
+                    cursor.authority_id.to_string(),
+                ),
+            )
+            .map_err(stoolap_error)?;
+    }
+    if rows.next().is_some() {
+        return Err(StoreError::permanent(
+            "Stoolap local store contains multiple trusted authorities",
+        ));
+    }
+    Ok(())
+}
+
+fn cursor_from_stoolap_row(
+    scope: SyncScopeId,
+    row: &stoolap::api::ResultRow,
+) -> Result<Cursor, StoreError> {
+    let sequence: i64 = row.get(0).map_err(stoolap_error)?;
+    let authority_id: String = row.get(1).map_err(stoolap_error)?;
+    let authority_epoch: i64 = row.get(2).map_err(stoolap_error)?;
+    Ok(Cursor::new(
+        parse_id::<AuthorityId>(&authority_id, "authority ID")?,
+        AuthorityEpoch::new(
+            u64::try_from(authority_epoch)
+                .map_err(|_| StoreError::permanent("invalid Stoolap authority epoch"))?,
+        )
+        .map_err(|error| StoreError::permanent(error.to_string()))?,
+        scope,
+        Sequence(
+            u64::try_from(sequence)
+                .map_err(|_| StoreError::permanent("negative Stoolap cursor sequence"))?,
+        ),
+    ))
 }
 
 fn set_cursor(transaction: &mut ApiTransaction, cursor: Cursor) -> Result<(), StoreError> {
     let scope = cursor.scope.to_string();
     let sequence = to_i64(cursor.sequence.0, "cursor sequence")?;
+    let authority_id = cursor.authority_id.to_string();
+    let authority_epoch = to_i64(cursor.authority_epoch.get(), "cursor authority epoch")?;
     if transaction
         .query_opt::<i64, _>(
             "SELECT sequence FROM aequora_cursors WHERE scope_id = $1",
@@ -1247,15 +2493,15 @@ fn set_cursor(transaction: &mut ApiTransaction, cursor: Cursor) -> Result<(), St
     {
         transaction
             .execute(
-                "UPDATE aequora_cursors SET sequence = $1 WHERE scope_id = $2",
-                (sequence, &scope),
+                "UPDATE aequora_cursors SET sequence = $1, authority_id = $2, authority_epoch = $3 WHERE scope_id = $4",
+                (sequence, &authority_id, authority_epoch, &scope),
             )
             .map_err(stoolap_error)?;
     } else {
         transaction
             .execute(
-                "INSERT INTO aequora_cursors (scope_id, sequence) VALUES ($1, $2)",
-                (&scope, sequence),
+                "INSERT INTO aequora_cursors (scope_id, sequence, authority_id, authority_epoch) VALUES ($1, $2, $3, $4)",
+                (&scope, sequence, &authority_id, authority_epoch),
             )
             .map_err(stoolap_error)?;
     }
@@ -1347,7 +2593,7 @@ fn snapshot_progress_transaction(
 ) -> Result<Option<SnapshotProgress>, StoreError> {
     let mut rows = transaction
         .query(
-            "SELECT snapshot_id, cursor_sequence, next_offset FROM aequora_snapshot_progress WHERE scope_id = $1",
+            "SELECT snapshot_id, cursor_sequence, next_offset, authority_id, authority_epoch FROM aequora_snapshot_progress WHERE scope_id = $1",
             (scope.to_string(),),
         )
         .map_err(stoolap_error)?;
@@ -1358,15 +2604,23 @@ fn snapshot_progress_transaction(
     let snapshot: String = row.get(0).map_err(stoolap_error)?;
     let cursor: i64 = row.get(1).map_err(stoolap_error)?;
     let offset: i64 = row.get(2).map_err(stoolap_error)?;
+    let authority_id: String = row.get(3).map_err(stoolap_error)?;
+    let authority_epoch: i64 = row.get(4).map_err(stoolap_error)?;
     Ok(Some(SnapshotProgress {
         snapshot_id: parse_id::<SnapshotId>(&snapshot, "snapshot ID")?,
-        cursor: Cursor {
+        cursor: Cursor::new(
+            parse_id::<AuthorityId>(&authority_id, "snapshot authority ID")?,
+            AuthorityEpoch::new(
+                u64::try_from(authority_epoch)
+                    .map_err(|_| StoreError::permanent("invalid snapshot authority epoch"))?,
+            )
+            .map_err(|error| StoreError::permanent(error.to_string()))?,
             scope,
-            sequence: Sequence(
+            Sequence(
                 u64::try_from(cursor)
                     .map_err(|_| StoreError::permanent("negative snapshot cursor"))?,
             ),
-        },
+        ),
         next_offset: u64::try_from(offset)
             .map_err(|_| StoreError::permanent("negative snapshot offset"))?,
     }))
@@ -1380,18 +2634,23 @@ fn put_snapshot_progress(
     let snapshot = progress.snapshot_id.to_string();
     let cursor = to_i64(progress.cursor.sequence.0, "snapshot cursor")?;
     let offset = to_i64(progress.next_offset, "snapshot offset")?;
+    let authority_id = progress.cursor.authority_id.to_string();
+    let authority_epoch = to_i64(
+        progress.cursor.authority_epoch.get(),
+        "snapshot authority epoch",
+    )?;
     if snapshot_progress_transaction(transaction, progress.cursor.scope)?.is_some() {
         transaction
             .execute(
-                "UPDATE aequora_snapshot_progress SET snapshot_id = $1, cursor_sequence = $2, next_offset = $3 WHERE scope_id = $4",
-                (&snapshot, cursor, offset, &scope),
+                "UPDATE aequora_snapshot_progress SET snapshot_id = $1, cursor_sequence = $2, next_offset = $3, authority_id = $4, authority_epoch = $5 WHERE scope_id = $6",
+                (&snapshot, cursor, offset, &authority_id, authority_epoch, &scope),
             )
             .map_err(stoolap_error)?;
     } else {
         transaction
             .execute(
-                "INSERT INTO aequora_snapshot_progress (scope_id, snapshot_id, cursor_sequence, next_offset) VALUES ($1, $2, $3, $4)",
-                (&scope, &snapshot, cursor, offset),
+                "INSERT INTO aequora_snapshot_progress (scope_id, snapshot_id, cursor_sequence, next_offset, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6)",
+                (&scope, &snapshot, cursor, offset, &authority_id, authority_epoch),
             )
             .map_err(stoolap_error)?;
     }
@@ -1422,6 +2681,18 @@ impl<B: TransactionCapabilityProvider> TransactionCapabilityProvider for Stoolap
     }
 }
 
+impl<B: IntegrityCapabilityProvider> IntegrityCapabilityProvider for StoolapStore<B> {
+    fn integrity_support(&self) -> IntegritySupport {
+        self.backend.integrity_support()
+    }
+}
+
+impl<B: AdapterManifestProvider> AdapterManifestProvider for StoolapStore<B> {
+    fn adapter_manifest(&self) -> AdapterManifest {
+        self.backend.adapter_manifest()
+    }
+}
+
 #[async_trait]
 impl<B: StoolapBackend> OutboxStore for StoolapStore<B> {
     async fn pending_operations(&self, limit: usize) -> Result<Vec<OperationEnvelope>, StoreError> {
@@ -1429,6 +2700,48 @@ impl<B: StoolapBackend> OutboxStore for StoolapStore<B> {
     }
     async fn append_operation(&self, operation: OperationEnvelope) -> Result<(), StoreError> {
         self.backend.append_operation(operation).await
+    }
+
+    async fn compact_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        self.backend.compact_outbox(registry, max_operations).await
+    }
+
+    async fn compact_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<QueueCompactionPlan, StoreError> {
+        self.backend
+            .compact_outbox_fenced(registry, max_operations, fence)
+            .await
+    }
+
+    async fn rebase_outbox(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+    ) -> Result<RebasePlan, StoreError> {
+        self.backend
+            .rebase_outbox(registry, targets, max_operations)
+            .await
+    }
+
+    async fn rebase_outbox_fenced(
+        &self,
+        registry: &OptimizationRegistry,
+        targets: &[RebaseTarget],
+        max_operations: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<RebasePlan, StoreError> {
+        self.backend
+            .rebase_outbox_fenced(registry, targets, max_operations, fence)
+            .await
     }
 }
 
@@ -1438,6 +2751,14 @@ impl<B: StoolapBackend> OutboxStateStore for StoolapStore<B> {
         self.backend.mark_sending(operations).await
     }
 
+    async fn mark_sending_fenced(
+        &self,
+        operations: &[OperationId],
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        self.backend.mark_sending_fenced(operations, fence).await
+    }
+
     async fn mark_retry(
         &self,
         operations: &[OperationId],
@@ -1445,6 +2766,17 @@ impl<B: StoolapBackend> OutboxStateStore for StoolapStore<B> {
     ) -> Result<(), StoreError> {
         self.backend
             .mark_retry(operations, next_attempt_unix_ms)
+            .await
+    }
+
+    async fn mark_retry_fenced(
+        &self,
+        operations: &[OperationId],
+        next_attempt_unix_ms: u64,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        self.backend
+            .mark_retry_fenced(operations, next_attempt_unix_ms, fence)
             .await
     }
 
@@ -1494,13 +2826,68 @@ impl<B: StoolapBackend> CursorStore for StoolapStore<B> {
 }
 
 #[async_trait]
+impl<B: StoolapBackend> LocalIntegrityStore for StoolapStore<B> {
+    async fn capture_local_integrity(
+        &self,
+        scope: SyncScopeId,
+        boundary: Cursor,
+        generation: IntegrityGeneration,
+        scheme: PartitionScheme,
+        max_entities: usize,
+    ) -> Result<IntegritySnapshot, StoreError> {
+        self.backend
+            .capture_local_integrity(scope, boundary, generation, scheme, max_entities)
+            .await
+    }
+
+    async fn repair_local_replica(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        self.backend
+            .repair_local_replica(plan, replacements, removals)
+            .await
+    }
+
+    async fn repair_local_replica_fenced(
+        &self,
+        plan: &RepairPlan,
+        replacements: &[CanonicalEntity],
+        removals: &[EntityRef],
+        fence: Option<LeaseGrant>,
+    ) -> Result<ReplicaRepairReport, StoreError> {
+        self.backend
+            .repair_local_replica_fenced(plan, replacements, removals, fence)
+            .await
+    }
+}
+
+#[async_trait]
 impl<B: StoolapBackend> ReconciliationStore for StoolapStore<B> {
     async fn reconcile(&self, response: &SyncResponse) -> Result<(), StoreError> {
         self.backend.reconcile(response).await
     }
 
+    async fn reconcile_fenced(
+        &self,
+        response: &SyncResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        self.backend.reconcile_fenced(response, fence).await
+    }
+
     async fn stage_snapshot(&self, response: &BootstrapResponse) -> Result<(), StoreError> {
         self.backend.stage_snapshot(response).await
+    }
+
+    async fn stage_snapshot_fenced(
+        &self,
+        response: &BootstrapResponse,
+        fence: Option<LeaseGrant>,
+    ) -> Result<(), StoreError> {
+        self.backend.stage_snapshot_fenced(response, fence).await
     }
 
     async fn snapshot_progress(
@@ -1508,6 +2895,82 @@ impl<B: StoolapBackend> ReconciliationStore for StoolapStore<B> {
         scope: SyncScopeId,
     ) -> Result<Option<SnapshotProgress>, StoreError> {
         self.backend.snapshot_progress(scope).await
+    }
+}
+
+#[async_trait]
+impl<B> LocalCoordinationStore for StoolapStore<B>
+where
+    B: StoolapBackend + LocalCoordinationStore,
+{
+    fn coordination_support(&self) -> LocalCoordinationSupport {
+        self.backend.coordination_support()
+    }
+
+    async fn coordination_snapshot(&self) -> Result<CoordinationSnapshot, StoreError> {
+        self.backend.coordination_snapshot().await
+    }
+
+    async fn acquire_lease(&self, request: LeaseRequest) -> Result<LeaseGrant, StoreError> {
+        self.backend.acquire_lease(request).await
+    }
+
+    async fn renew_lease(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<LeaseGrant, StoreError> {
+        self.backend.renew_lease(grant, now_unix_ms, ttl_ms).await
+    }
+
+    async fn release_lease(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        self.backend.release_lease(grant, now_unix_ms).await
+    }
+
+    async fn validate_fence(&self, grant: LeaseGrant, now_unix_ms: u64) -> Result<(), StoreError> {
+        self.backend.validate_fence(grant, now_unix_ms).await
+    }
+
+    async fn advance_store_generation(
+        &self,
+        grant: LeaseGrant,
+        now_unix_ms: u64,
+    ) -> Result<LocalStoreGeneration, StoreError> {
+        self.backend
+            .advance_store_generation(grant, now_unix_ms)
+            .await
+    }
+}
+
+#[async_trait]
+impl<B> ScopeStateStore for StoolapStore<B>
+where
+    B: StoolapBackend + ScopeStateStore,
+{
+    async fn load_scope_state(&self) -> Result<LocalScopeState, StoreError> {
+        self.backend.load_scope_state().await
+    }
+
+    async fn install_subscription(&self, subscription: &Subscription) -> Result<(), StoreError> {
+        self.backend.install_subscription(subscription).await
+    }
+
+    async fn apply_scope_transition(
+        &self,
+        transition: &ScopeTransition,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        self.backend.apply_scope_transition(transition).await
+    }
+
+    async fn apply_scope_transition_fenced(
+        &self,
+        transition: &ScopeTransition,
+        fence: Option<LeaseGrant>,
+    ) -> Result<ScopeTransitionOutcome, StoreError> {
+        self.backend
+            .apply_scope_transition_fenced(transition, fence)
+            .await
     }
 }
 
@@ -1519,10 +2982,13 @@ mod tests {
         OperationRejection, RejectionCode, RemoteChange, SyncDirective,
     };
     use aequora_store::StoreErrorKind;
-    use aequora_testkit::contracts::verify_local_store;
+    use aequora_testkit::{
+        InMemoryLocalStore,
+        contracts::{scope_state_contract_fixture, verify_local_store, verify_scope_state_store},
+    };
     use aequora_types::{
-        ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp, NodeId,
-        ProtocolVersion, SchemaVersion, TenantId,
+        ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId,
+        HybridTimestamp, LineageRef, NodeId, ProtocolVersion, SchemaVersion, TenantId,
     };
     use tempfile::tempdir;
 
@@ -1554,11 +3020,266 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn stoolap_passes_scope_state_contract() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let store = StoolapStore::new(backend);
+        let (subscription, transition, operation) =
+            scope_state_contract_fixture().unwrap_or_else(|error| panic!("{error}"));
+        verify_scope_state_store(&store, subscription, transition, operation)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+
     fn entity() -> EntityRef {
         EntityRef {
             entity_type: EntityType::new(1).unwrap_or_else(|error| panic!("{error}")),
             entity_id: EntityId::new(),
         }
+    }
+
+    fn expected_integrity_snapshot(
+        scope: SyncScopeId,
+        boundary: Cursor,
+        entity: EntityRef,
+        payload: &[u8],
+    ) -> aequora_integrity::IntegritySnapshot {
+        aequora_integrity::IntegritySnapshot::build(
+            scope,
+            boundary,
+            aequora_integrity::CURRENT_INTEGRITY_GENERATION,
+            PartitionScheme::new(8).unwrap_or_else(|error| panic!("{error}")),
+            [CanonicalEntity {
+                entity,
+                version: EntityVersion::INITIAL,
+                hash_schema: CURRENT_HASH_SCHEMA,
+                payload: payload.to_vec(),
+                tombstone: false,
+            }],
+            100,
+        )
+        .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn replace_latest_registry(kind: u16) -> OptimizationRegistry {
+        let mut registry = OptimizationRegistry::default();
+        registry.register(
+            aequora_protocol::OperationKind(kind),
+            aequora_queue::OperationOptimization {
+                compaction: aequora_queue::CompactionPolicy::ReplaceLatest,
+                rebase: aequora_queue::RebasePolicy::ReapplyIntent,
+                operation_class: aequora_queue::OperationClassId(kind),
+                ..aequora_queue::OperationOptimization::default()
+            },
+        );
+        registry
+    }
+
+    fn same_lineage_operations(entity: EntityRef, count: usize) -> Vec<OperationEnvelope> {
+        let mut operations = (0..count).map(|_| operation(entity)).collect::<Vec<_>>();
+        if let Some(lineage) = operations
+            .first()
+            .map(|operation| operation.metadata.lineage)
+        {
+            for operation in &mut operations {
+                operation.metadata.lineage = lineage;
+            }
+        }
+        operations
+    }
+
+    fn lease_request(
+        owner_id: aequora_coordination::ProcessInstanceId,
+        kind: LeaseKind,
+        now_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> LeaseRequest {
+        LeaseRequest {
+            owner_id,
+            kind,
+            now_unix_ms,
+            ttl_ms,
+        }
+    }
+
+    fn empty_sync_response(scope: SyncScopeId) -> SyncResponse {
+        SyncResponse {
+            protocol: ProtocolVersion::V1,
+            directive: SyncDirective::Continue,
+            acknowledged: Vec::new(),
+            rejected: Vec::new(),
+            conflicts: Vec::new(),
+            changes: Vec::new(),
+            next_cursor: Cursor::legacy(scope, Sequence(0)),
+            has_more: false,
+            server_time: HybridTimestamp {
+                physical_ms: 1,
+                logical: 0,
+                node: NodeId::new(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn durable_authority_trust_rejects_epoch_rollback_and_identity_change() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let scope = SyncScopeId::new();
+        let trusted = AuthorityId::new();
+        let other = AuthorityId::new();
+        let epoch_two = AuthorityEpoch::new(2).unwrap_or_else(|error| panic!("{error}"));
+        let mut response = empty_sync_response(scope);
+        response.next_cursor = Cursor::new(trusted, epoch_two, scope, Sequence(0));
+        backend
+            .reconcile(&response)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        response.next_cursor = Cursor::new(trusted, AuthorityEpoch::INITIAL, scope, Sequence(0));
+        assert!(backend.reconcile(&response).await.is_err());
+
+        response.next_cursor = Cursor::new(other, epoch_two, scope, Sequence(0));
+        assert!(backend.reconcile(&response).await.is_err());
+        assert_eq!(
+            backend.load_cursor(scope).await,
+            Ok(Some(Cursor::new(trusted, epoch_two, scope, Sequence(0))))
+        );
+    }
+
+    #[test]
+    fn simultaneous_stoolap_candidates_commit_exactly_one_lease_owner() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let now = unix_time_millis();
+        let results = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..2 {
+                let candidate = backend.clone();
+                let barrier = Arc::clone(&barrier);
+                handles.push(scope.spawn(move || {
+                    barrier.wait();
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap_or_else(|error| panic!("{error}"))
+                        .block_on(candidate.acquire_lease(lease_request(
+                            aequora_coordination::ProcessInstanceId::new(),
+                            LeaseKind::SyncCoordinator,
+                            now,
+                            10_000,
+                        )))
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|_| panic!("candidate panicked"))
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn stoolap_passes_public_local_coordination_contract() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let report = aequora_testkit::contracts::verify_local_coordination(&backend)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(report.fencing_token.0 >= 3);
+        assert!(report.store_generation.0 > 1);
+    }
+
+    #[tokio::test]
+    async fn stoolap_crash_takeover_fences_old_commits_and_coordinates_generation() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let first_snapshot = backend
+            .coordination_snapshot()
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let now = unix_time_millis();
+        let first = backend
+            .acquire_lease(lease_request(
+                aequora_coordination::ProcessInstanceId::new(),
+                LeaseKind::SyncCoordinator,
+                now,
+                1_000,
+            ))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let pending = operation(entity());
+        backend
+            .append_operation(pending.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let takeover_at = now.saturating_add(1_000);
+        let second = backend
+            .acquire_lease(lease_request(
+                aequora_coordination::ProcessInstanceId::new(),
+                LeaseKind::SyncCoordinator,
+                takeover_at,
+                1_000,
+            ))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(second.fencing_token > first.fencing_token);
+        assert!(
+            backend
+                .mark_sending_fenced(&[pending.operation_id], Some(first))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            backend.operation_state(pending.operation_id).await,
+            Ok(Some(OutboxState::Pending))
+        );
+        let scope = SyncScopeId::new();
+        assert!(
+            backend
+                .reconcile_fenced(&empty_sync_response(scope), Some(first))
+                .await
+                .is_err()
+        );
+        assert_eq!(backend.load_cursor(scope).await, Ok(None));
+
+        let maintenance_at = takeover_at.saturating_add(1_000);
+        let maintenance = backend
+            .acquire_lease(lease_request(
+                aequora_coordination::ProcessInstanceId::new(),
+                LeaseKind::Maintenance,
+                maintenance_at,
+                1_000,
+            ))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let generation = backend
+            .advance_store_generation(maintenance, maintenance_at)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(generation > first_snapshot.store_generation);
+        assert!(
+            backend
+                .validate_fence(second, maintenance_at)
+                .await
+                .is_err()
+        );
+        let updated_maintenance = LeaseGrant {
+            store_generation: generation,
+            ..maintenance
+        };
+        backend
+            .release_lease(updated_maintenance, maintenance_at)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let final_snapshot = backend
+            .coordination_snapshot()
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(final_snapshot.store_id, first_snapshot.store_id);
+        assert_eq!(final_snapshot.store_generation, generation);
     }
 
     #[derive(Clone, Copy)]
@@ -1798,6 +3519,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stoolap_and_reference_store_have_identical_local_contract_outcomes() {
+        let operation = operation(entity());
+        let server_time = operation.created_at;
+        let scope = SyncScopeId::new();
+        let reference = verify_local_store(
+            &InMemoryLocalStore::default(),
+            operation.clone(),
+            scope,
+            operation.created_at,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("reference contract failed: {error}"));
+        let stoolap = verify_local_store(
+            &StoolapStore::new(
+                StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}")),
+            ),
+            operation,
+            scope,
+            server_time,
+        )
+        .await;
+        let stoolap = stoolap.unwrap_or_else(|error| panic!("Stoolap contract failed: {error}"));
+        assert_eq!(stoolap, reference);
+    }
+
+    #[tokio::test]
     async fn durable_stats_include_terminal_work_needing_attention() {
         let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
         let store = StoolapStore::new(backend);
@@ -1831,10 +3578,7 @@ mod tests {
                     message: "attendance changed on another device".into(),
                 }],
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(scope, Sequence(0)),
                 has_more: false,
                 server_time: rejected.created_at,
             })
@@ -1920,11 +3664,18 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         let scope = SyncScopeId::new();
+        let event_id = EventId::new();
+        let lineage = operation
+            .metadata
+            .lineage
+            .derived(LineageRef::Operation(operation.operation_id));
         let response = SyncResponse {
             protocol: ProtocolVersion::V1,
             directive: SyncDirective::Continue,
             acknowledged: vec![OperationAck {
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity_version: EntityVersion::INITIAL,
                 sequence: Sequence(1),
                 duplicate: false,
@@ -1936,16 +3687,15 @@ mod tests {
                 scope_id: scope,
                 sequence: Sequence(1),
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity,
                 version: EntityVersion::INITIAL,
                 change_kind: ChangeKind::Upsert,
                 payload: operation.payload.clone(),
                 timestamp: operation.created_at,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(u64::MAX),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(u64::MAX)),
             has_more: false,
             server_time: operation.created_at,
         };
@@ -1991,11 +3741,18 @@ mod tests {
         drop(backend);
 
         let backend = reopen_and_release_retry(&dsn, &operation, retry_deadline).await;
+        let event_id = EventId::new();
+        let lineage = operation
+            .metadata
+            .lineage
+            .derived(LineageRef::Operation(operation.operation_id));
         let response = SyncResponse {
             protocol: ProtocolVersion::V1,
             directive: SyncDirective::Continue,
             acknowledged: vec![OperationAck {
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity_version: EntityVersion::INITIAL,
                 sequence: Sequence(1),
                 duplicate: false,
@@ -2007,16 +3764,15 @@ mod tests {
                 scope_id: scope,
                 sequence: Sequence(1),
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity,
                 version: EntityVersion::INITIAL,
                 change_kind: ChangeKind::Upsert,
                 payload: operation.payload.clone(),
                 timestamp: operation.created_at,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(1)),
             has_more: false,
             server_time: operation.created_at,
         };
@@ -2062,10 +3818,7 @@ mod tests {
         let installed = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            cursor: Cursor::legacy(scope, Sequence(1)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity,
@@ -2088,10 +3841,7 @@ mod tests {
         let replacement = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(u64::MAX),
-            },
+            cursor: Cursor::legacy(scope, Sequence(u64::MAX)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity,
@@ -2150,10 +3900,7 @@ mod tests {
         let replacement = BootstrapResponse {
             protocol: ProtocolVersion::V1,
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
-                scope,
-                sequence: Sequence(4),
-            },
+            cursor: Cursor::legacy(scope, Sequence(4)),
             offset: 0,
             entities: vec![SnapshotEntity {
                 entity: entity(),
@@ -2204,11 +3951,18 @@ mod tests {
             logical: 0,
             node: NodeId::new(),
         };
+        let event_id = EventId::new();
+        let lineage = operation
+            .metadata
+            .lineage
+            .derived(LineageRef::Operation(operation.operation_id));
         let response = SyncResponse {
             protocol: ProtocolVersion::V1,
             directive: SyncDirective::Continue,
             acknowledged: vec![OperationAck {
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity_version: EntityVersion::INITIAL,
                 sequence: Sequence(1),
                 duplicate: false,
@@ -2220,16 +3974,15 @@ mod tests {
                 scope_id: scope,
                 sequence: Sequence(1),
                 operation_id: operation.operation_id,
+                event_id,
+                lineage,
                 entity,
                 version: EntityVersion::INITIAL,
                 change_kind: ChangeKind::Upsert,
                 payload: operation.payload.clone(),
                 timestamp,
             }],
-            next_cursor: Cursor {
-                scope,
-                sequence: Sequence(1),
-            },
+            next_cursor: Cursor::legacy(scope, Sequence(1)),
             has_more: false,
             server_time: timestamp,
         };
@@ -2307,10 +4060,179 @@ mod tests {
         assert_eq!(backend.load_cursor(revoked_scope).await, Ok(None));
         assert_eq!(
             backend.load_cursor(retained_scope).await,
-            Ok(Some(Cursor {
-                scope: retained_scope,
-                sequence: Sequence(4),
-            }))
+            Ok(Some(Cursor::legacy(retained_scope, Sequence(4))))
+        );
+    }
+
+    #[tokio::test]
+    async fn integrity_repair_is_atomic_and_preserves_pending_operations() {
+        let store = StoolapStore::new(
+            StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}")),
+        );
+        let scope = SyncScopeId::new();
+        let entity = entity();
+        let boundary = Cursor::legacy(scope, Sequence(7));
+        store
+            .stage_snapshot(&BootstrapResponse {
+                protocol: ProtocolVersion::V1,
+                snapshot_id: SnapshotId::new(),
+                cursor: boundary,
+                offset: 0,
+                entities: vec![SnapshotEntity {
+                    entity,
+                    version: EntityVersion::INITIAL,
+                    payload: b"before-repair".to_vec(),
+                    tombstone: false,
+                }],
+                next_offset: 1,
+                has_more: false,
+                server_time: HybridTimestamp {
+                    physical_ms: 7,
+                    logical: 0,
+                    node: NodeId::new(),
+                },
+            })
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let pending = operation(entity);
+        store
+            .append_operation(pending.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let before = store
+            .capture_local_integrity(
+                scope,
+                boundary,
+                aequora_integrity::CURRENT_INTEGRITY_GENERATION,
+                PartitionScheme::new(8).unwrap_or_else(|error| panic!("{error}")),
+                100,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let expected_before =
+            expected_integrity_snapshot(scope, boundary, entity, b"before-repair");
+        assert_eq!(before, expected_before);
+        let plan = RepairPlan {
+            repair_id: aequora_types::RepairId::new(),
+            boundary,
+            affected_entities: vec![entity],
+            strategy: RepairStrategy::ReplaceEntities,
+        };
+        let report = store
+            .repair_local_replica(
+                &plan,
+                &[CanonicalEntity {
+                    entity,
+                    version: EntityVersion::INITIAL,
+                    hash_schema: CURRENT_HASH_SCHEMA,
+                    payload: b"after-repair".to_vec(),
+                    tombstone: false,
+                }],
+                &[],
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let after = store
+            .capture_local_integrity(
+                scope,
+                boundary,
+                aequora_integrity::CURRENT_INTEGRITY_GENERATION,
+                PartitionScheme::new(8).unwrap_or_else(|error| panic!("{error}")),
+                100,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let expected_after = expected_integrity_snapshot(scope, boundary, entity, b"after-repair");
+
+        assert_ne!(before.manifest.root_hash, after.manifest.root_hash);
+        assert_eq!(after, expected_after);
+        assert_eq!(report.sync_cursor, boundary);
+        assert_eq!(
+            report.preserved_pending_operations,
+            vec![pending.operation_id]
+        );
+        assert_eq!(
+            store
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            vec![pending]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_compaction_and_rebase_are_atomic_and_never_rewrite_sent_intent() {
+        let store = StoolapStore::new(
+            StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}")),
+        );
+        let entity = entity();
+        let operations = same_lineage_operations(entity, 3);
+        for operation in &operations {
+            store
+                .append_operation(operation.clone())
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+        let registry = replace_latest_registry(operations[0].operation_kind.0);
+        let plan = store
+            .compact_outbox(&registry, 10)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(plan.operations_after, 1);
+        assert_eq!(plan.supersessions.len(), 2);
+        assert_eq!(
+            store
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            vec![operations[2].clone()]
+        );
+
+        store
+            .mark_sending(&[operations[2].operation_id])
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let target = RebaseTarget {
+            entity,
+            version: EntityVersion::INITIAL.checked_next(),
+            changed_fields: std::collections::BTreeSet::new(),
+        };
+        let rebase = store
+            .rebase_outbox(&registry, &[target], 10)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(rebase.rewrites.is_empty());
+        assert_eq!(rebase.immutable_skipped, vec![operations[2].operation_id]);
+    }
+
+    #[tokio::test]
+    async fn failed_compaction_transaction_restores_the_complete_original_queue() {
+        let store = StoolapStore::new(
+            StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}")),
+        );
+        let operations = same_lineage_operations(entity(), 3);
+        for operation in &operations {
+            store
+                .append_operation(operation.clone())
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+        store
+            .backend()
+            .database
+            .execute(
+                "INSERT INTO aequora_supersession (old_operation_id, new_operation_id, reason) VALUES ($1, NULL, 'fixture')",
+                (operations[1].operation_id.to_string(),),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        let registry = replace_latest_registry(operations[0].operation_kind.0);
+        assert!(store.compact_outbox(&registry, 10).await.is_err());
+        assert_eq!(
+            store
+                .pending_operations(10)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            operations
         );
     }
 }
