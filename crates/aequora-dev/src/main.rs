@@ -6,6 +6,10 @@ use aequora_audit::{ChainedAuditRecord, verify_chain};
 use aequora_coordination::CoordinationSnapshot;
 use aequora_crypto::{CryptoPolicy, KeyRegistryManifest, PublicKeyBytes, TrustedKeyRegistry};
 use aequora_governance::ErasurePlan;
+use aequora_performance::{
+    PerformancePolicy, PerformanceProfile, PerformanceReport, RegressionPolicy, WorkloadManifest,
+    compare_reports,
+};
 use aequora_profile::{ConsistencyProfile, ConsistencyProfileKind, ProfileManifest};
 use aequora_replay::{ReplayBundle, ReplayStateRef};
 use aequora_scheduler::SchedulerState;
@@ -17,6 +21,43 @@ use guppy::{
 };
 
 const BOUNDARY_RULES: &[(&str, &[&str])] = &[
+    (
+        "aequora-performance",
+        &[
+            "aequora-admission",
+            "aequora-axum",
+            "aequora-client",
+            "aequora-compute",
+            "aequora-http",
+            "aequora-quic",
+            "aequora-server",
+            "aequora-store-postgres",
+            "aequora-store-stoolap",
+            "axum",
+            "rayon",
+            "reqwest",
+            "sqlx",
+            "stoolap",
+            "tokio",
+        ],
+    ),
+    (
+        "aequora-admission",
+        &[
+            "aequora-axum",
+            "aequora-client",
+            "aequora-http",
+            "aequora-quic",
+            "aequora-server",
+            "aequora-store-postgres",
+            "aequora-store-stoolap",
+            "axum",
+            "reqwest",
+            "sqlx",
+            "stoolap",
+            "tokio",
+        ],
+    ),
     ("aequora-store-stoolap", &["aequora-store-postgres", "sqlx"]),
     (
         "aequora-store-postgres",
@@ -179,6 +220,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         Some("audit") => print_audit(arguments.next().as_deref(), arguments.next()),
         Some("governance") => print_governance(arguments.next().as_deref(), arguments.next()),
         Some("crypto") => print_crypto(arguments.next().as_deref(), arguments.next()),
+        Some("performance") => print_performance(
+            arguments.next().as_deref(),
+            arguments.next(),
+            arguments.next(),
+        ),
         Some("help" | "--help" | "-h") => {
             print_help();
             Ok(())
@@ -215,6 +261,115 @@ fn print_help() {
     println!("aequora-dev governance verify <erasure-plan.ron>");
     println!("aequora-dev crypto policy");
     println!("aequora-dev crypto registry-verify <root-and-registry.ron>");
+    println!("aequora-dev performance explain");
+    println!("aequora-dev performance profile <mobile|desktop|server|high-throughput>");
+    println!("aequora-dev performance workload-verify <workload.ron>");
+    println!("aequora-dev performance report-verify <report.ron>");
+    println!("aequora-dev performance compare <baseline.ron> <candidate.ron>");
+}
+
+fn print_performance(
+    action: Option<&str>,
+    first: Option<String>,
+    second: Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    match action {
+        Some("explain") => {
+            println!("ownership: bounded frame -> borrowed validation -> owned domain fields");
+            println!("execution: Tokio I/O; admitted bounded Rayon CPU; no blocking I/O workers");
+            println!("large-data: snapshot/blob/export chunks stream directly to durable staging");
+            println!("client: bounded reconciliation -> local database -> paged reactive view");
+            println!("evidence: fixed-seed workload + environment + phase report + correctness gates");
+            Ok(())
+        }
+        Some("profile") => {
+            let name = first
+                .ok_or_else(|| io::Error::other("performance profile requires a profile name"))?;
+            let profile = match name.as_str() {
+                "mobile" => PerformanceProfile::MobileLowMemory,
+                "desktop" => PerformanceProfile::Desktop,
+                "server" => PerformanceProfile::ServerStandard,
+                "high-throughput" => PerformanceProfile::ServerHighThroughput,
+                _ => return Err(io::Error::other(format!("unknown performance profile {name:?}")).into()),
+            };
+            let policy = PerformancePolicy::for_profile(profile);
+            policy.validate()?;
+            println!(
+                "profile={:?} request={} decode={} response={} snapshot_pipeline={} cache={} cpu_workers={} cpu_jobs={}",
+                policy.profile,
+                policy.memory.request_bytes,
+                policy.memory.decode_bytes,
+                policy.memory.response_bytes,
+                policy.memory.snapshot_pipeline_bytes,
+                policy.memory.cache_bytes,
+                policy.cpu.worker_threads,
+                policy.cpu.max_queued_jobs,
+            );
+            Ok(())
+        }
+        Some("workload-verify") => {
+            let path = first.ok_or_else(|| {
+                io::Error::other("performance workload-verify requires a manifest path")
+            })?;
+            let workload: WorkloadManifest = ron::from_str(&fs::read_to_string(path)?)?;
+            let digest = workload.digest()?;
+            println!(
+                "performance-workload verified name={} kind={:?} operations={} digest={}",
+                workload.name,
+                workload.benchmark_kind,
+                workload.operations,
+                hex_prefix(digest),
+            );
+            Ok(())
+        }
+        Some("report-verify") => {
+            let path = first.ok_or_else(|| {
+                io::Error::other("performance report-verify requires a report path")
+            })?;
+            let report: PerformanceReport = ron::from_str(&fs::read_to_string(path)?)?;
+            report.validate()?;
+            println!(
+                "performance-report verified phases={} commit={} database={} durability={}",
+                report.phases.len(),
+                report.environment.aequora_commit,
+                report.environment.database,
+                report.environment.durability,
+            );
+            Ok(())
+        }
+        Some("compare") => {
+            let baseline_path = first.ok_or_else(|| {
+                io::Error::other("performance compare requires a baseline report")
+            })?;
+            let candidate_path = second.ok_or_else(|| {
+                io::Error::other("performance compare requires a candidate report")
+            })?;
+            let baseline: PerformanceReport =
+                ron::from_str(&fs::read_to_string(baseline_path)?)?;
+            let candidate: PerformanceReport =
+                ron::from_str(&fs::read_to_string(candidate_path)?)?;
+            let regressions = compare_reports(&baseline, &candidate, RegressionPolicy::default())?;
+            if regressions.is_empty() {
+                println!("performance-regression: ok ({} compared phases)", candidate.phases.len());
+                return Ok(());
+            }
+            for regression in &regressions {
+                eprintln!(
+                    "performance-regression: phase={:?} metric={:?} increase_bps={}",
+                    regression.phase, regression.metric, regression.increase_bps
+                );
+            }
+            Err(io::Error::other(format!(
+                "{} attributed performance regression(s)",
+                regressions.len()
+            ))
+            .into())
+        }
+        _ => Err(io::Error::other(
+            "performance command must be `explain`, `profile`, `workload-verify`, `report-verify`, or `compare`",
+        )
+        .into()),
+    }
 }
 
 fn print_crypto(action: Option<&str>, argument: Option<String>) -> Result<(), Box<dyn Error>> {
