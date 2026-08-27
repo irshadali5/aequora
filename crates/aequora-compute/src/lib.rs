@@ -3,7 +3,7 @@
 use rayon::{ThreadPool, ThreadPoolBuilder, prelude::*};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::sync::{Semaphore, oneshot};
 
 /// Dedicated compute-pool settings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,6 +12,8 @@ pub struct ComputeConfig {
     pub worker_threads: usize,
     /// Item count below which sequential execution avoids scheduling overhead.
     pub parallel_threshold: usize,
+    /// Maximum submitted jobs, including running work, before callers receive backpressure.
+    pub max_queued_jobs: usize,
 }
 
 impl Default for ComputeConfig {
@@ -19,6 +21,7 @@ impl Default for ComputeConfig {
         Self {
             worker_threads: 4,
             parallel_threshold: 128,
+            max_queued_jobs: 32,
         }
     }
 }
@@ -35,6 +38,9 @@ pub enum ComputeError {
     /// A scheduled job panicked or was otherwise abandoned.
     #[error("compute job did not return a result")]
     WorkerAbandoned,
+    /// Submission was rejected before entering the CPU pool because its hard bound was full.
+    #[error("compute pool submission limit is saturated")]
+    Saturated,
 }
 
 /// Cloneable handle to a dedicated Rayon pool.
@@ -42,6 +48,7 @@ pub enum ComputeError {
 pub struct ComputePool {
     pool: Arc<ThreadPool>,
     parallel_threshold: usize,
+    submissions: Arc<Semaphore>,
 }
 
 impl ComputePool {
@@ -51,7 +58,7 @@ impl ComputePool {
     ///
     /// Returns [`ComputeError`] for a zero worker count or thread-pool construction failure.
     pub fn new(config: ComputeConfig) -> Result<Self, ComputeError> {
-        if config.worker_threads == 0 {
+        if config.worker_threads == 0 || config.max_queued_jobs == 0 {
             return Err(ComputeError::ZeroWorkers);
         }
         let pool = ThreadPoolBuilder::new()
@@ -61,6 +68,7 @@ impl ComputePool {
         Ok(Self {
             pool: Arc::new(pool),
             parallel_threshold: config.parallel_threshold.max(1),
+            submissions: Arc::new(Semaphore::new(config.max_queued_jobs)),
         })
     }
 
@@ -80,8 +88,12 @@ impl ComputePool {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        let permit = Arc::clone(&self.submissions)
+            .try_acquire_owned()
+            .map_err(|_| ComputeError::Saturated)?;
         let (sender, receiver) = oneshot::channel();
         self.pool.spawn(move || {
+            let _permit = permit;
             let result = job();
             let _ignored = sender.send(result);
         });
@@ -117,6 +129,7 @@ mod tests {
         let pool = ComputePool::new(ComputeConfig {
             worker_threads: 2,
             parallel_threshold: 2,
+            max_queued_jobs: 4,
         })
         .unwrap_or_else(|error| panic!("{error}"));
         let output = pool
@@ -124,5 +137,39 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(output, vec![1, 4, 9]);
+    }
+
+    #[tokio::test]
+    async fn saturated_submission_is_rejected_before_entering_rayon() {
+        let pool = ComputePool::new(ComputeConfig {
+            worker_threads: 1,
+            parallel_threshold: 1,
+            max_queued_jobs: 1,
+        })
+        .unwrap_or_else(|error| panic!("{error}"));
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let first_pool = pool.clone();
+        let first = tokio::spawn(async move {
+            first_pool
+                .run(move || {
+                    let _ignored = started_sender.send(());
+                    release_receiver.recv().is_ok()
+                })
+                .await
+        });
+        started_receiver
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(matches!(pool.run(|| 2).await, Err(ComputeError::Saturated)));
+        release_sender
+            .send(())
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(
+            first
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .unwrap_or_else(|error| panic!("{error}"))
+        );
     }
 }
