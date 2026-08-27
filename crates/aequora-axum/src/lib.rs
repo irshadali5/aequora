@@ -957,6 +957,12 @@ impl IntoResponse for HttpError {
                 Some(retry_after_seconds),
                 OperationalErrorCode::Maintenance,
             ),
+            Self::Server(ServerError::Authority(error)) => (
+                StatusCode::CONFLICT,
+                error.to_string(),
+                None,
+                OperationalErrorCode::Authority,
+            ),
         };
         let mut response = (status, message).into_response();
         if let Some(value) =

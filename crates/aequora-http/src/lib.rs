@@ -389,10 +389,7 @@ mod tests {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 has_more: false,
                 server_time: HybridTimestamp {
                     physical_ms: 1,

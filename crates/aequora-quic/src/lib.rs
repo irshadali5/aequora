@@ -495,6 +495,7 @@ fn encode_server_error(error: &ServerError) -> Result<Vec<u8>, aequora_codec::Co
         ServerError::IdentityMismatch | ServerError::ScopeAuthorization(_) => {
             OperationalErrorCode::Authentication
         }
+        ServerError::Authority(_) => OperationalErrorCode::Authority,
         ServerError::Validation(_) | ServerError::Codec(_) | ServerError::BootstrapUnavailable => {
             OperationalErrorCode::Protocol
         }
@@ -600,10 +601,7 @@ mod tests {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                next_cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 has_more: false,
                 server_time: HybridTimestamp {
                     physical_ms: 1,
@@ -622,10 +620,7 @@ mod tests {
             Ok(BootstrapResponse {
                 protocol: request.protocol,
                 snapshot_id,
-                cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                },
+                cursor: Cursor::legacy(request.session.scope_id, Sequence(0)),
                 offset: request.offset,
                 entities: vec![SnapshotEntity {
                     entity: EntityRef {
@@ -673,10 +668,7 @@ mod tests {
             rejected: Vec::new(),
             conflicts: Vec::new(),
             changes: Vec::new(),
-            next_cursor: Cursor {
-                scope: SyncScopeId::new(),
-                sequence: Sequence(0),
-            },
+            next_cursor: Cursor::legacy(SyncScopeId::new(), Sequence(0)),
             has_more: false,
             server_time: HybridTimestamp {
                 physical_ms: 1,
