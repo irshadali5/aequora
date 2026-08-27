@@ -109,6 +109,40 @@ const BOUNDARY_RULES: &[(&str, &[&str])] = &[
             "tokio",
         ],
     ),
+    (
+        "aequora-authority",
+        &[
+            "aequora-axum",
+            "aequora-client",
+            "aequora-http",
+            "aequora-quic",
+            "aequora-server",
+            "aequora-store-postgres",
+            "aequora-store-stoolap",
+            "axum",
+            "reqwest",
+            "sqlx",
+            "stoolap",
+            "tokio",
+        ],
+    ),
+    (
+        "aequora-region",
+        &[
+            "aequora-axum",
+            "aequora-client",
+            "aequora-http",
+            "aequora-quic",
+            "aequora-server",
+            "aequora-store-postgres",
+            "aequora-store-stoolap",
+            "axum",
+            "reqwest",
+            "sqlx",
+            "stoolap",
+            "tokio",
+        ],
+    ),
 ];
 
 fn main() -> ExitCode {
