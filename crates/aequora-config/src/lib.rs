@@ -1,5 +1,6 @@
 //! Validated, secret-free RON configuration for Aequora runtime components.
 
+use aequora_admission::AdmissionPolicy;
 use aequora_client::{
     AdaptiveBatchConfig, ClientConfig, MultiProcessCoordinatorConfig, RetryConfig,
     SyncCoordinatorConfig,
@@ -7,6 +8,7 @@ use aequora_client::{
 use aequora_compute::ComputeConfig;
 use aequora_coordination::{LocalProcessMode, ProcessInstanceId};
 use aequora_crypto::CryptoPolicy;
+use aequora_performance::{PerformancePolicy, PerformanceProfile};
 use aequora_protocol::{Capability, ClientLimits, SessionMetadata, SnapshotLimits};
 use aequora_scheduler::{SchedulerPolicy, SyncProfile};
 use aequora_server::ServerConfig;
@@ -28,6 +30,8 @@ use aequora_quic::QuicConfig;
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AequoraConfig {
+    /// Cross-transport hierarchical admission, fairness, and overload policy.
+    pub admission: AdmissionPolicy,
     /// Wire protocol compatibility.
     pub protocol: ProtocolConfig,
     /// Client push and server validation bounds.
@@ -38,6 +42,8 @@ pub struct AequoraConfig {
     pub retry: RetryPolicyConfig,
     /// Dedicated CPU pool settings.
     pub compute: ComputePoolConfig,
+    /// Cross-layer memory, streaming, reactive-view, and benchmark policy.
+    pub performance: PerformancePolicy,
     /// Negotiated compression settings.
     pub compression: CompressionConfig,
     /// Untrusted-input and snapshot bounds.
@@ -222,6 +228,8 @@ pub struct ComputePoolConfig {
     pub worker_threads: usize,
     /// Item threshold for offloading parallel work.
     pub parallel_threshold: usize,
+    /// Maximum submitted CPU jobs before backpressure.
+    pub max_queued_jobs: usize,
 }
 
 impl Default for ComputePoolConfig {
@@ -229,6 +237,7 @@ impl Default for ComputePoolConfig {
         Self {
             worker_threads: 4,
             parallel_threshold: 128,
+            max_queued_jobs: 32,
         }
     }
 }
@@ -509,11 +518,22 @@ impl AequoraConfig {
         let mut config = Self::default();
         match profile {
             DeploymentProfile::Development => {
+                config.admission.global.max_in_flight = 32;
+                config.admission.tenant.budget.max_in_flight = 16;
+                config.admission.tenant.max_tracked_tenants = 128;
+                config.admission.critical.reserved_in_flight = 4;
+                config.admission.interactive.reserved_in_flight = 8;
+                config.admission.normal.reserved_in_flight = 2;
+                config.admission.bulk.reserved_in_flight = 1;
+                config.admission.background.reserved_in_flight = 1;
+                config.admission.maintenance.reserved_in_flight = 1;
                 config.scheduler = SchedulerPolicy::for_profile(SyncProfile::Desktop);
                 config.push.max_wait_ms = 25;
                 config.retry.initial_ms = 100;
                 config.retry.max_ms = 5_000;
                 config.compute.worker_threads = 2;
+                config.compute.max_queued_jobs = 8;
+                config.performance = PerformancePolicy::for_profile(PerformanceProfile::Desktop);
                 config.coordinator.sync_on_start = true;
                 config.operational.max_in_flight_requests = 32;
                 config.operational.max_in_flight_per_tenant = 16;
@@ -522,6 +542,9 @@ impl AequoraConfig {
             }
             DeploymentProfile::SmallProduction => {}
             DeploymentProfile::Enterprise => {
+                config.admission.global.max_in_flight = 512;
+                config.admission.tenant.budget.max_in_flight = 64;
+                config.admission.tenant.max_tracked_tenants = 16_384;
                 config.crypto = CryptoPolicy::enterprise();
                 config.scheduler = SchedulerPolicy::for_profile(SyncProfile::EnterpriseLan);
                 config.pull.max_events = 2_048;
@@ -530,8 +553,14 @@ impl AequoraConfig {
                 config.operational.tenant_requests_per_second = 128;
                 config.operational.tenant_request_burst = 256;
                 config.operational.max_rate_limit_tenants = 16_384;
+                config.compute.worker_threads = 8;
+                config.compute.max_queued_jobs = 128;
+                config.performance =
+                    PerformancePolicy::for_profile(PerformanceProfile::ServerHighThroughput);
             }
             DeploymentProfile::HighLatencyNetwork => {
+                config.admission.global.max_in_flight = 128;
+                config.admission.tenant.budget.max_in_flight = 32;
                 config.scheduler = SchedulerPolicy::for_profile(SyncProfile::HighLatency);
                 config.push.max_operations = 128;
                 config.push.max_wait_ms = 500;
@@ -566,7 +595,11 @@ impl AequoraConfig {
     /// # Errors
     ///
     /// Returns [`ConfigError::Invalid`] for unsupported or unsafe settings.
-    pub const fn validate(&self) -> Result<(), ConfigError> {
+    #[allow(clippy::too_many_lines)]
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.admission.validate().is_err() {
+            return Err(ConfigError::Invalid("admission policy is inconsistent"));
+        }
         if self.protocol.minimum_version == 0
             || self.protocol.minimum_version > self.protocol.version
         {
@@ -608,9 +641,23 @@ impl AequoraConfig {
         {
             return Err(ConfigError::Invalid("retry settings are inconsistent"));
         }
-        if self.compute.worker_threads == 0 || self.compute.parallel_threshold == 0 {
+        if self.compute.worker_threads == 0
+            || self.compute.parallel_threshold == 0
+            || self.compute.max_queued_jobs == 0
+        {
             return Err(ConfigError::Invalid(
                 "compute limits must be greater than zero",
+            ));
+        }
+        if self.performance.validate().is_err()
+            || self.push.max_bytes > self.performance.memory.request_bytes
+            || self.limits.max_decompressed_bytes > self.performance.memory.decode_bytes
+            || self.pull.max_bytes > self.performance.memory.response_bytes
+            || usize::try_from(self.limits.max_snapshot_bytes).unwrap_or(usize::MAX)
+                > self.performance.snapshot.max_chunk_bytes
+        {
+            return Err(ConfigError::Invalid(
+                "performance and memory budgets are inconsistent",
             ));
         }
         if self.compression.min_bytes == 0 {
@@ -718,6 +765,7 @@ impl AequoraConfig {
                 max_partition_bytes: self.limits.max_partition_bytes,
             },
             max_pull_changes: usize::try_from(self.pull.max_events).unwrap_or(usize::MAX),
+            performance: self.performance,
         })
     }
 
@@ -797,6 +845,7 @@ impl AequoraConfig {
         Ok(ComputeConfig {
             worker_threads: self.compute.worker_threads,
             parallel_threshold: self.compute.parallel_threshold,
+            max_queued_jobs: self.compute.max_queued_jobs,
         })
     }
 
@@ -961,6 +1010,10 @@ mod tests {
         config = AequoraConfig::default();
         config.operational.drain_timeout_ms = 0;
         assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.admission.retry_after_ms = 0;
+        assert!(config.validate().is_err());
+        assert!(AequoraConfig::from_ron("(admission: (unknown: 1))").is_err());
     }
 
     #[cfg(feature = "axum")]
