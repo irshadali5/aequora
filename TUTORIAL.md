@@ -1907,7 +1907,7 @@ cargo test -p aequora-testkit --test governance_contracts
 Use these repository resources as deeper references:
 
 - [`plan.md`](plan.md): governing database-neutral architecture and implementation direction.
-- [`next.md`](next.md): detailed synchronization architecture and protocol semantics.
+- [`next.md`](next.md): architecture-specification index; detailed design lives in [`sys-arch/`](sys-arch/).
 - [`ACID.md`](ACID.md): transaction, isolation, idempotency, and recovery model.
 - [`docs/next-completion.md`](docs/next-completion.md): architecture-to-code implementation map.
 - [`docs/acid-compliance.md`](docs/acid-compliance.md): ACID requirements mapped to contracts/tests.

@@ -1,9 +1,14 @@
-# `plan.md` completion audit
+# Aequora implementation completion audit
 
-This matrix treats the numbered plan as the release specification. “Implemented” requires code
-and direct test or build evidence. “Boundary” means the database- or application-owned contract
-exists but no concrete reference integration proves it. “Open” is required work; it is not hidden
-by the broader phase labels.
+This matrix is the implementation evidence index for the numbered `sys-arch/` specifications.
+The architecture documents are the release specifications; `plan.md` contains only sequencing,
+status, and links. “Implemented” requires code and direct test or build evidence. “Boundary” means
+the database- or application-owned contract exists but no concrete reference integration proves it.
+“Open” is required work; it is not hidden by the broader phase labels.
+
+The historical section ranges in the first column are retained as traceability identifiers for the
+original implementation audit; they are not architecture content and are not sections of the
+current `plan.md`.
 
 | Sections | Requirement area | Current evidence | Status / remaining proof |
 |---|---|---|---|
@@ -46,12 +51,14 @@ by the broader phase labels.
 | 157–160 | Phase 1–4 features | All named phase features have corresponding crates and direct tests | Implemented |
 | 161 | Recommended first API | Constructors and type-state client/server builders | Implemented |
 | 162 | Thirteen permanent invariants | Named property/integration tests, guarded financial policy, persistent Stoolap proof, and current-revision live PostgreSQL proof | Implemented |
-| 163–165 | Architecture diagrams and final project guidance | `plan.md`, README guidance, runnable examples, and this evidence matrix | Implemented |
+| 163–165 | Architecture diagrams and final project guidance | The applicable `sys-arch/` specifications, README guidance, runnable examples, and this evidence matrix | Implemented |
 | 166 | Phase 5 production operational resilience | Shared Axum admission permits, exchange/bootstrap deadlines, `Retry-After`, split liveness/readiness, async application probes, strict RON mapping, payload-free metrics, and deterministic saturation/timeout/readiness tests | Implemented |
 | 167 | Phase 6 graceful draining and zero-downtime lifecycle | Race-free `ServerLifecycle`, exact admitted count, irreversible draining, readiness short-circuit, transient new-work rejection, bounded typed drain outcomes, RON deadline, metrics, and concurrency tests | Implemented |
 | 168 | Phase 7 multi-tenant fair admission | Authenticated pre-body tenant admission, atomic global/tenant counts, bounded idle-counter cleanup, distinct transient `429`, strict RON relationships, payload-free metric, and deterministic noisy-neighbor isolation test | Implemented |
 | 169 | Phase 8 authenticated tenant request-rate limiting | Per-tenant token buckets before body decoding, configurable sustained/burst limits, bounded inactive state with safe eviction, transient `429`, payload-free metric, strict RON mapping, and deterministic refill/isolation/retention tests | Implemented |
 | 170 | Phase 9 bounded HTTP body ingestion | Deadline- and byte-bounded custom Axum body extraction after admission, transient `408`, permanent `413`, automatic permit release, strict RON mapping, payload-free metrics, and adversarial slow/oversized stream tests | Implemented |
+| 171 | Phase 10 Part 18 overload architecture | Runtime-neutral hierarchical admission, resource permits, request-shape limits, bounded fair queues, load hysteresis, security-preserving brownout, transport/server integration, and `AEQ-INV-LOAD001` through `LOAD009` | Implemented |
+| 172 | Phase 11 Part 19 performance and memory architecture | Runtime-neutral profiles/budgets, `Bytes` and borrowed codec boundaries, header-first rejection, bounded CPU submission, streaming snapshot/blob APIs, paged UI state, hot-query contracts, fixed workloads, attributed regression reports, and `AEQ-INV-PERF001` through `PERF009` | Implemented |
 
 ## Release gates
 
@@ -107,7 +114,8 @@ Verified from the final source state on 2026-08-11:
 - Phase 9 proves a never-ending body reaches bounded `408` without service execution, releases its
   permit for a valid retry and drain, rejects streamed wire overflow with permanent `413`, and
   records both ingestion failures without body or identity data;
-- the subsequent `next.md`/`ACID.md` reconciliation adds explicit adapter durability declarations,
+- the historical implementation reconciliation recorded in `docs/next-completion.md` and `ACID.md`
+  adds explicit adapter durability declarations,
   concurrent duplicate/version-race conformance, bounded PostgreSQL deadlock/serialization retry,
   real rollback/restart/snapshot-install proofs, transaction metrics, and durable due-only client
   retry scheduling through Stoolap schema revision 2;

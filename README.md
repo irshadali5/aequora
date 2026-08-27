@@ -359,7 +359,7 @@ Database URLs, access tokens, and TLS keys do not belong in this object.
 
 ## Workspace map
 
-The workspace contains 45 publishable packages plus one non-publishable developer utility:
+The workspace package count is reported by `aequora-dev summary`; the major ownership areas are:
 
 | Area | Crates |
 |---|---|
@@ -370,7 +370,7 @@ The workspace contains 45 publishable packages plus one non-publishable develope
 | Network boundaries | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic` |
 | Domain policies | `aequora-crypto`, `aequora-profile`, `aequora-replay`, `aequora-audit`, `aequora-governance`, `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal`, `aequora-queue` |
 | Optional record interoperability | `aequora-schema`, `aequora-mapping`, `aequora-migration` |
-| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler` |
+| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-performance`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler` |
 | Verification/tooling | `aequora-invariants`, `aequora-model`, `aequora-testkit`, `aequora-macros`, `aequora-cli`, `aequora-dev` |
 
 Run `cargo run -q -p aequora-dev -- summary` for the live workspace graph or
@@ -385,6 +385,9 @@ Use `cargo run -q -p aequora-dev -- governance explain` or `governance verify
 <erasure-plan.ron>` for read-only lifecycle diagnostics.
 Use `cargo run -q -p aequora-dev -- crypto policy` or `crypto registry-verify
 <root-and-registry.ron>` for secret-free cryptographic policy and trust diagnostics.
+Use `cargo run -q -p aequora-dev -- performance explain`, `performance profile <name>`,
+`performance workload-verify <workload.ron>`, or `performance compare <baseline.ron>
+<candidate.ron>` for Part 19 memory budgets and reproducible regression diagnostics.
 
 Payload-free built-in adapter diagnostics are available without database credentials:
 
@@ -463,7 +466,7 @@ versioned.
 
 - [Complete developer tutorial](TUTORIAL.md)
 - [Governing implementation plan](plan.md)
-- [Detailed synchronization architecture](next.md)
+- [Architecture specification index](next.md) ([authoritative `sys-arch/` specifications](sys-arch/))
 - [ACID architecture](ACID.md)
 - [ACID compliance evidence](docs/acid-compliance.md)
 - [Enterprise implementation evidence](docs/enterprise-completion.md)
@@ -482,6 +485,7 @@ versioned.
 - [Part 13 data provenance, auditability, and explainability evidence](docs/data-provenance-auditability-explainability-completion.md)
 - [Part 14 data governance, retention, hold, and erasure evidence](docs/data-governance-retention-erasure-completion.md)
 - [Part 15 cryptographic integrity, key management, and protected payload evidence](docs/cryptographic-integrity-key-management-e2e-completion.md)
+- [Part 19 performance engineering and memory architecture evidence](docs/performance-engineering-memory-architecture-completion.md)
 - [Architecture implementation matrix](docs/next-completion.md)
 - [Plan completion evidence](docs/plan-completion.md)
 - [Custom database adapter guide](docs/custom-database-adapters.md)
@@ -489,8 +493,8 @@ versioned.
 
 ## Project status
 
-The repository-owned implementation described by `plan.md`, `next.md`, `ACID.md`, and
-`enterprise.md` is present in
+The repository-owned implementation described by the `sys-arch/` specifications, `plan.md`,
+`ACID.md`, and `enterprise.md` is present in
 code, migrations, public contracts, real Stoolap tests, deterministic simulations, model/property
 tests, HTTP/QUIC integration tests, and environment-gated PostgreSQL/Neon suites.
 
