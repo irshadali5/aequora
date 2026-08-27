@@ -197,72 +197,121 @@ impl SnapshotManifest {
         }
         let mut ordered = records.to_vec();
         ordered.sort_by_key(|record| record.entity);
-        for pair in ordered.windows(2) {
-            if pair[0].entity == pair[1].entity {
-                return Err(BootstrapError::DuplicateEntity);
-            }
-        }
-
         let mut chunks = Vec::new();
-        let mut current = Vec::new();
-        for record in ordered {
+        let manifest = Self::build_streaming(
+            snapshot_id,
+            boundary,
+            schema_version,
+            ordered,
+            config,
+            |chunk| {
+                chunks.push(chunk);
+                Ok(())
+            },
+        )?;
+        Ok(BuiltSnapshot { manifest, chunks })
+    }
+
+    /// Builds a snapshot from records already ordered by entity and emits each bounded encoded
+    /// chunk to `sink` immediately. Only the current chunk and bounded descriptor manifest remain
+    /// in memory; adapters can durably upload each chunk before the manifest is published.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unordered or duplicate input, invalid bounds, excessive records/chunks/bytes,
+    /// serialization errors, and sink failures.
+    pub fn build_streaming<I, F>(
+        snapshot_id: SnapshotId,
+        boundary: SnapshotBoundary,
+        schema_version: ProjectionSchemaVersion,
+        records: I,
+        config: ChunkingConfig,
+        mut sink: F,
+    ) -> Result<Self, BootstrapError>
+    where
+        I: IntoIterator<Item = SnapshotEntity>,
+        F: FnMut(SnapshotChunk) -> Result<(), BootstrapError>,
+    {
+        config.validate()?;
+        let mut descriptors = Vec::with_capacity(config.max_chunks.min(1_024));
+        let mut current = Vec::with_capacity(config.target_records.min(1_024));
+        let mut previous_entity = None;
+        let mut record_count = 0_usize;
+        let mut total_uncompressed_bytes = 0_u64;
+
+        for record in records {
+            if previous_entity.is_some_and(|previous| previous >= record.entity) {
+                return Err(if previous_entity == Some(record.entity) {
+                    BootstrapError::DuplicateEntity
+                } else {
+                    BootstrapError::EntityOrder
+                });
+            }
+            previous_entity = Some(record.entity);
+            record_count = record_count
+                .checked_add(1)
+                .ok_or(BootstrapError::Overflow)?;
+            if record_count > config.max_records {
+                return Err(BootstrapError::RecordLimit);
+            }
             current.push(record);
-            let encoded = postcard::to_stdvec(&current)?;
+            let encoded_len = postcard::to_stdvec(&current)?.len();
             let reached_target = current.len() >= config.target_records
-                || encoded.len() >= config.target_uncompressed_bytes;
-            if encoded.len() > config.max_chunk_uncompressed_bytes {
+                || encoded_len >= config.target_uncompressed_bytes;
+            if encoded_len > config.max_chunk_uncompressed_bytes {
                 if current.len() == 1 {
                     return Err(BootstrapError::ChunkByteLimit);
                 }
                 let last = current.pop().ok_or(BootstrapError::InvalidState)?;
-                chunks.push(build_chunk(snapshot_id, chunks.len(), &current)?);
-                current = vec![last];
+                emit_stream_chunk(
+                    snapshot_id,
+                    &current,
+                    config,
+                    &mut descriptors,
+                    &mut total_uncompressed_bytes,
+                    &mut sink,
+                )?;
+                current.clear();
+                current.push(last);
                 if postcard::to_stdvec(&current)?.len() > config.max_chunk_uncompressed_bytes {
                     return Err(BootstrapError::ChunkByteLimit);
                 }
             } else if reached_target {
-                chunks.push(build_chunk(snapshot_id, chunks.len(), &current)?);
+                emit_stream_chunk(
+                    snapshot_id,
+                    &current,
+                    config,
+                    &mut descriptors,
+                    &mut total_uncompressed_bytes,
+                    &mut sink,
+                )?;
                 current.clear();
-            }
-            if chunks.len() > config.max_chunks {
-                return Err(BootstrapError::ChunkLimit);
             }
         }
         if !current.is_empty() {
-            chunks.push(build_chunk(snapshot_id, chunks.len(), &current)?);
-        }
-        if chunks.len() > config.max_chunks {
-            return Err(BootstrapError::ChunkLimit);
+            emit_stream_chunk(
+                snapshot_id,
+                &current,
+                config,
+                &mut descriptors,
+                &mut total_uncompressed_bytes,
+                &mut sink,
+            )?;
         }
 
-        let record_count = u64::try_from(records.len()).map_err(|_| BootstrapError::Overflow)?;
-        let total_uncompressed_bytes = chunks.iter().try_fold(0_u64, |total, chunk| {
-            total
-                .checked_add(chunk.descriptor.uncompressed_bytes)
-                .ok_or(BootstrapError::Overflow)
-        })?;
-        let max_total = u64::try_from(config.max_total_uncompressed_bytes)
-            .map_err(|_| BootstrapError::Overflow)?;
-        if total_uncompressed_bytes > max_total {
-            return Err(BootstrapError::TotalByteLimit);
-        }
-        let descriptors = chunks
-            .iter()
-            .map(|chunk| chunk.descriptor.clone())
-            .collect::<Vec<_>>();
         let mut manifest = Self {
             format_version: MANIFEST_FORMAT_VERSION,
             snapshot_id,
             boundary,
             schema_version,
-            record_count,
+            record_count: u64::try_from(record_count).map_err(|_| BootstrapError::Overflow)?,
             total_uncompressed_bytes,
             total_compressed_bytes: total_uncompressed_bytes,
             root_digest: [0; 32],
             chunks: descriptors,
         };
         manifest.root_digest = manifest.calculate_root()?;
-        Ok(BuiltSnapshot { manifest, chunks })
+        Ok(manifest)
     }
 
     /// Verifies format, boundary identity, deterministic ordinals, totals, ranges, and root.
@@ -401,6 +450,33 @@ fn build_chunk(
         location: ChunkLocation::Service,
     };
     Ok(SnapshotChunk { descriptor, bytes })
+}
+
+fn emit_stream_chunk<F>(
+    snapshot_id: SnapshotId,
+    records: &[SnapshotEntity],
+    config: ChunkingConfig,
+    descriptors: &mut Vec<ChunkDescriptor>,
+    total_uncompressed_bytes: &mut u64,
+    sink: &mut F,
+) -> Result<(), BootstrapError>
+where
+    F: FnMut(SnapshotChunk) -> Result<(), BootstrapError>,
+{
+    if descriptors.len() == config.max_chunks {
+        return Err(BootstrapError::ChunkLimit);
+    }
+    let chunk = build_chunk(snapshot_id, descriptors.len(), records)?;
+    *total_uncompressed_bytes = total_uncompressed_bytes
+        .checked_add(chunk.descriptor.uncompressed_bytes)
+        .ok_or(BootstrapError::Overflow)?;
+    let max_total =
+        u64::try_from(config.max_total_uncompressed_bytes).map_err(|_| BootstrapError::Overflow)?;
+    if *total_uncompressed_bytes > max_total {
+        return Err(BootstrapError::TotalByteLimit);
+    }
+    descriptors.push(chunk.descriptor.clone());
+    sink(chunk)
 }
 
 impl ChunkingConfig {
@@ -1291,6 +1367,36 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{error}"));
             assert!(!decoded.is_empty());
         }
+    }
+
+    #[test]
+    fn streaming_builder_emits_one_bounded_chunk_at_a_time() {
+        let records = vec![record(1, 8), record(2, 8), record(3, 8)];
+        let config = ChunkingConfig {
+            target_records: 2,
+            target_uncompressed_bytes: 1_024,
+            max_chunk_uncompressed_bytes: 4_096,
+            max_chunks: 32,
+            max_records: 100,
+            max_total_uncompressed_bytes: 65_536,
+        };
+        let mut emitted = Vec::new();
+        let manifest = SnapshotManifest::build_streaming(
+            SnapshotId::from_uuid(Uuid::from_u128(77)),
+            boundary(),
+            ProjectionSchemaVersion::new(1).unwrap_or_else(|error| panic!("{error}")),
+            records,
+            config,
+            |chunk| {
+                assert!(chunk.bytes.len() <= config.max_chunk_uncompressed_bytes);
+                emitted.push(chunk.descriptor.clone());
+                Ok(())
+            },
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(manifest.chunks, emitted);
+        assert_eq!(manifest.record_count, 3);
+        manifest.verify().unwrap_or_else(|error| panic!("{error}"));
     }
 
     #[test]
