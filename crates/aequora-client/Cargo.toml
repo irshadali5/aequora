@@ -14,6 +14,7 @@ aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
+aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }

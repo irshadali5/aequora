@@ -16,10 +16,10 @@ impl AequoraClient {
 pub mod prelude {
     pub use crate::{
         AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, BootstrapOutcome, ClientBuildError,
-        ClientConfig, ClientError, ClientSyncEngine, ClientSyncEngineBuilder, CoordinatorClosed,
-        CoordinatorStatus, MultiProcessCoordinatorConfig, RetryConfig, SyncCoordinator,
-        SyncCoordinatorConfig, SyncCoordinatorHandle, SyncHealth, SyncOutcome, SyncStatus,
-        SyncSummary, SyncTrigger,
+        ClientConfig, ClientError, ClientReadSession, ClientSyncEngine, ClientSyncEngineBuilder,
+        CoordinatorClosed, CoordinatorStatus, MultiProcessCoordinatorConfig, RetryConfig,
+        SyncCoordinator, SyncCoordinatorConfig, SyncCoordinatorHandle, SyncHealth, SyncOutcome,
+        SyncStatus, SyncSummary, SyncTrigger,
     };
     pub use aequora_coordination::{
         FencingToken, LocalProcessMode, LocalStoreGeneration, LocalStoreId, ProcessInstanceId,
@@ -55,6 +55,7 @@ use aequora_protocol::{
     SessionMetadata, SnapshotLimits, SyncDirective, SyncRequest, SyncResponse,
 };
 use aequora_queue::OptimizationRegistry;
+use aequora_region::{ReadResponseMetadata, RegionError, SessionWatermark};
 use aequora_scheduler::{
     AdaptiveScheduler, DeferralReason, SchedulerPolicy, SchedulerState, SchedulingContext,
     WorkClass, WorkDescriptor, WorkId, WorkKind,
@@ -67,7 +68,10 @@ use aequora_store::{
 use aequora_transport::{
     StreamingSyncTransport, SyncTransport, TransportError, TransportErrorKind,
 };
-use aequora_types::{Cursor, OperationId, ProtocolVersion, RequestId, SnapshotId};
+use aequora_types::{
+    AuthorityEpoch, AuthorityId, Cursor, OperationId, ProtocolVersion, RequestId, Sequence,
+    SnapshotId,
+};
 use std::{
     collections::HashSet,
     sync::{
@@ -82,6 +86,68 @@ use tokio::sync::{mpsc, watch};
 trait ReservationFlag {
     fn try_set(&self) -> bool;
     fn clear(&self);
+}
+
+/// Session/read-your-writes lower bound for web or nonreplicated regional API reads.
+///
+/// Native synchronized datasets continue to read from their local store. This tracker is for
+/// server reads whose response metadata carries an authoritative epoch and served sequence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ClientReadSession {
+    watermark: Option<SessionWatermark>,
+}
+
+impl ClientReadSession {
+    /// Current lower bound to attach to a `Session` regional read.
+    #[must_use]
+    pub const fn watermark(self) -> Option<SessionWatermark> {
+        self.watermark
+    }
+
+    /// Advances read-your-writes after an authoritative operation commits.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an authority change or epoch rollback until Part 16 transition handling completes.
+    pub fn observe_commit(
+        &mut self,
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        sequence: Sequence,
+    ) -> Result<(), RegionError> {
+        self.observe(authority_id, authority_epoch, sequence)
+    }
+
+    /// Advances session consistency after a guarded regional or authority read.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an authority change or epoch rollback.
+    pub fn observe_read(&mut self, metadata: ReadResponseMetadata) -> Result<(), RegionError> {
+        self.observe(
+            metadata.authority_id,
+            metadata.authority_epoch,
+            metadata.served_sequence,
+        )
+    }
+
+    fn observe(
+        &mut self,
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        sequence: Sequence,
+    ) -> Result<(), RegionError> {
+        if let Some(watermark) = &mut self.watermark {
+            watermark.observe(authority_id, authority_epoch, sequence)
+        } else {
+            self.watermark = Some(SessionWatermark::new(
+                authority_id,
+                authority_epoch,
+                sequence,
+            ));
+            Ok(())
+        }
+    }
 }
 
 impl ReservationFlag for AtomicBool {
@@ -285,6 +351,7 @@ impl ClientConfig {
                 Capability::Tombstones,
                 Capability::LineageV1,
                 Capability::IntegrityV1,
+                Capability::AuthorityEpochV1,
             ],
             retry: RetryConfig::default(),
             max_exchanges_per_sync: 1_024,
@@ -1031,6 +1098,21 @@ pub enum ClientError {
         /// Stable recovery reason supplied by the server.
         reason: ResyncReason,
     },
+    /// The server moved to a newer authority timeline; pending sent work is frozen for review.
+    #[error(
+        "authority epoch changed from {previous_epoch:?} to {current_epoch:?}; bootstrap and operation recovery are required"
+    )]
+    AuthorityChanged {
+        authority_id: aequora_types::AuthorityId,
+        previous_epoch: aequora_types::AuthorityEpoch,
+        current_epoch: aequora_types::AuthorityEpoch,
+    },
+    /// A server presented an epoch below the highest durable client cursor.
+    #[error("authority rollback detected")]
+    AuthorityRollbackDetected,
+    /// A server endpoint presented a different logical authority identity.
+    #[error("server authority identity does not match the durable client cursor")]
+    AuthorityIdChanged,
     /// Server returned a cursor for another scope.
     #[error("server returned a cursor for another sync scope")]
     CursorScope,
@@ -1728,7 +1810,11 @@ where
         let result = self
             .reconcile_exchange(cursor, response, &operation_ids, latency)
             .await;
-        if result.is_err() {
+        if matches!(&result, Err(ClientError::AuthorityChanged { .. })) {
+            self.store
+                .mark_retry_fenced(&operation_ids, u64::MAX, self.current_lease())
+                .await?;
+        } else if result.is_err() {
             self.store
                 .mark_retry_fenced(
                     &operation_ids,
@@ -1758,15 +1844,7 @@ where
         submitted_operations: &[OperationId],
         latency: Duration,
     ) -> Result<SyncOutcome, ClientError> {
-        match response.directive {
-            SyncDirective::Continue => {}
-            SyncDirective::UpgradeRequired { minimum, current } => {
-                return Err(ClientError::UpgradeRequired { minimum, current });
-            }
-            SyncDirective::ResyncRequired { reason } => {
-                return Err(ClientError::ResyncRequired { reason });
-            }
-        }
+        validate_sync_directive(&response.directive)?;
         if response.protocol != self.config.protocol {
             return Err(ClientError::Protocol);
         }
@@ -1785,6 +1863,23 @@ where
         }
         if response.next_cursor.scope != self.config.session.scope_id {
             return Err(ClientError::CursorScope);
+        }
+        if let Some(old) = cursor {
+            if old.authority_id != aequora_types::AuthorityId::LEGACY_UNBOUND
+                && response.next_cursor.authority_id != old.authority_id
+            {
+                return Err(ClientError::AuthorityIdChanged);
+            }
+            if response.next_cursor.authority_epoch < old.authority_epoch {
+                return Err(ClientError::AuthorityRollbackDetected);
+            }
+            if response.next_cursor.authority_epoch > old.authority_epoch {
+                return Err(ClientError::AuthorityChanged {
+                    authority_id: response.next_cursor.authority_id,
+                    previous_epoch: old.authority_epoch,
+                    current_epoch: response.next_cursor.authority_epoch,
+                });
+            }
         }
         if cursor.is_some_and(|old| response.next_cursor.sequence < old.sequence) {
             return Err(ClientError::CursorRegression);
@@ -1916,6 +2011,7 @@ where
     }
 
     async fn bootstrap_unreserved(&self) -> Result<BootstrapOutcome, ClientError> {
+        let trusted_cursor = self.store.load_cursor(self.config.session.scope_id).await?;
         let progress = self
             .store
             .snapshot_progress(self.config.session.scope_id)
@@ -1936,6 +2032,16 @@ where
                 capabilities: self.config.capabilities.clone(),
             };
             let response = self.bootstrap_page_with_retry(request).await?;
+            if let Some(trusted) = trusted_cursor {
+                if trusted.authority_id != aequora_types::AuthorityId::LEGACY_UNBOUND
+                    && response.cursor.authority_id != trusted.authority_id
+                {
+                    return Err(ClientError::AuthorityIdChanged);
+                }
+                if response.cursor.authority_epoch < trusted.authority_epoch {
+                    return Err(ClientError::AuthorityRollbackDetected);
+                }
+            }
             validate_snapshot_page(
                 &response,
                 self.config.protocol,
@@ -2203,6 +2309,28 @@ fn validate_operation_results(
         return Err(ClientError::OperationResults);
     }
     Ok(())
+}
+
+fn validate_sync_directive(directive: &SyncDirective) -> Result<(), ClientError> {
+    match directive {
+        SyncDirective::Continue => Ok(()),
+        SyncDirective::UpgradeRequired { minimum, current } => Err(ClientError::UpgradeRequired {
+            minimum: *minimum,
+            current: *current,
+        }),
+        SyncDirective::ResyncRequired { reason } => {
+            Err(ClientError::ResyncRequired { reason: *reason })
+        }
+        SyncDirective::AuthorityChanged {
+            authority_id,
+            previous_epoch,
+            current_epoch,
+        } => Err(ClientError::AuthorityChanged {
+            authority_id: *authority_id,
+            previous_epoch: *previous_epoch,
+            current_epoch: *current_epoch,
+        }),
+    }
 }
 
 fn trace_context(request_id: RequestId, session: &SessionMetadata) -> TraceContext {
