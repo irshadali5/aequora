@@ -138,6 +138,10 @@ local ACID, durable intent, idempotent authoritative execution, and local reconc
 These boundaries make failure behavior explainable instead of pretending an offline distributed
 system has stronger semantics than it can provide.
 
+For formal correctness proofs, the 138-invariant catalog, and causality DAG specification, see:
+- [`sys-arch/01-formal-correctness.md`](sys-arch/01-formal-correctness.md): Normative invariant registry and verification model.
+- [`sys-arch/02-causality-provenance-lineage.md`](sys-arch/02-causality-provenance-lineage.md): Causal cuts, hybrid logical clocks (HLC), and dependency DAGs.
+
 ---
 
 ## 3. Install Aequora and select features
@@ -902,6 +906,12 @@ next.
 
 ## 12. Run background synchronization
 
+Background synchronization orchestrates multi-process coordinator election, QoS rate adaptation,
+and dynamic dataset subscriptions. For the underlying architecture, see:
+- [`sys-arch/05-local-multiprocess-coordination.md`](sys-arch/05-local-multiprocess-coordination.md): Multi-process coordinator election and shared locking.
+- [`sys-arch/06-adaptive-sync-scheduler-qos.md`](sys-arch/06-adaptive-sync-scheduler-qos.md): Priority queuing and battery/network-aware sync policies.
+- [`sys-arch/07-subscription-scope-dynamic-dataset.md`](sys-arch/07-subscription-scope-dynamic-dataset.md): Parameterized scope filters and dynamic subscriptions.
+
 ```rust
 use aequora::client::{SyncCoordinator, SyncTrigger};
 use std::sync::Arc;
@@ -1152,7 +1162,7 @@ Version comparison is strict:
 - Update/delete requires an exact current `EntityVersion`.
 - An accepted transition advances exactly one version.
 
-The safe default is `RejectConflicts`.
+The safe default is `RejectConflicts`. For operation semantics, aggregate profiles, and consistency policies, see [`sys-arch/11-operation-semantics-consistency-profiles.md`](sys-arch/11-operation-semantics-consistency-profiles.md).
 
 ### 14.1 Register policies by operation type
 
@@ -1218,6 +1228,10 @@ Deletion conflicts are not automatically resolved by the provided CRDT merger.
 
 ## 15. Bootstrap, cursors, scopes, and tombstones
 
+For offline operation log compaction, timeline rebasing, and chunked bootstrap architecture, see:
+- [`sys-arch/04-offline-compaction-rebase.md`](sys-arch/04-offline-compaction-rebase.md): Offline compaction and queue footprint optimization.
+- [`sys-arch/10-large-snapshot-streaming-bootstrap.md`](sys-arch/10-large-snapshot-streaming-bootstrap.md): Chunked snapshot transfer and cold-replica bootstrap.
+
 ### 15.1 Snapshot-first onboarding
 
 A new client should install a consistent snapshot instead of replaying an unbounded history. The
@@ -1256,7 +1270,7 @@ compaction must not delete operation-ledger or audit evidence.
 ## 16. Synchronize large blobs separately
 
 Do not place large files in normal operation batches. Embed a small `BlobRef` in domain state and
-transfer content through a separate bounded blob capability.
+transfer content through a separate bounded blob capability (see [`sys-arch/19-performance-engineering-memory-architecture.md`](sys-arch/19-performance-engineering-memory-architecture.md)).
 
 ```rust
 use aequora::blob::{BlobDigest, BlobManifest, BlobStore, InMemoryBlobStore};
@@ -1336,6 +1350,10 @@ Operational alerts should include:
 Aequora's protocol is database-neutral. SQLite, Redb, a document store, or another database is
 usable only after you implement and verify the required behavioral capabilities. Mentioning a
 database in configuration is not enough.
+
+For the database storage schema and conformance test suite specifications, see:
+- [`sys-arch/22-sync-metadata-schema-internal-persistence.md`](sys-arch/22-sync-metadata-schema-internal-persistence.md): Database schemas, indexes, and persistence specification.
+- [`sys-arch/30-certification-conformance-ecosystem-architecture.md`](sys-arch/30-certification-conformance-ecosystem-architecture.md): Automated compliance test suites and certification profiles.
 
 ### 18.1 Local adapter capabilities
 
@@ -1418,6 +1436,8 @@ reference.
 ---
 
 ## 19. Use QUIC or a custom transport
+
+For protocol negotiation, version handshakes, and compatibility governance, see [`sys-arch/21-protocol-negotiation-compatibility-governance.md`](sys-arch/21-protocol-negotiation-compatibility-governance.md).
 
 ### 19.1 QUIC
 
@@ -1904,10 +1924,62 @@ cargo test -p aequora-testkit --test governance_contracts
 
 ## 24. Where to go next
 
-Use these repository resources as deeper references:
+The authoritative system-architecture specifications live in the [`sys-arch/`](sys-arch/README.md) directory. Use these resources as deeper references:
+
+### System Architecture Specifications (`sys-arch/`)
+
+- **[System Architecture Index](sys-arch/README.md)**: Full architecture directory and design roadmap.
+
+#### 🏛️ Tier 1: Core Synchronizer & Data Engine
+- [Part 01: Formal Correctness, Lineage Invariants, and Verification Model](sys-arch/01-formal-correctness.md)
+- [Part 02: Causality, Provenance, Dependency DAGs, and Lineage Architecture](sys-arch/02-causality-provenance-lineage.md)
+- [Part 03: Anti-Entropy, Integrity Verification, Divergence Detection, and Self-Repair](sys-arch/03-anti-entropy-self-repair.md)
+- [Part 04: Offline Operation Compaction, Coalescing, Rebase, and Queue Optimization](sys-arch/04-offline-compaction-rebase.md)
+
+#### 🔄 Tier 2: Local Coordination & Scheduling
+- [Part 05: Local Multi-Process, Multi-Window, and Coordinator Election Architecture](sys-arch/05-local-multiprocess-coordination.md)
+- [Part 06: Adaptive Sync Scheduler and Quality-of-Service Architecture](sys-arch/06-adaptive-sync-scheduler-qos.md)
+- [Part 07: Subscription, Scope, Filter, and Dynamic Dataset Architecture](sys-arch/07-subscription-scope-dynamic-dataset.md)
+- [Part 08: Live Sync, Push Hints, Presence, and Near-Real-Time Delivery Architecture](sys-arch/08-live-sync-push-presence.md)
+
+#### ⚡ Tier 3: Data Transfer & Execution
+- [Part 09: Bulk Import, Export, Seed, and Initial Migration Architecture](sys-arch/09-bulk-import-export-seed-migration.md)
+- [Part 10: Large Snapshot, Streaming Bootstrap, and Resumable Transfer Architecture](sys-arch/10-large-snapshot-streaming-bootstrap.md)
+- [Part 11: Operation Semantics, Aggregate Policies, and Consistency Profiles](sys-arch/11-operation-semantics-consistency-profiles.md)
+- [Part 12: Deterministic Domain Execution, Replay, and Reproducibility Architecture](sys-arch/12-deterministic-execution-replay.md)
+
+#### 🔐 Tier 4: Audit, Governance & Security
+- [Part 13: Data Provenance, Auditability, and Explainability Architecture](sys-arch/13-data-provenance-auditability-explainability.md)
+- [Part 14: Data Governance, Retention, Legal Hold, Erasure, and Lifecycle Architecture](sys-arch/14-data-governance-retention-erasure.md)
+- [Part 15: Cryptographic Integrity, Key Management, Signed Artifacts, and E2E Protection](sys-arch/15-cryptographic-integrity-key-management-e2e.md)
+- [Part 16: Authority Failover, Timeline Epochs, Fork Detection, and Disaster Promotion](sys-arch/16-authority-failover-timeline-epochs-fork-detection.md)
+
+#### 🚀 Tier 5: Scale & High Performance
+- [Part 17: Multi-Region Read Architecture and Future Single-Writer Global Deployment](sys-arch/17-multi-region-read-single-writer-global.md)
+- [Part 18: Backpressure, Admission Control, Fairness, and Overload Architecture](sys-arch/18-backpressure-admission-fairness-overload.md)
+- [Part 19: Performance Engineering, Memory Architecture, and Zero-Copy Boundaries](sys-arch/19-performance-engineering-memory-architecture.md)
+- [Part 20: Resource-Constrained Client Architecture](sys-arch/20-resource-constrained-client-architecture.md)
+
+#### 🛠️ Tier 6: Protocols, Metadata & Workflows
+- [Part 21: Protocol Negotiation, Compatibility Governance, and Evolution Architecture](sys-arch/21-protocol-negotiation-compatibility-governance.md)
+- [Part 22: Sync Metadata Schema and Internal Persistence Specification](sys-arch/22-sync-metadata-schema-internal-persistence.md)
+- [Part 23: Background Jobs, Durable Workflows, and Side-Effect Engine Architecture](sys-arch/23-background-jobs-durable-workflows-side-effects.md)
+- [Part 24: Operational Control Plane and Admin API Architecture](sys-arch/24-operational-control-plane-admin-api.md)
+
+#### 🔍 Tier 7: Diagnostics, Governance & Conformance
+- [Part 25: Diagnostics, Forensics, and Reproducible Incident Bundle Architecture](sys-arch/25-diagnostics-forensics-reproducible-incident-bundles.md)
+- [Part 26: Legacy Application Compatibility and Incremental Adoption Architecture](sys-arch/26-legacy-application-compatibility-incremental-adoption.md)
+- [Part 27: Dedicated Security Threat Model and Abuse Resistance Architecture](sys-arch/27-security-threat-model-abuse-resistance.md)
+- [Part 28: Multi-Consumer Change Feed Architecture](sys-arch/28-multi-consumer-change-feed-architecture.md)
+- [Part 29: Schema, Operation Registry, and Developer Governance Architecture](sys-arch/29-schema-operation-registry-developer-governance.md)
+- [Part 30: Certification, Conformance, and Ecosystem Architecture](sys-arch/30-certification-conformance-ecosystem-architecture.md)
+
+---
+
+### Implementation Evidence & Runnable Examples
 
 - [`plan.md`](plan.md): governing database-neutral architecture and implementation direction.
-- [`next.md`](next.md): architecture-specification index; detailed design lives in [`sys-arch/`](sys-arch/).
+- [`next.md`](next.md): architecture-specification index pointing to [`sys-arch/`](sys-arch/).
 - [`ACID.md`](ACID.md): transaction, isolation, idempotency, and recovery model.
 - [`docs/next-completion.md`](docs/next-completion.md): architecture-to-code implementation map.
 - [`docs/acid-compliance.md`](docs/acid-compliance.md): ACID requirements mapped to contracts/tests.
