@@ -22,6 +22,7 @@ quic = ["dep:aequora-quic", "aequora-config/quic"]
 record-sync = ["dep:aequora-mapping", "dep:aequora-migration", "dep:aequora-schema"]
 
 [dependencies]
+aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
 aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
@@ -47,6 +48,7 @@ aequora-mapping = { version = "0.1.0", path = "../aequora-mapping", optional = t
 aequora-migration = { version = "0.1.0", path = "../aequora-migration", optional = true }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-partition = { version = "0.1.0", path = "../aequora-partition" }
+aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }

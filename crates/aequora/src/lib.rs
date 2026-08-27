@@ -4,6 +4,7 @@ extern crate self as aequora;
 
 pub use aequora_macros::{AequoraAggregate, AequoraOperation};
 
+pub use aequora_admission as admission;
 pub use aequora_audit as audit;
 pub use aequora_authority as authority;
 pub use aequora_blob as blob;
@@ -29,6 +30,7 @@ pub use aequora_mapping as mapping;
 pub use aequora_migration as migration;
 pub use aequora_observability as observability;
 pub use aequora_partition as partition;
+pub use aequora_performance as performance;
 pub use aequora_profile as profile;
 pub use aequora_protocol as protocol;
 pub use aequora_queue as queue;
@@ -68,6 +70,14 @@ pub use aequora_testkit as testkit;
 
 /// Common imports needed to build client and server integrations.
 pub mod prelude {
+    pub use aequora_admission::{
+        AdmissionController, AdmissionMetricsSnapshot, AdmissionPermit, AdmissionPolicy,
+        AdmissionRejection, BrownoutPolicy, ClassBudget, CostUnits, FairQueue, FairQueueConfig,
+        HierarchicalAdmission, LoadPolicy, LoadSignals, LoadState, LoadStateTracker,
+        LoadThresholds, PolicyError as AdmissionPolicyError, QueueRejection, QueuedWork, RateLimit,
+        RequestLimits, RequestShape, ResourceBudget, ResourceDomain, ServerPriorityPolicy,
+        TenantAdmissionPolicy, TokenBucket, WorkDescriptor as AdmissionWorkDescriptor,
+    };
     pub use aequora_audit::{
         AUDIT_FORMAT_VERSION, AuditAccess, AuditActionId, AuditActor, AuditAnchorSink,
         AuditArchiveSink, AuditCategory, AuditChange, AuditChangeKind, AuditCheckpoint,
@@ -95,7 +105,11 @@ pub mod prelude {
         AxumConfig, DrainOutcome, ReadinessFn, ReadinessProbe, ServerLifecycle,
         router_with_lifecycle, router_with_readiness,
     };
-    pub use aequora_blob::{BlobDigest, BlobManifest, BlobRef, BlobStore, InMemoryBlobStore};
+    pub use aequora_blob::{
+        BlobDigest, BlobDownloadSink, BlobManifest, BlobRef, BlobStore, BlobUploadSource,
+        InMemoryBlobStore, StreamingBlobStore, download_stream as download_blob_stream,
+        upload_stream as upload_blob_stream,
+    };
     pub use aequora_bootstrap::{
         ActivationEvidence, ActivationOutcome, AuthorityEpoch, BootstrapError, BootstrapJob,
         BootstrapJobId, BootstrapMutationPolicy, BootstrapPreflight, BootstrapState,
@@ -218,6 +232,14 @@ pub mod prelude {
     pub use aequora_partition::{
         PartitionExpression, PartitionHierarchy, PartitionPolicy, PartitionPolicyError,
     };
+    pub use aequora_performance::{
+        BenchmarkEnvironment, BenchmarkKind, BoundedQueue, CpuBudget, HOT_QUERY_CONTRACTS,
+        HotQuery, HotQueryContract, ImmutableRegistry, InvalidationCoalescer, MeasuredPhase,
+        MemoryBudget, MemoryPressure, PERFORMANCE_INVARIANTS, PagedView, PerformanceError,
+        PerformancePolicy, PerformanceProfile, PerformanceReport, PhaseMeasurement,
+        PressureDecision, ReactiveViewBudget, Regression, RegressionMetric, RegressionPolicy,
+        StreamBudget, WorkloadManifest, WorkloadProfile, compare_reports,
+    };
     pub use aequora_profile::{
         AdapterProfileCapabilities, AggregateDefinition, AggregateProfile, AggregateProfileBuilder,
         AggregateProfileId, AuditPolicy, ConsistencyProfile, ConsistencyProfileKind,
@@ -287,8 +309,8 @@ pub mod prelude {
         SubscriptionState, project_filtered_page,
     };
     pub use aequora_server::{
-        AequoraServer, ExchangeService, ServerBuildError, ServerCommandOutcome, ServerConfig,
-        SyncServer, SyncServerBuilder,
+        AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,
+        ServerCommandOutcome, ServerConfig, ServerError, SyncServer, SyncServerBuilder,
     };
     pub use aequora_store::{
         AdapterCapabilities, AdapterCompatibilityError, AdapterManifest, AdapterManifestProvider,
