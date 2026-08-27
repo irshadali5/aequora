@@ -16,7 +16,11 @@ impl AequoraServer {
 pub mod prelude {
     pub use crate::{
         AequoraServer, ExchangeService, ServerBuildError, ServerCommandOutcome, ServerConfig,
-        ServerError, SyncServer, SyncServerBuilder,
+        ServerError, ServerRegionalReadGuard, SyncServer, SyncServerBuilder,
+    };
+    pub use aequora_authority::{
+        AuthorityController, AuthorityPromotionPolicy, AuthorityRole, AuthorityRuntimeMode,
+        AuthorityState,
     };
     pub use aequora_clock::{Clock, SystemClock};
     pub use aequora_conflict::{ConflictResolver, RejectConflicts};
@@ -24,12 +28,19 @@ pub mod prelude {
         AuthContext, DerivedEventProvenance, DomainOperation, JobProvenance, OperationExecutor,
         OperationHandler, OperationRegistry, ScopeAuthorizer, TrustedProvenance,
     };
+    pub use aequora_region::{
+        ReadResponseMetadata, RegionError, RegionalReadRequest, ReplicaObservation,
+    };
     pub use aequora_store::{
         AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRequirements,
         AdapterRole, AdapterTier, AuthoritativeStore, ProductionAdapterPair,
     };
 }
 
+use aequora_authority::{
+    AuthorityController, AuthorityError, AuthorityPromotionPolicy, AuthorityRole,
+    AuthorityRuntimeMode, AuthorityState, CursorDisposition, validate_cursor,
+};
 use aequora_clock::Clock;
 use aequora_compute::{ComputeError, ComputePool};
 use aequora_conflict::{
@@ -48,12 +59,16 @@ use aequora_protocol::{
     OperationEnvelope, OperationRejection, RejectionCode, ResyncReason, SessionMetadata,
     SyncDirective, SyncRequest, SyncResponse,
 };
+use aequora_region::{
+    ReadResponseMetadata, RegionError, RegionalReadRequest, ReplicaObservation, ReplicaReadGuard,
+};
 use aequora_store::{
     AdapterCompatibilityError, AdapterManifestProvider, AdapterRequirements, AuthoritativeStore,
     CommitOperation, CommitOutcome, StoreError, StoreErrorKind,
 };
 use aequora_types::{
-    Cursor, EntityVersion, EventId, OperationId, RequestId, Sequence, SessionId, SyncScopeId,
+    AuthorityId, AuthorityInstanceId, EntityVersion, EventId, OperationId, RequestId, Sequence,
+    SessionId, SyncScopeId,
 };
 use aequora_validator::{
     ProtocolLimits, ValidationError, validate_bootstrap_request, validate_request,
@@ -69,6 +84,40 @@ use std::{
     time::Instant,
 };
 use thiserror::Error;
+
+/// Replica-side defense-in-depth for regional read API handlers.
+///
+/// Routing metadata can be stale, so every server instance validates its own durable watermark,
+/// epoch, projection version, and authorization freshness immediately before reading.
+#[derive(Clone, Debug)]
+pub struct ServerRegionalReadGuard {
+    observation: ReplicaObservation,
+}
+
+impl ServerRegionalReadGuard {
+    /// Creates a guard from the adapter's latest durable apply observation.
+    #[must_use]
+    pub const fn new(observation: ReplicaObservation) -> Self {
+        Self { observation }
+    }
+
+    /// Replaces health and watermark state after an atomic adapter observation refresh.
+    pub fn update(&mut self, observation: ReplicaObservation) {
+        self.observation = observation;
+    }
+
+    /// Authorizes one regional read and returns freshness metadata for its response.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed if this node cannot prove the requested consistency and security bounds.
+    pub fn authorize(
+        &self,
+        request: RegionalReadRequest,
+    ) -> Result<ReadResponseMetadata, RegionError> {
+        ReplicaReadGuard::validate(&self.observation, request)
+    }
+}
 
 /// Server processing configuration.
 #[derive(Clone, Copy, Debug)]
@@ -135,6 +184,9 @@ pub enum ServerError {
         /// Retry delay safe to expose to clients and transports.
         retry_after_seconds: u64,
     },
+    /// Authority identity, epoch, runtime mode, or write fence rejected the request.
+    #[error("authority rejected synchronization: {0}")]
+    Authority(#[from] AuthorityError),
 }
 
 /// Runtime maintenance policy for an [`ExchangeService`].
@@ -301,6 +353,7 @@ pub struct SyncServer<S, E, R, C> {
     config: ServerConfig,
     compute: Option<Arc<ComputePool>>,
     observer: Arc<dyn Observer>,
+    authority: AuthorityController,
 }
 
 /// Marker used only before a server builder receives its authoritative store.
@@ -337,6 +390,8 @@ pub struct SyncServerBuilder<
     config: ServerConfig,
     compute: Option<Arc<ComputePool>>,
     observer: Arc<dyn Observer>,
+    authority: AuthorityController,
+    authority_explicit: bool,
 }
 
 /// Production server assembly failure.
@@ -345,6 +400,9 @@ pub enum ServerBuildError {
     /// Selected authority adapter does not meet production requirements.
     #[error(transparent)]
     Adapter(#[from] AdapterCompatibilityError),
+    /// Production assembly requires a deployment-specific authority identity/controller.
+    #[error("production server requires an explicit authority controller")]
+    AuthorityRequired,
 }
 
 impl Default for SyncServerBuilder {
@@ -357,6 +415,8 @@ impl Default for SyncServerBuilder {
             config: ServerConfig::default(),
             compute: None,
             observer: Arc::new(NoopObserver),
+            authority: development_authority(),
+            authority_explicit: false,
         }
     }
 }
@@ -381,6 +441,8 @@ impl<S, E, R, C> SyncServerBuilder<S, E, R, C> {
             config: self.config,
             compute: self.compute,
             observer: self.observer,
+            authority: self.authority,
+            authority_explicit: self.authority_explicit,
         }
     }
 
@@ -395,6 +457,8 @@ impl<S, E, R, C> SyncServerBuilder<S, E, R, C> {
             config: self.config,
             compute: self.compute,
             observer: self.observer,
+            authority: self.authority,
+            authority_explicit: self.authority_explicit,
         }
     }
 
@@ -409,6 +473,8 @@ impl<S, E, R, C> SyncServerBuilder<S, E, R, C> {
             config: self.config,
             compute: self.compute,
             observer: self.observer,
+            authority: self.authority,
+            authority_explicit: self.authority_explicit,
         }
     }
 
@@ -423,6 +489,8 @@ impl<S, E, R, C> SyncServerBuilder<S, E, R, C> {
             config: self.config,
             compute: self.compute,
             observer: self.observer,
+            authority: self.authority,
+            authority_explicit: self.authority_explicit,
         }
     }
 
@@ -446,6 +514,14 @@ impl<S, E, R, C> SyncServerBuilder<S, E, R, C> {
         self.observer = observer;
         self
     }
+
+    /// Installs authority metadata, fencing, failover, and recovery enforcement.
+    #[must_use]
+    pub fn authority(mut self, authority: AuthorityController) -> Self {
+        self.authority = authority;
+        self.authority_explicit = true;
+        self
+    }
 }
 
 impl<S, E, R, C> SyncServerBuilder<Arc<S>, Arc<E>, Arc<R>, Arc<C>>
@@ -466,6 +542,7 @@ where
             config: self.config,
             compute: self.compute,
             observer: self.observer,
+            authority: self.authority,
         }
     }
 }
@@ -485,6 +562,9 @@ where
     ///
     /// Returns a typed adapter compatibility failure before any request is accepted.
     pub fn build_production(self) -> Result<SyncServer<S, E, R, C>, ServerBuildError> {
+        if !self.authority_explicit {
+            return Err(ServerBuildError::AuthorityRequired);
+        }
         AdapterRequirements::PRODUCTION_AUTHORITATIVE.verify(self.store.adapter_manifest())?;
         Ok(self.build())
     }
@@ -502,6 +582,7 @@ impl<S, E, R, C> SyncServer<S, E, R, C> {
             config: ServerConfig::default(),
             compute: None,
             observer: Arc::new(NoopObserver),
+            authority: development_authority(),
         }
     }
 
@@ -524,6 +605,19 @@ impl<S, E, R, C> SyncServer<S, E, R, C> {
     pub fn with_observer(mut self, observer: Arc<dyn Observer>) -> Self {
         self.observer = observer;
         self
+    }
+
+    /// Installs authority metadata, fencing, failover, and recovery enforcement.
+    #[must_use]
+    pub fn with_authority(mut self, authority: AuthorityController) -> Self {
+        self.authority = authority;
+        self
+    }
+
+    /// Returns the failover controller used by administrative/control-plane code.
+    #[must_use]
+    pub const fn authority(&self) -> &AuthorityController {
+        &self.authority
     }
 }
 
@@ -607,6 +701,7 @@ where
         scope_id: SyncScopeId,
         command_digest: [u8; 32],
     ) -> Result<ProcessResult, ServerError> {
+        let authority_commit = self.authority.authorize_write()?;
         let authenticated = match IncomingOperation::new(operation).authenticate(auth) {
             Ok(authenticated) => authenticated,
             Err(error) => {
@@ -777,6 +872,7 @@ where
         };
         let event = provenance.primary_event(EventId::new());
         let commit = CommitOperation {
+            authority: Some(authority_commit),
             operation_id: operation.operation_id,
             event_id: event.event_id,
             operation_lineage: provenance.operation_lineage(),
@@ -793,6 +889,7 @@ where
             timestamp: self.clock.now(),
             command_digest,
         };
+        self.authority.verify_commit_context(authority_commit)?;
         let database_started = Instant::now();
         let outcome = self.store.commit_operation(commit).await;
         self.record_phase(ServerPhaseKind::Database, database_started);
@@ -840,6 +937,7 @@ where
         auth: AuthContext,
         request: SyncRequest,
     ) -> Result<SyncResponse, ServerError> {
+        let authority = self.authority.state()?;
         if request.protocol < self.config.limits.minimum_protocol
             || request.protocol > self.config.limits.current_protocol
         {
@@ -853,10 +951,9 @@ where
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: request.cursor.unwrap_or(Cursor {
-                    scope: request.session.scope_id,
-                    sequence: Sequence(0),
-                }),
+                next_cursor: request
+                    .cursor
+                    .unwrap_or_else(|| authority.cursor(request.session.scope_id, Sequence(0))),
                 has_more: false,
                 server_time: self.clock.now(),
             });
@@ -876,6 +973,29 @@ where
             .await
             .map_err(ServerError::ScopeAuthorization)?;
 
+        if let Some(cursor) = request.cursor {
+            match validate_cursor(authority, cursor)? {
+                CursorDisposition::Continue => {}
+                CursorDisposition::AuthorityChanged { previous, current } => {
+                    return Ok(SyncResponse {
+                        protocol: request.protocol,
+                        directive: SyncDirective::AuthorityChanged {
+                            authority_id: authority.authority_id,
+                            previous_epoch: previous,
+                            current_epoch: current,
+                        },
+                        acknowledged: Vec::new(),
+                        rejected: Vec::new(),
+                        conflicts: Vec::new(),
+                        changes: Vec::new(),
+                        next_cursor: authority.cursor(request.session.scope_id, Sequence(0)),
+                        has_more: false,
+                        server_time: self.clock.now(),
+                    });
+                }
+            }
+        }
+
         let start = request.cursor.map_or(Sequence(0), |cursor| cursor.sequence);
         let database_started = Instant::now();
         let minimum_cursor = self
@@ -893,10 +1013,7 @@ where
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor {
-                    scope: request.session.scope_id,
-                    sequence: minimum_cursor,
-                },
+                next_cursor: authority.cursor(request.session.scope_id, minimum_cursor),
                 has_more: false,
                 server_time: self.clock.now(),
             });
@@ -951,10 +1068,7 @@ where
             rejected,
             conflicts,
             changes: page.changes,
-            next_cursor: Cursor {
-                scope: request.session.scope_id,
-                sequence: page.next_sequence,
-            },
+            next_cursor: authority.cursor(request.session.scope_id, page.next_sequence),
             has_more: page.has_more,
             server_time: self.clock.now(),
         };
@@ -1047,6 +1161,8 @@ where
         auth: AuthContext,
         request: BootstrapRequest,
     ) -> Result<BootstrapResponse, ServerError> {
+        let authority = self.authority.state()?;
+        self.authority.validate_startup()?;
         let validation_started = Instant::now();
         let validation = validate_bootstrap_request(&request, self.config.limits);
         self.record_phase(ServerPhaseKind::Validation, validation_started);
@@ -1067,10 +1183,12 @@ where
             let database_started = Instant::now();
             let descriptor = self
                 .store
-                .create_snapshot(
+                .create_snapshot_in_timeline(
                     auth.tenant_id,
                     request.session.scope_id,
                     &request.session.partitions,
+                    authority.authority_id,
+                    authority.epoch,
                 )
                 .await?;
             self.record_phase(ServerPhaseKind::Database, database_started);
@@ -1088,6 +1206,22 @@ where
             )
             .await?;
         self.record_phase(ServerPhaseKind::Database, database_started);
+        if page.descriptor.cursor.authority_id != AuthorityId::LEGACY_UNBOUND {
+            if page.descriptor.cursor.authority_id != authority.authority_id {
+                return Err(AuthorityError::AuthorityIdChanged {
+                    trusted: authority.authority_id,
+                    presented: page.descriptor.cursor.authority_id,
+                }
+                .into());
+            }
+            if page.descriptor.cursor.authority_epoch != authority.epoch {
+                return Err(AuthorityError::ArtifactEpochMismatch {
+                    artifact: page.descriptor.cursor.authority_epoch,
+                    current: authority.epoch,
+                }
+                .into());
+            }
+        }
         if page.descriptor.cursor.scope != request.session.scope_id {
             return Err(ServerError::IdentityMismatch);
         }
@@ -1097,7 +1231,7 @@ where
         Ok(BootstrapResponse {
             protocol: request.protocol,
             snapshot_id: page.descriptor.snapshot_id,
-            cursor: page.descriptor.cursor,
+            cursor: authority.cursor(request.session.scope_id, page.descriptor.cursor.sequence),
             offset: request.offset,
             entities: page.entities,
             next_offset: page.next_offset,
@@ -1183,6 +1317,17 @@ fn duration_micros(duration: std::time::Duration) -> u64 {
 
 fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn development_authority() -> AuthorityController {
+    let mut state = AuthorityState::new(
+        AuthorityId::LOCAL_DEVELOPMENT,
+        AuthorityInstanceId::new(),
+        AuthorityRole::Primary,
+        0,
+    );
+    state.runtime_mode = AuthorityRuntimeMode::Serving;
+    AuthorityController::new(state, AuthorityPromotionPolicy::default())
 }
 
 fn server_result_outcome<T>(result: &Result<T, ServerError>) -> OutcomeKind {
