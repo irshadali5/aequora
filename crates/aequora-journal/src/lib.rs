@@ -149,26 +149,12 @@ mod tests {
         let mut watermarks = CursorWatermarks::default();
         assert!(
             watermarks
-                .update(
-                    DeviceId::new(),
-                    Cursor {
-                        scope,
-                        sequence: Sequence(10)
-                    },
-                    10_000,
-                )
+                .update(DeviceId::new(), Cursor::legacy(scope, Sequence(10)), 10_000,)
                 .is_ok()
         );
         assert!(
             watermarks
-                .update(
-                    DeviceId::new(),
-                    Cursor {
-                        scope,
-                        sequence: Sequence(5)
-                    },
-                    10_000,
-                )
+                .update(DeviceId::new(), Cursor::legacy(scope, Sequence(5)), 10_000,)
                 .is_ok()
         );
         let operation_id = OperationId::new();

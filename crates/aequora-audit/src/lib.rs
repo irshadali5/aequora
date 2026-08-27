@@ -7,8 +7,8 @@
 #![allow(clippy::missing_errors_doc)]
 
 use aequora_types::{
-    ActorId, CorrelationId, DeviceId, EntityRef, EventId, LineageRef, OperationId, RepairId,
-    SyncScopeId, TenantId,
+    ActorId, AuthorityTimeline, CorrelationId, DeviceId, EntityRef, EventId, LineageRef,
+    OperationId, RepairId, SyncScopeId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -681,6 +681,7 @@ fn chain_hash(
 /// Unsigned checkpoint suitable for an application-owned signing/immutable-anchor boundary.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AuditCheckpoint {
+    pub authority: AuthorityTimeline,
     pub tenant_id: TenantId,
     pub partition: AuditPartition,
     pub sequence: AuditSequence,

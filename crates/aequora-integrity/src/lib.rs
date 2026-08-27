@@ -842,10 +842,7 @@ mod tests {
         let scope = SyncScopeId::from_uuid(uuid_from_byte(42));
         IntegritySnapshot::build(
             scope,
-            Cursor {
-                scope,
-                sequence: Sequence(9),
-            },
+            Cursor::legacy(scope, Sequence(9)),
             CURRENT_INTEGRITY_GENERATION,
             PartitionScheme::new(8).unwrap_or_else(|error| panic!("{error}")),
             entities,
@@ -906,10 +903,7 @@ mod tests {
             opaque_operation: vec![7, 8, 9],
         }];
         let scope = SyncScopeId::new();
-        let cursor = Cursor {
-            scope,
-            sequence: Sequence(44),
-        };
+        let cursor = Cursor::legacy(scope, Sequence(44));
         let repaired = apply_authoritative_repair(&current, &[replacement], &pending, cursor);
         assert_eq!(repaired.pending_intents, pending);
         assert_eq!(repaired.sync_cursor, cursor);

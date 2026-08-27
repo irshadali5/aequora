@@ -1,9 +1,9 @@
 //! Stable wire data-transfer objects for synchronization exchanges.
 
 use aequora_types::{
-    ActorId, Cursor, DeviceId, EntityRef, EntityVersion, EventId, HybridTimestamp, LineageContext,
-    OperationId, ProtocolVersion, RegionId, RequestId, SchemaVersion, Sequence, SessionId,
-    SnapshotId, SyncScopeId, TenantId,
+    ActorId, AuthorityEpoch, AuthorityId, Cursor, DeviceId, EntityRef, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, OperationId, ProtocolVersion, RegionId, RequestId,
+    SchemaVersion, Sequence, SessionId, SnapshotId, SyncScopeId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -306,6 +306,8 @@ pub enum Capability {
     EncryptedSnapshotV1,
     /// The peer can produce or verify device operation signatures version one.
     DeviceSignatureV1,
+    /// The peer binds every synchronization cursor to an authority ID and epoch.
+    AuthorityEpochV1,
 }
 
 /// Client-enforced response limits advertised to the server.
@@ -504,6 +506,15 @@ pub enum SyncDirective {
     ResyncRequired {
         /// Stable reason suitable for application policy and diagnostics.
         reason: ResyncReason,
+    },
+    /// The authority timeline advanced and incremental replay must freeze before rebootstrap.
+    AuthorityChanged {
+        /// Logical authority that owns the replacement timeline.
+        authority_id: AuthorityId,
+        /// Epoch supplied by the rejected client cursor.
+        previous_epoch: AuthorityEpoch,
+        /// Current epoch that must be bootstrapped.
+        current_epoch: AuthorityEpoch,
     },
 }
 

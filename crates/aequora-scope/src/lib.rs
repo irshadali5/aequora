@@ -254,10 +254,7 @@ impl ScopeCursor {
     /// anti-entropy adapters. Callers retain this full binding beside the returned value.
     #[must_use]
     pub const fn legacy_cursor(self) -> Cursor {
-        Cursor {
-            scope: self.scope_id,
-            sequence: self.sequence,
-        }
+        Cursor::legacy(self.scope_id, self.sequence)
     }
 }
 

@@ -6,6 +6,7 @@
 
 use aequora_protocol::SnapshotEntity;
 use aequora_scope::{ScopeGeneration, ScopeVersion};
+pub use aequora_types::{AuthorityEpoch, AuthorityId};
 use aequora_types::{OperationId, Sequence, SnapshotId, SyncScopeId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -73,14 +74,10 @@ nonzero_u64!(
     /// Monotonic local replica generation; staging and active data never share a generation.
     ReplicaGeneration
 );
-nonzero_u64!(
-    /// Authority timeline epoch used to reject stale manifests before activation.
-    AuthorityEpoch
-);
-
 /// One immutable authoritative state boundary.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SnapshotBoundary {
+    pub authority_id: AuthorityId,
     pub scope_id: SyncScopeId,
     pub scope_version: ScopeVersion,
     pub scope_generation: ScopeGeneration,
@@ -1240,6 +1237,7 @@ mod tests {
 
     fn boundary() -> SnapshotBoundary {
         SnapshotBoundary {
+            authority_id: AuthorityId::from_uuid(Uuid::from_u128(1)),
             scope_id: SyncScopeId::from_uuid(Uuid::from_u128(11)),
             scope_version: ScopeVersion::INITIAL,
             scope_generation: ScopeGeneration::INITIAL,

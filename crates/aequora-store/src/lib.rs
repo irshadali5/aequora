@@ -532,6 +532,10 @@ pub struct EntitySnapshot {
 /// Atomic authoritative commit requested after validation and execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitOperation {
+    /// Authority identity, epoch, instance, and fence verified by the store transaction.
+    ///
+    /// `None` exists only for explicit legacy adapter calls; server write paths always supply it.
+    pub authority: Option<aequora_authority::AuthorityCommitContext>,
     /// Original permanent operation ID.
     pub operation_id: OperationId,
     /// Stable authoritative event identity selected before the atomic commit.
@@ -592,6 +596,8 @@ pub struct AuditOffset(pub u64);
 /// Payload-free immutable evidence of one committed authoritative command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditRecord {
+    /// Authority context under which this record committed, absent only for legacy evidence.
+    pub authority: Option<aequora_types::AuthorityTimeline>,
     /// Monotonic audit position, independent of synchronization cursors.
     pub offset: AuditOffset,
     /// Authenticated tenant boundary.
@@ -948,6 +954,21 @@ pub trait SnapshotStore: Send + Sync {
         scope: SyncScopeId,
         partitions: &[Partition],
     ) -> Result<SnapshotDescriptor, StoreError>;
+
+    /// Captures and durably binds a snapshot to one explicit authority timeline.
+    async fn create_snapshot_in_timeline(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        partitions: &[Partition],
+        authority_id: aequora_types::AuthorityId,
+        authority_epoch: aequora_types::AuthorityEpoch,
+    ) -> Result<SnapshotDescriptor, StoreError> {
+        let mut descriptor = self.create_snapshot(tenant, scope, partitions).await?;
+        descriptor.cursor.authority_id = authority_id;
+        descriptor.cursor.authority_epoch = authority_epoch;
+        Ok(descriptor)
+    }
 
     /// Reads a bounded page from a previously captured snapshot.
     async fn read_snapshot(
