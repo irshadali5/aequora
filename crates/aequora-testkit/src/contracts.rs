@@ -617,10 +617,7 @@ where
     verify_state(store, operation_id, OutboxState::Sending).await?;
     verify_retry_schedule(store, operation_id).await?;
 
-    let cursor = Cursor {
-        scope,
-        sequence: Sequence(1),
-    };
+    let cursor = Cursor::legacy(scope, Sequence(1));
     let event_id = EventId::new();
     let event_lineage = operation
         .metadata
@@ -876,6 +873,7 @@ where
                 "the conformance fixture cannot create an invalid version transition",
             ))?;
     let invalid = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         entity: EntityRef {
             entity_type: baseline.entity.entity_type,
@@ -961,6 +959,7 @@ where
         ))?;
     let operation_id = OperationId::new();
     let commit = CommitOperation {
+        authority: None,
         operation_id,
         expected_version: Some(expected_version),
         next_version,
@@ -1012,6 +1011,7 @@ where
         entity_id: EntityId::new(),
     };
     let mut left_commit = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         entity,
         expected_version: None,
@@ -1021,6 +1021,7 @@ where
     };
     left_commit.command_digest[0] ^= 1;
     let mut right_commit = CommitOperation {
+        authority: None,
         operation_id: OperationId::new(),
         payload: [baseline.payload.as_slice(), b"-race-right"].concat(),
         ..left_commit.clone()

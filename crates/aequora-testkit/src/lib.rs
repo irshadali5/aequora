@@ -410,6 +410,12 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         fail_at(failpoint, CommitFailPoint::AfterLedger)?;
         fail_at(failpoint, CommitFailPoint::BeforeAudit)?;
         let audit = AuditRecord {
+            authority: commit
+                .authority
+                .map(|authority| aequora_types::AuthorityTimeline {
+                    authority_id: authority.authority_id,
+                    epoch: authority.epoch,
+                }),
             offset: AuditOffset(
                 u64::try_from(state.audit.len())
                     .unwrap_or(u64::MAX)
@@ -519,14 +525,14 @@ impl SnapshotStore for InMemoryAuthoritativeStore {
         let mut state = self.state();
         let descriptor = SnapshotDescriptor {
             snapshot_id: SnapshotId::new(),
-            cursor: Cursor {
+            cursor: Cursor::legacy(
                 scope,
-                sequence: state
+                state
                     .sequences
                     .get(&(tenant, scope))
                     .copied()
                     .unwrap_or(Sequence(0)),
-            },
+            ),
         };
         let mut entities: Vec<_> = state
             .entities

@@ -71,6 +71,7 @@ impl AuthoritativeAdapterContractFactory for ReferenceAuthorityFactory {
             AdapterContractError::Violation("reference authority fixture construction failed")
         })?;
         let commit = CommitOperation {
+            authority: None,
             operation_id: operation.operation_id,
             event_id: EventId::new(),
             operation_lineage: operation.metadata.lineage,
@@ -124,6 +125,7 @@ async fn reference_authority_passes_public_adapter_contract()
 -> Result<(), Box<dyn std::error::Error>> {
     let (operation, scope) = fixture()?;
     let commit = CommitOperation {
+        authority: None,
         operation_id: operation.operation_id,
         event_id: EventId::new(),
         operation_lineage: operation.metadata.lineage,

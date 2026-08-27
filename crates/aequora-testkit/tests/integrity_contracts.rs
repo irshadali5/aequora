@@ -94,6 +94,7 @@ async fn reference_adapters_share_root_and_repair_preserves_pending_intent()
     };
     let initial_operation = operation(tenant, scope, entity, b"canonical-state");
     let commit = CommitOperation {
+        authority: None,
         operation_id: initial_operation.operation_id,
         event_id: EventId::new(),
         operation_lineage: initial_operation.metadata.lineage,
@@ -116,10 +117,7 @@ async fn reference_adapters_share_root_and_repair_preserves_pending_intent()
     let page = authority
         .read_changes_after(tenant, scope, Sequence(0), 10, 1_024)
         .await?;
-    let boundary = Cursor {
-        scope,
-        sequence: acknowledgement.sequence,
-    };
+    let boundary = Cursor::legacy(scope, acknowledgement.sequence);
     local
         .reconcile(&SyncResponse {
             protocol: ProtocolVersion::V1,

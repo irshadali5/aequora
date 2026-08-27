@@ -100,10 +100,7 @@ fn response(
             payload: b"authoritative".to_vec(),
             timestamp: timestamp(2),
         }],
-        next_cursor: Cursor {
-            scope,
-            sequence: Sequence(sequence),
-        },
+        next_cursor: Cursor::legacy(scope, Sequence(sequence)),
         has_more: false,
         server_time: timestamp(2),
     }
@@ -173,6 +170,7 @@ proptest! {
             let operation_id = OperationId::new();
             let payload = b"one logical effect".to_vec();
             let commit = CommitOperation {
+                authority: None,
                 operation_id,
                 event_id: EventId::new(),
                 operation_lineage: LineageContext::root(),
@@ -224,14 +222,14 @@ proptest! {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor { scope, sequence: Sequence(regression) },
+                next_cursor: Cursor::legacy(scope, Sequence(regression)),
                 has_more: false,
                 server_time: timestamp(3),
             };
             prop_assert!(store.reconcile(&regressing).await.is_err());
             prop_assert_eq!(
                 store.load_cursor(scope).await.unwrap_or_else(|error| panic!("{error}")),
-                Some(Cursor { scope, sequence: Sequence(start) })
+                Some(Cursor::legacy(scope, Sequence(start)))
             );
             Ok(())
         })?;
@@ -269,7 +267,10 @@ proptest! {
                 rejected: Vec::new(),
                 conflicts: Vec::new(),
                 changes: Vec::new(),
-                next_cursor: Cursor { scope, sequence: Sequence(u64::try_from(count).unwrap_or(u64::MAX)) },
+                next_cursor: Cursor::legacy(
+                    scope,
+                    Sequence(u64::try_from(count).unwrap_or(u64::MAX)),
+                ),
                 has_more: false,
                 server_time: timestamp(3),
             };
@@ -317,7 +318,7 @@ proptest! {
             );
             prop_assert_eq!(
                 store.load_cursor(scope).await.unwrap_or_else(|error| panic!("{error}")),
-                Some(Cursor { scope, sequence: Sequence(1) })
+                Some(Cursor::legacy(scope, Sequence(1)))
             );
             Ok(())
         })?;

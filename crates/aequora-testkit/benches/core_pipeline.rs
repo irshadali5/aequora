@@ -84,10 +84,7 @@ fn empty_response(scope: SyncScopeId) -> SyncResponse {
         rejected: Vec::new(),
         conflicts: Vec::new(),
         changes: Vec::new(),
-        next_cursor: Cursor {
-            scope,
-            sequence: Sequence(0),
-        },
+        next_cursor: Cursor::legacy(scope, Sequence(0)),
         has_more: false,
         server_time: HybridTimestamp {
             physical_ms: 1,

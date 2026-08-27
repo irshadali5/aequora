@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
+aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
@@ -19,12 +20,14 @@ aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
+aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
+aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }

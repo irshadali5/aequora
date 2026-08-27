@@ -7,7 +7,8 @@ use aequora_protocol::SnapshotEntity;
 use aequora_scope::{ScopeGeneration, ScopeVersion};
 use aequora_testkit::large_bootstrap::{BootstrapFailpoint, FaultInjectingSnapshotSink};
 use aequora_types::{
-    EntityId, EntityRef, EntityType, EntityVersion, OperationId, Sequence, SnapshotId, SyncScopeId,
+    AuthorityId, EntityId, EntityRef, EntityType, EntityVersion, OperationId, Sequence, SnapshotId,
+    SyncScopeId,
 };
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -28,6 +29,7 @@ fn entity(id: u128) -> SnapshotEntity {
 #[allow(clippy::too_many_lines)]
 async fn staging_and_activation_are_atomic_replayable_and_preserve_pending_intent() {
     let boundary = SnapshotBoundary {
+        authority_id: AuthorityId::from_uuid(Uuid::from_u128(1)),
         scope_id: SyncScopeId::from_uuid(Uuid::from_u128(9)),
         scope_version: ScopeVersion::INITIAL,
         scope_generation: ScopeGeneration::INITIAL,

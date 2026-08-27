@@ -1,3 +1,7 @@
+use aequora_authority::{
+    AuthorityController, AuthorityPromotionPolicy, AuthorityRole, AuthorityRuntimeMode,
+    AuthorityState,
+};
 use aequora_client::{
     ClientConfig, ClientError, ClientSyncEngine, ClientSyncEngineBuilder, RetryConfig,
     SyncCoordinator, SyncCoordinatorConfig, SyncStatus, SyncTrigger,
@@ -31,8 +35,9 @@ use aequora_testkit::{
 };
 use aequora_transport::{SyncTransport, TransportError};
 use aequora_types::{
-    ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
-    ProtocolVersion, RequestId, SchemaVersion, Sequence, SessionId, SyncScopeId, TenantId,
+    ActorId, AuthorityEpoch, AuthorityId, AuthorityInstanceId, Cursor, DeviceId, EntityId,
+    EntityRef, EntityType, HybridTimestamp, NodeId, OperationId, ProtocolVersion, RequestId,
+    SchemaVersion, Sequence, SessionId, SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
 use std::sync::{
@@ -264,6 +269,56 @@ fn server(store: &InMemoryAuthoritativeStore) -> Arc<dyn ExchangeService> {
             .clock(Arc::new(TestClock::new(NodeId::new(), 10_000)))
             .build(),
     )
+}
+
+#[tokio::test]
+async fn server_reports_epoch_transition_before_accepting_old_timeline_writes() {
+    let fixture = Fixture::new();
+    let authoritative = InMemoryAuthoritativeStore::default();
+    let authority_id = AuthorityId::new();
+    let mut authority_state = AuthorityState::new(
+        authority_id,
+        AuthorityInstanceId::new(),
+        AuthorityRole::Primary,
+        10,
+    );
+    authority_state.epoch = AuthorityEpoch::new(2).unwrap_or_else(|error| panic!("{error}"));
+    authority_state.runtime_mode = AuthorityRuntimeMode::Serving;
+    let service = SyncServerBuilder::new()
+        .store(Arc::new(authoritative.clone()))
+        .executor(Arc::new(CopyPayloadExecutor))
+        .conflicts(Arc::new(RejectConflicts))
+        .clock(Arc::new(TestClock::new(NodeId::new(), 10_000)))
+        .authority(AuthorityController::new(
+            authority_state,
+            AuthorityPromotionPolicy::default(),
+        ))
+        .build();
+    let mut request = fixture.request(fixture.operation());
+    request.cursor = Some(Cursor::new(
+        authority_id,
+        AuthorityEpoch::INITIAL,
+        fixture.scope,
+        Sequence(44),
+    ));
+
+    let response = service
+        .exchange(fixture.auth, request)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(matches!(
+        response.directive,
+        SyncDirective::AuthorityChanged {
+            authority_id: changed_id,
+            previous_epoch: AuthorityEpoch::INITIAL,
+            current_epoch,
+        } if changed_id == authority_id && current_epoch == authority_state.epoch
+    ));
+    assert!(response.acknowledged.is_empty());
+    assert_eq!(authoritative.applied_operation_count(), 0);
+    assert_eq!(response.next_cursor.authority_id, authority_id);
+    assert_eq!(response.next_cursor.authority_epoch, authority_state.epoch);
+    assert_eq!(response.next_cursor.sequence, Sequence(0));
 }
 
 #[tokio::test]
