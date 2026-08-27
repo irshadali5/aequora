@@ -1,0 +1,21 @@
+[package]
+name = "aequora-performance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime-neutral performance, memory-budget, and benchmark policy for Aequora"
+
+[dependencies]
+aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
+blake3.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+postcard.workspace = true
+ron.workspace = true
+
+[lints]
+workspace = true
