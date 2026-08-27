@@ -66,8 +66,6 @@ uuid_id!(/// Identity of the node producing a hybrid timestamp.
     NodeId);
 uuid_id!(/// Identity of one consistent bootstrap snapshot.
     SnapshotId);
-uuid_id!(/// Stable identity of a deployment region.
-    RegionId);
 uuid_id!(/// Stable identity shared by every operation, event, and job from one root action.
     CorrelationId);
 uuid_id!(/// Stable identity of one authoritative journal event.
@@ -78,6 +76,108 @@ uuid_id!(/// Stable identity of one replica repair attempt.
     RepairId);
 uuid_id!(/// Stable identity of one bounded anti-entropy exchange.
     IntegritySessionId);
+uuid_id!(/// Stable identity of one logical authoritative deployment.
+    AuthorityId);
+uuid_id!(/// Identity of one deployed authority server or database instance.
+    AuthorityInstanceId);
+uuid_id!(/// Identity of one promotion, demotion, restore, or migration transition.
+    AuthorityTransitionId);
+
+/// Stable deployment-defined identity used in regional protocol and metric paths.
+///
+/// Region identifiers are deliberately compact and are assigned by the deployment control plane;
+/// they are not generated per process and do not encode a provider or geographic name.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct RegionId(u16);
+
+impl RegionId {
+    /// Creates a region identifier from its deployment registry value.
+    #[must_use]
+    pub const fn new(value: u16) -> Self {
+        Self(value)
+    }
+
+    /// Returns the compact persistent/protocol value.
+    #[must_use]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+impl fmt::Display for RegionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for RegionId {
+    type Err = core::num::ParseIntError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.parse().map(Self)
+    }
+}
+
+impl AuthorityId {
+    /// Sentinel for data written before authority timeline binding was introduced.
+    ///
+    /// It must be upgraded from trusted deployment metadata before serving production traffic.
+    pub const LEGACY_UNBOUND: Self = Self(Uuid::nil());
+    /// Deterministic identity used only by reference/test builders.
+    pub const LOCAL_DEVELOPMENT: Self = Self(Uuid::from_u128(1));
+}
+
+/// Monotonic identity of one authoritative history for an [`AuthorityId`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct AuthorityEpoch(u64);
+
+impl AuthorityEpoch {
+    /// First valid authoritative timeline.
+    pub const INITIAL: Self = Self(1);
+
+    /// Creates a non-zero authority epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError::Zero`] because zero cannot identify a trusted timeline.
+    pub const fn new(value: u64) -> Result<Self, ValueError> {
+        if value == 0 {
+            Err(ValueError::Zero)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    /// Returns the wire value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns the next epoch, or `None` when the representation is exhausted.
+    #[must_use]
+    pub const fn checked_next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+}
+
+impl Default for AuthorityEpoch {
+    fn default() -> Self {
+        Self::INITIAL
+    }
+}
+
+/// Stable namespace shared by all journal and artifact positions in one authority history.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct AuthorityTimeline {
+    pub authority_id: AuthorityId,
+    pub epoch: AuthorityEpoch,
+}
 
 /// Direct causal predecessor of an operation, authoritative event, or durable job.
 ///
@@ -237,6 +337,60 @@ pub struct Cursor {
     pub scope: SyncScopeId,
     /// Greatest durably applied authoritative sequence.
     pub sequence: Sequence,
+    /// Logical authority whose journal owns this cursor.
+    #[serde(default = "legacy_authority_id")]
+    pub authority_id: AuthorityId,
+    /// Exact authority timeline in which `sequence` is meaningful.
+    #[serde(default)]
+    pub authority_epoch: AuthorityEpoch,
+}
+
+fn legacy_authority_id() -> AuthorityId {
+    AuthorityId::LEGACY_UNBOUND
+}
+
+impl Cursor {
+    /// Constructs a cursor decoded from pre-epoch local state.
+    #[must_use]
+    pub const fn legacy(scope: SyncScopeId, sequence: Sequence) -> Self {
+        Self::new(
+            AuthorityId::LEGACY_UNBOUND,
+            AuthorityEpoch::INITIAL,
+            scope,
+            sequence,
+        )
+    }
+
+    /// Creates a cursor bound to one explicit authority timeline.
+    #[must_use]
+    pub const fn new(
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+        scope: SyncScopeId,
+        sequence: Sequence,
+    ) -> Self {
+        Self {
+            scope,
+            sequence,
+            authority_id,
+            authority_epoch,
+        }
+    }
+
+    /// Returns the authority timeline namespace owning this position.
+    #[must_use]
+    pub const fn timeline(self) -> AuthorityTimeline {
+        AuthorityTimeline {
+            authority_id: self.authority_id,
+            epoch: self.authority_epoch,
+        }
+    }
+
+    /// Returns true only when both cursors belong to the same authoritative history.
+    #[must_use]
+    pub fn same_timeline(self, other: Self) -> bool {
+        self.authority_id == other.authority_id && self.authority_epoch == other.authority_epoch
+    }
 }
 
 /// A transport protocol version, separate from domain schema versions.
@@ -293,6 +447,8 @@ pub enum OperationalErrorCode {
     Draining,
     /// A wire or decompressed payload exceeded a configured bound.
     PayloadLimit,
+    /// Authority identity, epoch, role, or fencing rejected the request.
+    Authority,
 }
 
 impl OperationalErrorCode {
@@ -311,6 +467,7 @@ impl OperationalErrorCode {
             Self::Deadline => "AEQ-DEADLINE-001",
             Self::Draining => "AEQ-DRAIN-001",
             Self::PayloadLimit => "AEQ-LIMIT-001",
+            Self::Authority => "AEQ-AUTHORITY-001",
         }
     }
 
@@ -329,6 +486,7 @@ impl OperationalErrorCode {
             "AEQ-DEADLINE-001" => Some(Self::Deadline),
             "AEQ-DRAIN-001" => Some(Self::Draining),
             "AEQ-LIMIT-001" => Some(Self::PayloadLimit),
+            "AEQ-AUTHORITY-001" => Some(Self::Authority),
             _ => None,
         }
     }
