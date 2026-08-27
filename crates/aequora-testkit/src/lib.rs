@@ -56,7 +56,7 @@ use std::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 type EntityKey = (TenantId, EntityRef);
@@ -1750,6 +1750,16 @@ fn map_server_error(error: ServerError) -> TransportError {
             TransportError::transient(maintenance.to_string())
                 .with_code(OperationalErrorCode::Maintenance)
         }
+        admission @ ServerError::Admission(rejection) if rejection.retryable() => {
+            let error = TransportError::transient(admission.to_string())
+                .with_code(OperationalErrorCode::Overloaded);
+            match rejection.retry_after_ms() {
+                Some(delay) => error.with_retry_after(Duration::from_millis(delay)),
+                None => error,
+            }
+        }
+        admission @ ServerError::Admission(_) => TransportError::permanent(admission.to_string())
+            .with_code(OperationalErrorCode::PayloadLimit),
         other => TransportError::permanent(other.to_string()),
     }
 }

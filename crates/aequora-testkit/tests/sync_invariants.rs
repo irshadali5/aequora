@@ -1253,6 +1253,7 @@ async fn observers_cover_client_server_and_compute_boundaries_without_payloads()
         ComputePool::new(ComputeConfig {
             worker_threads: 1,
             parallel_threshold: 1,
+            max_queued_jobs: 4,
         })
         .unwrap_or_else(|error| panic!("{error}")),
     );

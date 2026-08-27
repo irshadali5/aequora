@@ -147,6 +147,7 @@ fn core_pipeline(criterion: &mut Criterion) {
     let compute = ComputePool::new(ComputeConfig {
         worker_threads: 2,
         parallel_threshold: 128,
+        max_queued_jobs: 8,
     })
     .unwrap_or_else(|error| panic!("{error}"));
     criterion.bench_function("rayon_threshold_decision", |bencher| {
