@@ -243,6 +243,34 @@ impl RetryConfig {
         let jittered = base_ms.saturating_sub(radius).saturating_add(offset);
         Duration::from_millis(u64::try_from(jittered).unwrap_or(u64::MAX))
     }
+
+    /// Applies a capped server `Retry-After` floor while retaining non-negative client jitter.
+    #[must_use]
+    pub fn delay_with_server(
+        self,
+        retry: u32,
+        entropy: u64,
+        server_retry_after: Option<Duration>,
+    ) -> Duration {
+        let local = self.delay(retry, entropy);
+        let Some(server) = server_retry_after else {
+            return local;
+        };
+        let floor_ms = server.as_millis().min(self.max_delay.as_millis());
+        if floor_ms <= local.as_millis() {
+            return local;
+        }
+        let jitter_window = floor_ms.saturating_mul(u128::from(self.jitter_percent.min(100))) / 100;
+        let extra = if jitter_window == 0 {
+            0
+        } else {
+            u128::from(entropy) % jitter_window.saturating_add(1)
+        };
+        let delayed = floor_ms
+            .saturating_add(extra)
+            .min(self.max_delay.as_millis());
+        Duration::from_millis(u64::try_from(delayed).unwrap_or(u64::MAX))
+    }
 }
 
 /// Conservative additive-increase/multiplicative-decrease batch tuning.
@@ -1771,9 +1799,15 @@ where
             Err(error) => {
                 if error.kind == TransportErrorKind::Transient {
                     self.batcher().record_failure();
+                    let retry_after_ms = error
+                        .retry_after
+                        .map(|delay| u64::try_from(delay.as_millis()).unwrap_or(u64::MAX));
                     self.scheduler().record_overload(
                         unix_time_ms(),
-                        aequora_scheduler::ServerSchedulingHints::default(),
+                        aequora_scheduler::ServerSchedulingHints {
+                            retry_after_ms,
+                            ..aequora_scheduler::ServerSchedulingHints::default()
+                        },
                     );
                     self.observer.record(MetricEvent::Scheduler {
                         kind: SchedulerEventKind::OverloadBackoff,
@@ -1782,10 +1816,14 @@ where
                         bytes: 0,
                     });
                 }
+                let durable_retry_delay = error
+                    .retry_after
+                    .map_or(retry_delay, |server| retry_delay.max(server))
+                    .min(self.config.retry.max_delay);
                 self.store
                     .mark_retry_fenced(
                         &operation_ids,
-                        retry_not_before(retry_delay),
+                        retry_not_before(durable_retry_delay),
                         self.current_lease(),
                     )
                     .await?;
@@ -1948,10 +1986,18 @@ where
         let mut attempt = 0_u32;
         loop {
             let entropy = system_entropy() ^ u64::from(attempt);
-            let delay = self.config.retry.delay(attempt, entropy);
-            match self.run_once_with_retry_delay(delay).await {
+            let local_delay = self.config.retry.delay(attempt, entropy);
+            match self.run_once_with_retry_delay(local_delay).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if error.is_transient() && attempt + 1 < max_attempts => {
+                    let server_retry_after = match &error {
+                        ClientError::Transport(error) => error.retry_after,
+                        _ => None,
+                    };
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, server_retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -2131,7 +2177,10 @@ where
                         },
                     );
                     let entropy = system_entropy() ^ u64::from(attempt);
-                    let delay = self.config.retry.delay(attempt, entropy);
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, error.retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -2202,7 +2251,11 @@ where
                     if error.kind == TransportErrorKind::Transient
                         && attempt + 1 < max_attempts =>
                 {
-                    let delay = self.config.retry.delay(attempt, system_entropy());
+                    let entropy = system_entropy();
+                    let delay =
+                        self.config
+                            .retry
+                            .delay_with_server(attempt, entropy, error.retry_after);
                     self.record_retry(delay);
                     tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
@@ -2228,7 +2281,12 @@ where
                                 outcome: OutcomeKind::TransientFailure,
                             },
                         );
-                        let delay = self.config.retry.delay(attempt, system_entropy());
+                        let entropy = system_entropy();
+                        let delay = self.config.retry.delay_with_server(
+                            attempt,
+                            entropy,
+                            error.retry_after,
+                        );
                         self.record_retry(delay);
                         tokio::time::sleep(delay).await;
                         attempt = attempt.saturating_add(1);
@@ -2456,6 +2514,12 @@ mod tests {
         assert_eq!(retry.delay(0, 20).as_millis(), 100);
         assert!((320..=480).contains(&retry.delay(2, 0).as_millis()));
         assert!((400..=600).contains(&retry.delay(20, u64::MAX).as_millis()));
+        let guided = retry.delay_with_server(0, 20, Some(Duration::from_millis(400)));
+        assert!((400..=480).contains(&guided.as_millis()));
+        assert_eq!(
+            retry.delay_with_server(0, 20, Some(Duration::from_secs(60))),
+            retry.max_delay
+        );
     }
 
     #[test]
