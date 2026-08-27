@@ -214,11 +214,47 @@ pub enum InvariantId {
     CryptoErasureCompletion,
     /// A possibly delivered operation identity retains one signed semantic payload.
     CryptoSignedOperationImmutability,
+    /// At most one unfenced authority instance accepts writes for a timeline.
+    AuthoritySingleWriter,
+    /// A cursor never crosses authority epochs as incremental continuation.
+    AuthorityCursorEpochBinding,
+    /// Divergent or restored history receives a new epoch unless continuity is proven.
+    AuthorityDivergenceEpoch,
+    /// A client never silently accepts a lower trusted authority epoch.
+    AuthorityRollbackSafety,
+    /// Fork detection never automatically merges authoritative histories.
+    AuthorityNoAutomaticForkMerge,
+    /// Ambiguous old-epoch operations follow explicit recovery policy.
+    AuthorityOperationRecoveryPolicy,
+    /// A promoted fence prevents the old primary from committing.
+    AuthorityOldPrimaryFence,
+    /// Proven lossless infrastructure failover retains the epoch.
+    AuthorityLosslessEpochContinuity,
+    /// Timeline-dependent artifacts bind to their authority epoch.
+    AuthorityArtifactEpochBinding,
+    /// Regional topology never creates another authoritative writer.
+    RegionSingleWriter,
+    /// `AtLeast` reads require a current-epoch verified apply watermark.
+    RegionAtLeastWatermark,
+    /// Session reads never intentionally return below the caller watermark.
+    RegionSessionMonotonicity,
+    /// Wrong-epoch replicas and caches are never served as current.
+    RegionEpochIsolation,
+    /// Regional infrastructure failure cannot create a write timeline.
+    RegionFailureAuthoritySafety,
+    /// Fallback never silently weakens endpoint consistency.
+    RegionFallbackSafety,
+    /// Edge transport cannot change artifact authority or integrity.
+    RegionArtifactIntegrity,
+    /// Tenant residency constrains every regional placement.
+    RegionResidencyCoverage,
+    /// Governance completion includes every required regional copy.
+    RegionGovernanceCoverage,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 102] = [
+    pub const ALL: [Self; 120] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -321,6 +357,24 @@ impl InvariantId {
         Self::CryptoE2eSemanticBoundary,
         Self::CryptoErasureCompletion,
         Self::CryptoSignedOperationImmutability,
+        Self::AuthoritySingleWriter,
+        Self::AuthorityCursorEpochBinding,
+        Self::AuthorityDivergenceEpoch,
+        Self::AuthorityRollbackSafety,
+        Self::AuthorityNoAutomaticForkMerge,
+        Self::AuthorityOperationRecoveryPolicy,
+        Self::AuthorityOldPrimaryFence,
+        Self::AuthorityLosslessEpochContinuity,
+        Self::AuthorityArtifactEpochBinding,
+        Self::RegionSingleWriter,
+        Self::RegionAtLeastWatermark,
+        Self::RegionSessionMonotonicity,
+        Self::RegionEpochIsolation,
+        Self::RegionFailureAuthoritySafety,
+        Self::RegionFallbackSafety,
+        Self::RegionArtifactIntegrity,
+        Self::RegionResidencyCoverage,
+        Self::RegionGovernanceCoverage,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -430,6 +484,24 @@ impl InvariantId {
             Self::CryptoE2eSemanticBoundary => "AEQ-INV-CRYPTO007",
             Self::CryptoErasureCompletion => "AEQ-INV-CRYPTO008",
             Self::CryptoSignedOperationImmutability => "AEQ-INV-CRYPTO009",
+            Self::AuthoritySingleWriter => "AEQ-INV-AUTH001",
+            Self::AuthorityCursorEpochBinding => "AEQ-INV-AUTH002",
+            Self::AuthorityDivergenceEpoch => "AEQ-INV-AUTH003",
+            Self::AuthorityRollbackSafety => "AEQ-INV-AUTH004",
+            Self::AuthorityNoAutomaticForkMerge => "AEQ-INV-AUTH005",
+            Self::AuthorityOperationRecoveryPolicy => "AEQ-INV-AUTH006",
+            Self::AuthorityOldPrimaryFence => "AEQ-INV-AUTH007",
+            Self::AuthorityLosslessEpochContinuity => "AEQ-INV-AUTH008",
+            Self::AuthorityArtifactEpochBinding => "AEQ-INV-AUTH009",
+            Self::RegionSingleWriter => "AEQ-INV-REG001",
+            Self::RegionAtLeastWatermark => "AEQ-INV-REG002",
+            Self::RegionSessionMonotonicity => "AEQ-INV-REG003",
+            Self::RegionEpochIsolation => "AEQ-INV-REG004",
+            Self::RegionFailureAuthoritySafety => "AEQ-INV-REG005",
+            Self::RegionFallbackSafety => "AEQ-INV-REG006",
+            Self::RegionArtifactIntegrity => "AEQ-INV-REG007",
+            Self::RegionResidencyCoverage => "AEQ-INV-REG008",
+            Self::RegionGovernanceCoverage => "AEQ-INV-REG009",
         }
     }
 
@@ -732,6 +804,60 @@ impl InvariantId {
             Self::CryptoSignedOperationImmutability => {
                 "a possibly delivered OperationId retains one immutable signed semantic payload"
             }
+            Self::AuthoritySingleWriter => {
+                "at most one unfenced authority instance accepts writes for one authority timeline"
+            }
+            Self::AuthorityCursorEpochBinding => {
+                "a cursor from one authority epoch is never accepted as continuation in another"
+            }
+            Self::AuthorityDivergenceEpoch => {
+                "restored or potentially divergent history receives a new epoch unless continuity is proven"
+            }
+            Self::AuthorityRollbackSafety => {
+                "a client never silently accepts an epoch below its highest trusted epoch"
+            }
+            Self::AuthorityNoAutomaticForkMerge => {
+                "fork detection quarantines writes and never automatically merges histories"
+            }
+            Self::AuthorityOperationRecoveryPolicy => {
+                "possibly committed old-epoch operations follow explicit recovery policy"
+            }
+            Self::AuthorityOldPrimaryFence => {
+                "an old primary cannot commit after a replacement promotion fence"
+            }
+            Self::AuthorityLosslessEpochContinuity => {
+                "proven lossless infrastructure failover does not open a new authority epoch"
+            }
+            Self::AuthorityArtifactEpochBinding => {
+                "snapshot integrity audit and governance artifacts bind to their authority epoch"
+            }
+            Self::RegionSingleWriter => {
+                "only the active authority writer commits authoritative regional domain transitions"
+            }
+            Self::RegionAtLeastWatermark => {
+                "an AtLeast read is served regionally only through a verified current-epoch watermark"
+            }
+            Self::RegionSessionMonotonicity => {
+                "a session read never intentionally returns state below its caller watermark"
+            }
+            Self::RegionEpochIsolation => {
+                "wrong-epoch regional replicas and caches are never served as current"
+            }
+            Self::RegionFailureAuthoritySafety => {
+                "regional read failure cannot create an alternative authoritative write timeline"
+            }
+            Self::RegionFallbackSafety => {
+                "regional fallback never silently weakens endpoint consistency policy"
+            }
+            Self::RegionArtifactIntegrity => {
+                "regional artifact delivery changes location but not authority or integrity semantics"
+            }
+            Self::RegionResidencyCoverage => {
+                "tenant residency constrains authority replica snapshot blob cache backup and key placement"
+            }
+            Self::RegionGovernanceCoverage => {
+                "governance completion accounts for every required registered regional copy"
+            }
         }
     }
 
@@ -846,6 +972,24 @@ impl InvariantId {
             Self::CryptoE2eSemanticBoundary => 99,
             Self::CryptoErasureCompletion => 100,
             Self::CryptoSignedOperationImmutability => 101,
+            Self::AuthoritySingleWriter => 102,
+            Self::AuthorityCursorEpochBinding => 103,
+            Self::AuthorityDivergenceEpoch => 104,
+            Self::AuthorityRollbackSafety => 105,
+            Self::AuthorityNoAutomaticForkMerge => 106,
+            Self::AuthorityOperationRecoveryPolicy => 107,
+            Self::AuthorityOldPrimaryFence => 108,
+            Self::AuthorityLosslessEpochContinuity => 109,
+            Self::AuthorityArtifactEpochBinding => 110,
+            Self::RegionSingleWriter => 111,
+            Self::RegionAtLeastWatermark => 112,
+            Self::RegionSessionMonotonicity => 113,
+            Self::RegionEpochIsolation => 114,
+            Self::RegionFailureAuthoritySafety => 115,
+            Self::RegionFallbackSafety => 116,
+            Self::RegionArtifactIntegrity => 117,
+            Self::RegionResidencyCoverage => 118,
+            Self::RegionGovernanceCoverage => 119,
         }
     }
 }
@@ -897,7 +1041,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 102] = [
+pub const REGISTRY: [InvariantEntry; 120] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -1611,6 +1755,132 @@ pub const REGISTRY: [InvariantEntry; 102] = [
         "signed_operation_drift_property",
         "verify_operation_ledger",
         "crypto_signed_operation_drift_total",
+    ),
+    entry(
+        InvariantId::AuthoritySingleWriter,
+        "authority_single_writer",
+        "authority_fence_property",
+        "verify_authority_guard",
+        "authority_dual_writer_detected_total",
+    ),
+    entry(
+        InvariantId::AuthorityCursorEpochBinding,
+        "authority_cursor_epoch_binding",
+        "cross_epoch_cursor_property",
+        "verify_cursor_binding",
+        "authority_cursor_epoch_mismatch_total",
+    ),
+    entry(
+        InvariantId::AuthorityDivergenceEpoch,
+        "authority_divergence_epoch",
+        "promotion_epoch_decision_property",
+        "verify_promotion_plan",
+        "authority_unsafe_epoch_reuse_total",
+    ),
+    entry(
+        InvariantId::AuthorityRollbackSafety,
+        "authority_rollback_safety",
+        "client_epoch_rollback_property",
+        "verify_client_authority_state",
+        "authority_rollback_detected_total",
+    ),
+    entry(
+        InvariantId::AuthorityNoAutomaticForkMerge,
+        "authority_no_automatic_fork_merge",
+        "fork_checkpoint_property",
+        "verify_fork_quarantine",
+        "authority_fork_detected_total",
+    ),
+    entry(
+        InvariantId::AuthorityOperationRecoveryPolicy,
+        "authority_operation_recovery_policy",
+        "ambiguous_operation_policy_property",
+        "verify_epoch_recovery_registry",
+        "authority_ambiguous_operations_total",
+    ),
+    entry(
+        InvariantId::AuthorityOldPrimaryFence,
+        "authority_old_primary_fence",
+        "old_primary_reappearance_property",
+        "verify_authority_commit_fence",
+        "authority_stale_fence_rejection_total",
+    ),
+    entry(
+        InvariantId::AuthorityLosslessEpochContinuity,
+        "authority_lossless_epoch_continuity",
+        "lossless_promotion_property",
+        "verify_replication_checkpoint",
+        "authority_unnecessary_epoch_change_total",
+    ),
+    entry(
+        InvariantId::AuthorityArtifactEpochBinding,
+        "authority_artifact_epoch_binding",
+        "artifact_timeline_property",
+        "verify_authority_artifacts",
+        "authority_artifact_epoch_mismatch_total",
+    ),
+    entry(
+        InvariantId::RegionSingleWriter,
+        "regional_single_writer",
+        "regional_write_route_property",
+        "verify_regional_write_guard",
+        "regional_non_authority_write_total",
+    ),
+    entry(
+        InvariantId::RegionAtLeastWatermark,
+        "regional_at_least_watermark",
+        "replica_watermark_property",
+        "verify_replica_read_guard",
+        "replica_too_stale_total",
+    ),
+    entry(
+        InvariantId::RegionSessionMonotonicity,
+        "regional_session_monotonicity",
+        "read_your_writes_property",
+        "verify_session_read_routing",
+        "regional_session_regression_total",
+    ),
+    entry(
+        InvariantId::RegionEpochIsolation,
+        "regional_epoch_isolation",
+        "wrong_epoch_replica_property",
+        "verify_epoch_cache_generation",
+        "regional_wrong_epoch_total",
+    ),
+    entry(
+        InvariantId::RegionFailureAuthoritySafety,
+        "regional_failure_authority_safety",
+        "region_partition_property",
+        "verify_authority_only_writes",
+        "regional_alternative_writer_total",
+    ),
+    entry(
+        InvariantId::RegionFallbackSafety,
+        "regional_fallback_safety",
+        "fallback_policy_property",
+        "verify_regional_router",
+        "regional_silent_downgrade_total",
+    ),
+    entry(
+        InvariantId::RegionArtifactIntegrity,
+        "regional_artifact_integrity",
+        "edge_artifact_property",
+        "verify_regional_artifact",
+        "regional_artifact_verify_failure_total",
+    ),
+    entry(
+        InvariantId::RegionResidencyCoverage,
+        "regional_residency_coverage",
+        "residency_placement_property",
+        "verify_residency_inventory",
+        "regional_residency_violation_total",
+    ),
+    entry(
+        InvariantId::RegionGovernanceCoverage,
+        "regional_governance_coverage",
+        "regional_erasure_property",
+        "verify_regional_governance_registry",
+        "regional_governance_incomplete_total",
     ),
 ];
 
