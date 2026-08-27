@@ -15,9 +15,11 @@ impl AequoraServer {
 /// Focused imports for application server integrations.
 pub mod prelude {
     pub use crate::{
-        AequoraServer, ExchangeService, ServerBuildError, ServerCommandOutcome, ServerConfig,
-        ServerError, ServerRegionalReadGuard, SyncServer, SyncServerBuilder,
+        AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,
+        ServerCommandOutcome, ServerConfig, ServerError, ServerRegionalReadGuard, SyncServer,
+        SyncServerBuilder,
     };
+    pub use aequora_admission::{AdmissionController, AdmissionPolicy, HierarchicalAdmission};
     pub use aequora_authority::{
         AuthorityController, AuthorityPromotionPolicy, AuthorityRole, AuthorityRuntimeMode,
         AuthorityState,
@@ -37,6 +39,10 @@ pub mod prelude {
     };
 }
 
+use aequora_admission::{
+    AdmissionController, AdmissionRejection, CostUnits, RequestShape, ResourceDomain,
+    ServerPriorityPolicy, WorkDescriptor,
+};
 use aequora_authority::{
     AuthorityController, AuthorityError, AuthorityPromotionPolicy, AuthorityRole,
     AuthorityRuntimeMode, AuthorityState, CursorDisposition, validate_cursor,
@@ -54,6 +60,7 @@ use aequora_observability::{
     MetricEvent, NoopObserver, Observer, OutcomeKind, ServerPhaseKind, TraceContext,
     TransactionOutcomeKind,
 };
+use aequora_performance::PerformancePolicy;
 use aequora_protocol::{
     BootstrapRequest, BootstrapResponse, ClientLimits, Conflict, ConflictPolicy, OperationAck,
     OperationEnvelope, OperationRejection, RejectionCode, ResyncReason, SessionMetadata,
@@ -126,6 +133,8 @@ pub struct ServerConfig {
     pub limits: ProtocolLimits,
     /// Absolute maximum pull page size.
     pub max_pull_changes: usize,
+    /// Cross-layer request, response, snapshot, and CPU memory policy.
+    pub performance: PerformancePolicy,
 }
 
 impl Default for ServerConfig {
@@ -133,6 +142,7 @@ impl Default for ServerConfig {
         Self {
             limits: ProtocolLimits::default(),
             max_pull_changes: 1_024,
+            performance: PerformancePolicy::default(),
         }
     }
 }
@@ -140,6 +150,9 @@ impl Default for ServerConfig {
 /// A request-level failure. Per-operation business failures are represented in `SyncResponse`.
 #[derive(Debug, Error)]
 pub enum ServerError {
+    /// Cross-transport admission rejected work before authoritative mutation.
+    #[error("sync admission rejected work: {0}")]
+    Admission(#[from] AdmissionRejection),
     /// Request failed structural validation.
     #[error("invalid sync request: {0}")]
     Validation(#[from] ValidationError),
@@ -173,6 +186,13 @@ pub enum ServerError {
     /// A response could not be measured with the production wire codec.
     #[error("sync response encoding failed: {0}")]
     Codec(#[from] aequora_codec::CodecError),
+    /// A typed request or response exceeded the configured in-memory domain budget.
+    #[error("{domain} memory use {actual} exceeds configured limit {maximum}")]
+    MemoryBudget {
+        domain: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
     /// An application-registered deterministic merger failed.
     #[error("sync conflict merge failed: {0}")]
     Merge(#[from] MergeError),
@@ -341,6 +361,144 @@ pub trait ExchangeService: Send + Sync {
         _request: BootstrapRequest,
     ) -> Result<BootstrapResponse, ServerError> {
         Err(ServerError::BootstrapUnavailable)
+    }
+}
+
+/// Optional cross-transport admission decorator held across authoritative execution.
+pub struct AdmittedExchangeService<S: ?Sized> {
+    inner: Arc<S>,
+    admission: Arc<dyn AdmissionController>,
+    priority: ServerPriorityPolicy,
+    tenant_weight: u16,
+}
+
+impl<S: ?Sized> AdmittedExchangeService<S> {
+    /// Wraps a service with server-derived work classification and hierarchical RAII admission.
+    #[must_use]
+    pub fn new(inner: Arc<S>, admission: Arc<dyn AdmissionController>) -> Self {
+        Self {
+            inner,
+            admission,
+            priority: ServerPriorityPolicy::default(),
+            tenant_weight: 1,
+        }
+    }
+
+    /// Replaces the server-owned work-kind classification policy.
+    #[must_use]
+    pub fn with_priority_policy(mut self, priority: ServerPriorityPolicy) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Applies a server-derived contractual tenant weight, never a request-body value.
+    #[must_use]
+    pub fn with_tenant_weight(mut self, tenant_weight: u16) -> Self {
+        self.tenant_weight = tenant_weight.max(1);
+        self
+    }
+
+    fn exchange_work(&self, auth: &AuthContext, request: &SyncRequest) -> WorkDescriptor {
+        let operation_count = request.operations.len();
+        let dependency_edges = request
+            .operations
+            .iter()
+            .map(|operation| operation.metadata.dependencies.len())
+            .sum::<usize>();
+        let payload_bytes = request.operations.iter().fold(0u64, |total, operation| {
+            total.saturating_add(u64::try_from(operation.payload.len()).unwrap_or(u64::MAX))
+        });
+        let kind = if request.operations.is_empty() {
+            aequora_scheduler::WorkKind::PullChanges
+        } else {
+            aequora_scheduler::WorkKind::PushOperations
+        };
+        let class = self.priority.classify(kind, None);
+        let mut resources = vec![
+            ResourceDomain::SyncExchange,
+            ResourceDomain::DatabaseTransaction,
+        ];
+        if !request.operations.is_empty() {
+            resources.push(ResourceDomain::InteractiveCpu);
+        }
+        WorkDescriptor {
+            tenant_id: auth.tenant_id,
+            tenant_weight: self.tenant_weight,
+            kind,
+            class,
+            cost: CostUnits::new(
+                u32::try_from(
+                    operation_count
+                        .saturating_add(dependency_edges)
+                        .saturating_add(1),
+                )
+                .unwrap_or(u32::MAX),
+            ),
+            shape: RequestShape {
+                operations: operation_count,
+                encoded_bytes: payload_bytes,
+                decompressed_bytes: payload_bytes,
+                scopes: request.session.partitions.len(),
+                dependency_edges,
+                dependency_depth: request
+                    .operations
+                    .iter()
+                    .map(|operation| operation.metadata.dependencies.len())
+                    .max()
+                    .unwrap_or(0),
+            },
+            scope: Some(request.session.scope_id),
+            estimated_response_bytes: u64::from(request.limits.max_response_bytes),
+            resources,
+        }
+    }
+
+    fn bootstrap_work(&self, auth: &AuthContext, request: &BootstrapRequest) -> WorkDescriptor {
+        let kind = aequora_scheduler::WorkKind::Bootstrap;
+        WorkDescriptor {
+            tenant_id: auth.tenant_id,
+            tenant_weight: self.tenant_weight,
+            kind,
+            class: self.priority.classify(kind, None),
+            cost: CostUnits::new(request.limits.max_entities.max(1)),
+            shape: RequestShape {
+                scopes: request.session.partitions.len(),
+                ..RequestShape::default()
+            },
+            scope: Some(request.session.scope_id),
+            estimated_response_bytes: u64::from(request.limits.max_payload_bytes),
+            resources: vec![
+                ResourceDomain::SyncExchange,
+                ResourceDomain::DatabaseTransaction,
+                ResourceDomain::SnapshotDownload,
+            ],
+        }
+    }
+}
+
+#[async_trait]
+impl<S> ExchangeService for AdmittedExchangeService<S>
+where
+    S: ExchangeService + ?Sized,
+{
+    async fn exchange(
+        &self,
+        auth: AuthContext,
+        request: SyncRequest,
+    ) -> Result<SyncResponse, ServerError> {
+        let work = self.exchange_work(&auth, &request);
+        let _permit = self.admission.admit(&work).await?;
+        self.inner.exchange(auth, request).await
+    }
+
+    async fn bootstrap(
+        &self,
+        auth: AuthContext,
+        request: BootstrapRequest,
+    ) -> Result<BootstrapResponse, ServerError> {
+        let work = self.bootstrap_work(&auth, &request);
+        let _permit = self.admission.admit(&work).await?;
+        self.inner.bootstrap(auth, request).await
     }
 }
 
@@ -962,6 +1120,7 @@ where
         let validation = validate_request(request, self.config.limits);
         self.record_phase(ServerPhaseKind::Validation, validation_started);
         let mut request = validation?.into_inner();
+        self.validate_typed_request_budget(&request)?;
         if request.session.tenant_id != auth.tenant_id
             || request.session.actor_id != auth.actor_id
             || request.session.device_id != auth.device_id
@@ -1072,7 +1231,7 @@ where
             has_more: page.has_more,
             server_time: self.clock.now(),
         };
-        Self::fit_response(&mut response, start, request.limits.max_response_bytes)?;
+        self.fit_response(&mut response, start, request.limits.max_response_bytes)?;
         self.observer.record(MetricEvent::ServerJournalLag {
             sequences: journal_head
                 .0
@@ -1082,11 +1241,14 @@ where
     }
 
     fn fit_response(
+        &self,
         response: &mut SyncResponse,
         start: Sequence,
         maximum_bytes: u32,
     ) -> Result<(), ServerError> {
-        let maximum = usize::try_from(maximum_bytes).unwrap_or(usize::MAX);
+        let maximum = usize::try_from(maximum_bytes)
+            .unwrap_or(usize::MAX)
+            .min(self.config.performance.memory.response_bytes);
         loop {
             let encoded = aequora_codec::encode(
                 response.protocol,
@@ -1112,6 +1274,31 @@ where
                 return Err(ServerError::ResponseLimit);
             }
         }
+    }
+
+    fn validate_typed_request_budget(&self, request: &SyncRequest) -> Result<(), ServerError> {
+        if request.operations.len() > self.config.performance.memory.pending_decode_records {
+            return Err(ServerError::MemoryBudget {
+                domain: "pending decode records",
+                actual: request.operations.len(),
+                maximum: self.config.performance.memory.pending_decode_records,
+            });
+        }
+        let bytes = request
+            .operations
+            .iter()
+            .try_fold(0_usize, |total, operation| {
+                total.checked_add(operation.payload.len())
+            });
+        let actual = bytes.unwrap_or(usize::MAX);
+        if actual > self.config.performance.memory.decode_bytes {
+            return Err(ServerError::MemoryBudget {
+                domain: "typed request payload",
+                actual,
+                maximum: self.config.performance.memory.decode_bytes,
+            });
+        }
+        Ok(())
     }
 
     async fn prepare_operations(
@@ -1201,8 +1388,12 @@ where
                 auth.tenant_id,
                 snapshot_id,
                 request.offset,
-                usize::try_from(request.limits.max_entities).unwrap_or(usize::MAX),
-                usize::try_from(request.limits.max_payload_bytes).unwrap_or(usize::MAX),
+                usize::try_from(request.limits.max_entities)
+                    .unwrap_or(usize::MAX)
+                    .min(self.config.performance.snapshot.max_records_per_chunk),
+                usize::try_from(request.limits.max_payload_bytes)
+                    .unwrap_or(usize::MAX)
+                    .min(self.config.performance.snapshot.max_chunk_bytes),
             )
             .await?;
         self.record_phase(ServerPhaseKind::Database, database_started);
@@ -1337,6 +1528,9 @@ fn server_result_outcome<T>(result: &Result<T, ServerError>) -> OutcomeKind {
             OutcomeKind::TransientFailure
         }
         Err(ServerError::Maintenance { .. }) => OutcomeKind::TransientFailure,
+        Err(ServerError::Admission(rejection)) if rejection.retryable() => {
+            OutcomeKind::TransientFailure
+        }
         Err(_) => OutcomeKind::PermanentFailure,
     }
 }
@@ -1377,7 +1571,42 @@ fn conflict(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    struct CountingService(AtomicUsize);
+
+    #[async_trait]
+    impl ExchangeService for CountingService {
+        async fn exchange(
+            &self,
+            _auth: AuthContext,
+            _request: SyncRequest,
+        ) -> Result<SyncResponse, ServerError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Err(ServerError::BootstrapUnavailable)
+        }
+    }
+
+    fn empty_request(auth: AuthContext) -> SyncRequest {
+        SyncRequest {
+            protocol: aequora_types::ProtocolVersion::V1,
+            request_id: aequora_types::RequestId::new(),
+            session: SessionMetadata {
+                session_id: aequora_types::SessionId::new(),
+                device_id: auth.device_id,
+                actor_id: auth.actor_id,
+                tenant_id: auth.tenant_id,
+                scope_id: aequora_types::SyncScopeId::new(),
+                partitions: Vec::new(),
+            },
+            cursor: None,
+            operations: Vec::new(),
+            limits: ClientLimits::default(),
+            capabilities: Vec::new(),
+        }
+    }
 
     #[test]
     fn maintenance_controller_transitions_atomically() {
@@ -1406,5 +1635,47 @@ mod tests {
         assert!(MaintenanceMode::Normal.allows_bootstrap());
         assert!(MaintenanceMode::ReadOnly.allows_bootstrap());
         assert!(!MaintenanceMode::SyncPaused.allows_bootstrap());
+    }
+
+    #[tokio::test]
+    async fn admission_decorator_rejects_before_inner_service_and_releases_with_raii() {
+        let mut policy = aequora_admission::AdmissionPolicy::default();
+        policy.global.max_in_flight = 1;
+        policy.tenant.budget.max_in_flight = 1;
+        policy.tenant.max_tracked_tenants = 1;
+        policy.critical.reserved_in_flight = 0;
+        policy.interactive.reserved_in_flight = 0;
+        policy.normal.reserved_in_flight = 0;
+        policy.bulk.reserved_in_flight = 0;
+        policy.background.reserved_in_flight = 0;
+        policy.maintenance.reserved_in_flight = 0;
+        let admission = Arc::new(
+            aequora_admission::HierarchicalAdmission::new(policy)
+                .unwrap_or_else(|error| panic!("{error}")),
+        );
+        let inner = Arc::new(CountingService(AtomicUsize::new(0)));
+        let service = AdmittedExchangeService::new(Arc::clone(&inner), admission.clone());
+        let auth = AuthContext {
+            actor_id: aequora_types::ActorId::new(),
+            tenant_id: aequora_types::TenantId::new(),
+            device_id: aequora_types::DeviceId::new(),
+        };
+        let request = empty_request(auth);
+        let blocker = admission
+            .try_admit(&service.exchange_work(&auth, &request))
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(matches!(
+            service.exchange(auth, request.clone()).await,
+            Err(ServerError::Admission(
+                AdmissionRejection::ServerBusy { .. }
+            ))
+        ));
+        assert_eq!(inner.0.load(Ordering::Relaxed), 0);
+        drop(blocker);
+        assert!(matches!(
+            service.exchange(auth, request).await,
+            Err(ServerError::BootstrapUnavailable)
+        ));
+        assert_eq!(inner.0.load(Ordering::Relaxed), 1);
     }
 }
