@@ -55,6 +55,7 @@ async fn exercise_backend(backend: &SqlxPostgresBackend) {
         node: NodeId::new(),
     };
     let commit = CommitOperation {
+        authority: None,
         operation_id,
         event_id: EventId::new(),
         operation_lineage: LineageContext::root(),
@@ -99,6 +100,7 @@ async fn verify_mid_transaction_failure_rolls_back(
     };
     let payload = b"must roll back".to_vec();
     let commit = CommitOperation {
+        authority: None,
         operation_id,
         event_id: EventId::new(),
         operation_lineage: LineageContext::root(),

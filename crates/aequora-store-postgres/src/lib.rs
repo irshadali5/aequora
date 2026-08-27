@@ -3,6 +3,10 @@
 //! The backend contract is deliberately transaction-oriented. A `SQLx` implementation can
 //! satisfy it without exposing `sqlx::Transaction` to the rest of Aequora.
 
+use aequora_authority::{
+    AuthorityRole, AuthorityRuntimeMode, AuthorityState, AuthorityTransitionManifest,
+    PromotionClass, TransitionReason,
+};
 use aequora_executor::CurrentEntity;
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CanonicalEntity, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
@@ -21,9 +25,10 @@ use aequora_store::{
     TransactionCapabilityProvider,
 };
 use aequora_types::{
-    ActorId, CorrelationId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion,
-    EventId, HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, Sequence,
-    SnapshotId, SyncScopeId, TenantId,
+    ActorId, AuthorityEpoch, AuthorityId, AuthorityInstanceId, AuthorityTransitionId,
+    CorrelationId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId,
+    HybridTimestamp, LineageContext, LineageRef, NodeId, OperationId, Sequence, SnapshotId,
+    SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
 use sqlx::{
@@ -278,6 +283,45 @@ CREATE INDEX IF NOT EXISTS aequora_audit_log_correlation_idx
     ON aequora_audit_log (tenant_id, correlation_id, audit_offset);
 ";
 
+/// Adds durable authority metadata, commit fencing, and epoch-bound artifacts.
+pub const MIGRATION_0003: &str = r"
+CREATE TABLE IF NOT EXISTS aequora_authority_state (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    authority_id UUID NOT NULL,
+    authority_epoch BIGINT NOT NULL CHECK (authority_epoch > 0),
+    authority_instance_id UUID NOT NULL,
+    role TEXT NOT NULL,
+    fence_token BIGINT NOT NULL CHECK (fence_token > 0),
+    runtime_mode TEXT NOT NULL,
+    promotion_class TEXT NOT NULL,
+    transition_id UUID NOT NULL,
+    updated_at_unix_ms BIGINT NOT NULL CHECK (updated_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS aequora_authority_transitions (
+    transition_id UUID PRIMARY KEY,
+    authority_id UUID NOT NULL,
+    old_epoch BIGINT NOT NULL CHECK (old_epoch > 0),
+    new_epoch BIGINT NOT NULL CHECK (new_epoch > 0),
+    promotion_class TEXT NOT NULL,
+    old_final_sequence BIGINT,
+    new_base_sequence BIGINT NOT NULL CHECK (new_base_sequence >= 0),
+    reason TEXT NOT NULL,
+    created_at_unix_ms BIGINT NOT NULL CHECK (created_at_unix_ms >= 0),
+    fence_token BIGINT NOT NULL CHECK (fence_token > 0),
+    manifest_digest BYTEA NOT NULL CHECK (octet_length(manifest_digest) = 32)
+);
+
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS authority_id UUID;
+ALTER TABLE aequora_sync_events ADD COLUMN IF NOT EXISTS authority_epoch BIGINT CHECK (authority_epoch > 0);
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS authority_id UUID;
+ALTER TABLE aequora_applied_operations ADD COLUMN IF NOT EXISTS authority_epoch BIGINT CHECK (authority_epoch > 0);
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS authority_id UUID;
+ALTER TABLE aequora_audit_log ADD COLUMN IF NOT EXISTS authority_epoch BIGINT CHECK (authority_epoch > 0);
+ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS authority_id UUID;
+ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS authority_epoch BIGINT CHECK (authority_epoch > 0);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     version INTEGER PRIMARY KEY CHECK (version > 0),
@@ -288,7 +332,7 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest `PostgreSQL` schema revision understood by this Aequora release.
-pub const POSTGRES_SCHEMA_VERSION: u32 = 2;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 3;
 
 /// Versioned role and capability declaration for the built-in `PostgreSQL` authority adapter.
 pub const POSTGRES_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
@@ -329,6 +373,11 @@ const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
         version: 2,
         name: "durable_causality_and_lineage",
         sql: MIGRATION_0002,
+    },
+    PostgresMigration {
+        version: 3,
+        name: "authority_failover_and_epoch_binding",
+        sql: MIGRATION_0003,
     },
 ];
 
@@ -673,6 +722,162 @@ impl SqlxPostgresBackend {
         &self.pool
     }
 
+    /// Initializes the singleton authority metadata row or verifies the existing identity.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a database already initialized for a different authority or timeline.
+    pub async fn initialize_authority_state(
+        &self,
+        state: AuthorityState,
+    ) -> Result<AuthorityState, StoreError> {
+        sqlx::query(
+            "INSERT INTO aequora_authority_state
+                (singleton,authority_id,authority_epoch,authority_instance_id,role,fence_token,
+                 runtime_mode,promotion_class,transition_id,updated_at_unix_ms)
+             VALUES (TRUE,$1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (singleton) DO NOTHING",
+        )
+        .bind(state.authority_id.as_uuid())
+        .bind(to_i64(state.epoch.get(), "authority epoch")?)
+        .bind(state.instance_id.as_uuid())
+        .bind(authority_role_name(state.role))
+        .bind(to_i64(state.fence_token.get(), "authority fence token")?)
+        .bind(runtime_mode_name(state.runtime_mode))
+        .bind(promotion_class_name(state.last_promotion_class))
+        .bind(state.transition_id.as_uuid())
+        .bind(to_i64(
+            state.updated_at_unix_ms,
+            "authority update timestamp",
+        )?)
+        .execute(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        let stored = self
+            .load_authority_state()
+            .await?
+            .ok_or_else(|| corrupt("PostgreSQL authority state was not initialized"))?;
+        if stored != state {
+            return Err(corrupt(
+                "PostgreSQL authority state already belongs to different metadata",
+            ));
+        }
+        Ok(stored)
+    }
+
+    /// Loads the durable singleton authority state used by startup validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed store error when the query fails or persisted metadata is invalid.
+    pub async fn load_authority_state(&self) -> Result<Option<AuthorityState>, StoreError> {
+        let row = sqlx::query(
+            "SELECT authority_id,authority_epoch,authority_instance_id,role,fence_token,
+                    runtime_mode,promotion_class,transition_id,updated_at_unix_ms
+               FROM aequora_authority_state WHERE singleton=TRUE",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        row.map(|row| authority_state_from_row(&row)).transpose()
+    }
+
+    /// Atomically replaces authority state under the old instance/epoch/fence and records the
+    /// immutable transition manifest in the same transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed store error for an invalid manifest, stale expected fence, or transaction
+    /// failure.
+    pub async fn persist_authority_transition(
+        &self,
+        expected: AuthorityState,
+        replacement: AuthorityState,
+        manifest: AuthorityTransitionManifest,
+    ) -> Result<(), StoreError> {
+        manifest
+            .verify()
+            .map_err(|error| corrupt(error.to_string()))?;
+        if replacement.authority_id != expected.authority_id
+            || manifest.authority_id != expected.authority_id
+            || replacement.transition_id != manifest.transition_id
+            || replacement.epoch != manifest.new_epoch
+            || replacement.fence_token != manifest.fence_token
+        {
+            return Err(corrupt(
+                "authority replacement state does not match its transition manifest",
+            ));
+        }
+        let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+        let changed = sqlx::query(
+            "UPDATE aequora_authority_state
+                SET authority_epoch=$1,authority_instance_id=$2,role=$3,fence_token=$4,
+                    runtime_mode=$5,promotion_class=$6,transition_id=$7,updated_at_unix_ms=$8
+              WHERE singleton=TRUE AND authority_id=$9 AND authority_epoch=$10
+                AND authority_instance_id=$11 AND fence_token=$12 AND transition_id=$13",
+        )
+        .bind(to_i64(replacement.epoch.get(), "authority epoch")?)
+        .bind(replacement.instance_id.as_uuid())
+        .bind(authority_role_name(replacement.role))
+        .bind(to_i64(
+            replacement.fence_token.get(),
+            "authority fence token",
+        )?)
+        .bind(runtime_mode_name(replacement.runtime_mode))
+        .bind(promotion_class_name(replacement.last_promotion_class))
+        .bind(replacement.transition_id.as_uuid())
+        .bind(to_i64(
+            replacement.updated_at_unix_ms,
+            "authority update timestamp",
+        )?)
+        .bind(expected.authority_id.as_uuid())
+        .bind(to_i64(expected.epoch.get(), "expected authority epoch")?)
+        .bind(expected.instance_id.as_uuid())
+        .bind(to_i64(
+            expected.fence_token.get(),
+            "expected authority fence token",
+        )?)
+        .bind(expected.transition_id.as_uuid())
+        .execute(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        if changed.rows_affected() != 1 {
+            return Err(StoreError::leadership_lost(
+                "authority transition lost its epoch or fencing compare-and-swap",
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO aequora_authority_transitions
+                (transition_id,authority_id,old_epoch,new_epoch,promotion_class,
+                 old_final_sequence,new_base_sequence,reason,created_at_unix_ms,fence_token,
+                 manifest_digest)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+        )
+        .bind(manifest.transition_id.as_uuid())
+        .bind(manifest.authority_id.as_uuid())
+        .bind(to_i64(manifest.old_epoch.get(), "old authority epoch")?)
+        .bind(to_i64(manifest.new_epoch.get(), "new authority epoch")?)
+        .bind(promotion_class_name(manifest.promotion_class))
+        .bind(
+            manifest
+                .old_final_sequence
+                .map(|sequence| to_i64(sequence.0, "old final sequence"))
+                .transpose()?,
+        )
+        .bind(to_i64(manifest.new_base_sequence.0, "new base sequence")?)
+        .bind(transition_reason_name(manifest.reason))
+        .bind(to_i64(manifest.created_at_unix_ms, "transition timestamp")?)
+        .bind(to_i64(
+            manifest.fence_token.get(),
+            "transition fence token",
+        )?)
+        .bind(manifest.canonical_digest().as_slice())
+        .execute(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        transaction.commit().await.map_err(postgres_error)
+    }
+
     /// Publishes an application/server-originated authoritative change inside an existing
     /// application transaction.
     ///
@@ -984,6 +1189,115 @@ fn verify_migration_record(
 }
 
 #[allow(clippy::needless_pass_by_value)]
+fn authority_role_name(role: AuthorityRole) -> &'static str {
+    match role {
+        AuthorityRole::Primary => "primary",
+        AuthorityRole::Standby => "standby",
+        AuthorityRole::ReadReplica => "read_replica",
+        AuthorityRole::Recovering => "recovering",
+        AuthorityRole::Demoted => "demoted",
+    }
+}
+
+fn runtime_mode_name(mode: AuthorityRuntimeMode) -> &'static str {
+    match mode {
+        AuthorityRuntimeMode::Serving => "serving",
+        AuthorityRuntimeMode::Recovering => "recovering",
+        AuthorityRuntimeMode::ReadOnlyVerification => "read_only_verification",
+        AuthorityRuntimeMode::PromotionPending => "promotion_pending",
+        AuthorityRuntimeMode::Quarantined => "quarantined",
+    }
+}
+
+fn promotion_class_name(class: PromotionClass) -> &'static str {
+    match class {
+        PromotionClass::LosslessContinuation => "lossless_continuation",
+        PromotionClass::PotentialDataLoss => "potential_data_loss",
+        PromotionClass::RestoredTimeline => "restored_timeline",
+        PromotionClass::NewAuthorityMigration => "new_authority_migration",
+    }
+}
+
+fn transition_reason_name(reason: TransitionReason) -> &'static str {
+    match reason {
+        TransitionReason::PlannedMigration => "planned_migration",
+        TransitionReason::RegionFailover => "region_failover",
+        TransitionReason::PointInTimeRestore => "point_in_time_restore",
+        TransitionReason::CorruptionRecovery => "corruption_recovery",
+        TransitionReason::StandbyPromotion => "standby_promotion",
+        TransitionReason::ForkResolution => "fork_resolution",
+        TransitionReason::OperatorDemotion => "operator_demotion",
+    }
+}
+
+fn authority_state_from_row(row: &sqlx::postgres::PgRow) -> Result<AuthorityState, StoreError> {
+    let epoch = AuthorityEpoch::new(from_i64(
+        row.try_get("authority_epoch").map_err(postgres_error)?,
+        "authority epoch",
+    )?)
+    .map_err(|error| corrupt(error.to_string()))?;
+    let fence_token = aequora_authority::AuthorityFenceToken::new(from_i64(
+        row.try_get("fence_token").map_err(postgres_error)?,
+        "authority fence token",
+    )?)
+    .map_err(|error| corrupt(error.to_string()))?;
+    let role = match row
+        .try_get::<String, _>("role")
+        .map_err(postgres_error)?
+        .as_str()
+    {
+        "primary" => AuthorityRole::Primary,
+        "standby" => AuthorityRole::Standby,
+        "read_replica" => AuthorityRole::ReadReplica,
+        "recovering" => AuthorityRole::Recovering,
+        "demoted" => AuthorityRole::Demoted,
+        _ => return Err(corrupt("unknown PostgreSQL authority role")),
+    };
+    let runtime_mode = match row
+        .try_get::<String, _>("runtime_mode")
+        .map_err(postgres_error)?
+        .as_str()
+    {
+        "serving" => AuthorityRuntimeMode::Serving,
+        "recovering" => AuthorityRuntimeMode::Recovering,
+        "read_only_verification" => AuthorityRuntimeMode::ReadOnlyVerification,
+        "promotion_pending" => AuthorityRuntimeMode::PromotionPending,
+        "quarantined" => AuthorityRuntimeMode::Quarantined,
+        _ => return Err(corrupt("unknown PostgreSQL authority runtime mode")),
+    };
+    let last_promotion_class = match row
+        .try_get::<String, _>("promotion_class")
+        .map_err(postgres_error)?
+        .as_str()
+    {
+        "lossless_continuation" => PromotionClass::LosslessContinuation,
+        "potential_data_loss" => PromotionClass::PotentialDataLoss,
+        "restored_timeline" => PromotionClass::RestoredTimeline,
+        "new_authority_migration" => PromotionClass::NewAuthorityMigration,
+        _ => return Err(corrupt("unknown PostgreSQL authority promotion class")),
+    };
+    Ok(AuthorityState {
+        authority_id: AuthorityId::from_uuid(row.try_get("authority_id").map_err(postgres_error)?),
+        epoch,
+        role,
+        instance_id: AuthorityInstanceId::from_uuid(
+            row.try_get("authority_instance_id")
+                .map_err(postgres_error)?,
+        ),
+        fence_token,
+        runtime_mode,
+        last_promotion_class,
+        transition_id: AuthorityTransitionId::from_uuid(
+            row.try_get("transition_id").map_err(postgres_error)?,
+        ),
+        updated_at_unix_ms: from_i64(
+            row.try_get("updated_at_unix_ms").map_err(postgres_error)?,
+            "authority update timestamp",
+        )?,
+    })
+}
+
+#[allow(clippy::needless_pass_by_value)]
 fn postgres_error(error: sqlx::Error) -> StoreError {
     let reason = error
         .as_database_error()
@@ -1106,6 +1420,31 @@ async fn prepare_commit_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     commit: &CommitOperation,
 ) -> Result<Option<CommitOutcome>, StoreError> {
+    if let Some(authority) = commit.authority {
+        let current: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM aequora_authority_state
+                 WHERE singleton=TRUE AND authority_id=$1 AND authority_epoch=$2
+                   AND authority_instance_id=$3 AND fence_token=$4
+                   AND role='primary' AND runtime_mode='serving'
+             )",
+        )
+        .bind(authority.authority_id.as_uuid())
+        .bind(to_i64(authority.epoch.get(), "commit authority epoch")?)
+        .bind(authority.instance_id.as_uuid())
+        .bind(to_i64(
+            authority.fence_token.get(),
+            "commit authority fence token",
+        )?)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(postgres_error)?;
+        if !current {
+            return Err(StoreError::leadership_lost(
+                "authoritative commit presented a stale database authority fence",
+            ));
+        }
+    }
     let operation_lock_key = format!("operation:{}:{}", commit.tenant_id, commit.operation_id);
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(operation_lock_key)
@@ -1185,6 +1524,13 @@ async fn persist_commit_in_transaction(
     let (operation_cause_kind, operation_cause_id) = lineage_ref_columns(commit.operation_lineage);
     let event_lineage = commit.event_lineage();
     let (event_cause_kind, event_cause_id) = lineage_ref_columns(event_lineage);
+    let authority_id = commit
+        .authority
+        .map(|authority| authority.authority_id.as_uuid());
+    let authority_epoch = commit
+        .authority
+        .map(|authority| to_i64(authority.epoch.get(), "commit authority epoch"))
+        .transpose()?;
     sqlx::query(
         "INSERT INTO aequora_entities (tenant_id, entity_type, entity_id, version, payload, tombstone) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version, payload = EXCLUDED.payload, tombstone = EXCLUDED.tombstone",
     )
@@ -1216,7 +1562,7 @@ async fn persist_commit_in_transaction(
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+        "INSERT INTO aequora_sync_events (tenant_id, scope_id, sequence, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.scope_id.as_uuid())
@@ -1237,11 +1583,13 @@ async fn persist_commit_in_transaction(
             .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
     )
     .bind(commit.timestamp.node.as_uuid())
+    .bind(authority_id)
+    .bind(authority_epoch)
     .execute(&mut **transaction)
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_version, scope_id, server_sequence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_version, scope_id, server_sequence, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.operation_id.as_uuid())
@@ -1252,11 +1600,13 @@ async fn persist_commit_in_transaction(
     .bind(next_version)
     .bind(commit.scope_id.as_uuid())
     .bind(sequence)
+    .bind(authority_id)
+    .bind(authority_epoch)
     .execute(&mut **transaction)
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_audit_log (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+        "INSERT INTO aequora_audit_log (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.operation_id.as_uuid())
@@ -1277,6 +1627,8 @@ async fn persist_commit_in_transaction(
             .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
     )
     .bind(commit.timestamp.node.as_uuid())
+    .bind(authority_id)
+    .bind(authority_epoch)
     .execute(&mut **transaction)
     .await
     .map_err(postgres_error)?;
@@ -1323,12 +1675,19 @@ async fn append_fanout_event_in_transaction(
         .event_lineage()
         .derived(LineageRef::Event(commit.event_id));
     let (cause_kind, cause_id) = lineage_ref_columns(lineage);
+    let authority_id = commit
+        .authority
+        .map(|authority| authority.authority_id.as_uuid());
+    let authority_epoch = commit
+        .authority
+        .map(|authority| to_i64(authority.epoch.get(), "fan-out authority epoch"))
+        .transpose()?;
     sqlx::query(
         "INSERT INTO aequora_sync_events
             (tenant_id,scope_id,sequence,operation_id,event_id,correlation_id,caused_by_kind,
              caused_by_id,entity_type,entity_id,entity_version,change_kind,payload,physical_ms,
-             logical_clock,clock_node)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
+             logical_clock,clock_node,authority_id,authority_epoch)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(delivery.scope_id.as_uuid())
@@ -1349,6 +1708,8 @@ async fn append_fanout_event_in_transaction(
             .map_err(|_| corrupt("logical clock exceeds PostgreSQL INTEGER"))?,
     )
     .bind(commit.timestamp.node.as_uuid())
+    .bind(authority_id)
+    .bind(authority_epoch)
     .execute(&mut **transaction)
     .await
     .map_err(postgres_error)?;
@@ -1402,6 +1763,20 @@ pub trait PostgresBackend: Send + Sync {
         scope: SyncScopeId,
         partitions: &[Partition],
     ) -> Result<SnapshotDescriptor, StoreError>;
+    /// Captures a snapshot bound to an explicit authority timeline.
+    async fn create_snapshot_in_timeline(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        partitions: &[Partition],
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+    ) -> Result<SnapshotDescriptor, StoreError> {
+        let mut descriptor = self.create_snapshot(tenant, scope, partitions).await?;
+        descriptor.cursor.authority_id = authority_id;
+        descriptor.cursor.authority_epoch = authority_epoch;
+        Ok(descriptor)
+    }
     /// Reads a bounded page from a captured snapshot.
     async fn read_snapshot(
         &self,
@@ -1646,6 +2021,24 @@ impl PostgresBackend for SqlxPostgresBackend {
         scope: SyncScopeId,
         partitions: &[Partition],
     ) -> Result<SnapshotDescriptor, StoreError> {
+        self.create_snapshot_in_timeline(
+            tenant,
+            scope,
+            partitions,
+            AuthorityId::LEGACY_UNBOUND,
+            AuthorityEpoch::INITIAL,
+        )
+        .await
+    }
+
+    async fn create_snapshot_in_timeline(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        partitions: &[Partition],
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+    ) -> Result<SnapshotDescriptor, StoreError> {
         let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             .execute(&mut *transaction)
@@ -1665,12 +2058,14 @@ impl PostgresBackend for SqlxPostgresBackend {
         .unwrap_or(0);
         let snapshot_id = SnapshotId::new();
         sqlx::query(
-            "INSERT INTO aequora_snapshots (tenant_id, snapshot_id, scope_id, cursor_sequence) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO aequora_snapshots (tenant_id, snapshot_id, scope_id, cursor_sequence, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(tenant.as_uuid())
         .bind(snapshot_id.as_uuid())
         .bind(scope.as_uuid())
         .bind(sequence)
+        .bind(authority_id.as_uuid())
+        .bind(to_i64(authority_epoch.get(), "snapshot authority epoch")?)
         .execute(&mut *transaction)
         .await
         .map_err(postgres_error)?;
@@ -1686,10 +2081,12 @@ impl PostgresBackend for SqlxPostgresBackend {
         transaction.commit().await.map_err(postgres_error)?;
         Ok(SnapshotDescriptor {
             snapshot_id,
-            cursor: aequora_types::Cursor {
+            cursor: Cursor::new(
+                authority_id,
+                authority_epoch,
                 scope,
-                sequence: Sequence(from_i64(sequence, "snapshot cursor")?),
-            },
+                Sequence(from_i64(sequence, "snapshot cursor")?),
+            ),
         })
     }
 
@@ -1702,7 +2099,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         max_payload_bytes: usize,
     ) -> Result<SnapshotPage, StoreError> {
         let descriptor_row = sqlx::query(
-            "SELECT scope_id, cursor_sequence FROM aequora_snapshots WHERE tenant_id = $1 AND snapshot_id = $2",
+            "SELECT scope_id, cursor_sequence, authority_id, authority_epoch FROM aequora_snapshots WHERE tenant_id = $1 AND snapshot_id = $2",
         )
         .bind(tenant.as_uuid())
         .bind(snapshot_id.as_uuid())
@@ -1718,6 +2115,19 @@ impl PostgresBackend for SqlxPostgresBackend {
         let cursor_sequence = descriptor_row
             .try_get::<i64, _>("cursor_sequence")
             .map_err(postgres_error)?;
+        let authority_id = descriptor_row
+            .try_get::<Option<uuid::Uuid>, _>("authority_id")
+            .map_err(postgres_error)?
+            .map_or(AuthorityId::LEGACY_UNBOUND, AuthorityId::from_uuid);
+        let authority_epoch = descriptor_row
+            .try_get::<Option<i64>, _>("authority_epoch")
+            .map_err(postgres_error)?
+            .map(|value| {
+                AuthorityEpoch::new(from_i64(value, "snapshot authority epoch")?)
+                    .map_err(|error| corrupt(error.to_string()))
+            })
+            .transpose()?
+            .unwrap_or(AuthorityEpoch::INITIAL);
         let rows = sqlx::query(
             "SELECT entity_type, entity_id, entity_version, payload, tombstone FROM aequora_snapshot_entities WHERE tenant_id = $1 AND snapshot_id = $2 AND entity_order >= $3 ORDER BY entity_order LIMIT $4",
         )
@@ -1746,10 +2156,12 @@ impl PostgresBackend for SqlxPostgresBackend {
         Ok(SnapshotPage {
             descriptor: SnapshotDescriptor {
                 snapshot_id,
-                cursor: aequora_types::Cursor {
+                cursor: Cursor::new(
+                    authority_id,
+                    authority_epoch,
                     scope,
-                    sequence: Sequence(from_i64(cursor_sequence, "snapshot cursor")?),
-                },
+                    Sequence(from_i64(cursor_sequence, "snapshot cursor")?),
+                ),
             },
             entities,
             next_offset,
@@ -1795,7 +2207,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         limit: usize,
     ) -> Result<AuditPage, StoreError> {
         let rows = sqlx::query(
-            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node FROM aequora_audit_log WHERE tenant_id = $1 AND audit_offset > $2 ORDER BY audit_offset LIMIT $3",
+            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node, authority_id, authority_epoch FROM aequora_audit_log WHERE tenant_id = $1 AND audit_offset > $2 ORDER BY audit_offset LIMIT $3",
         )
         .bind(tenant.as_uuid())
         .bind(to_i64(offset.0, "audit offset")?)
@@ -1824,7 +2236,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         limit: usize,
     ) -> Result<AuditPage, StoreError> {
         let rows = sqlx::query(
-            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node FROM aequora_audit_log WHERE tenant_id = $1 AND correlation_id = $2 AND audit_offset > $3 ORDER BY audit_offset LIMIT $4",
+            "SELECT audit_offset, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node, authority_id, authority_epoch FROM aequora_audit_log WHERE tenant_id = $1 AND correlation_id = $2 AND audit_offset > $3 ORDER BY audit_offset LIMIT $4",
         )
         .bind(tenant.as_uuid())
         .bind(correlation_id.as_uuid())
@@ -2091,7 +2503,23 @@ fn audit_from_row(
     let logical = row
         .try_get::<i32, _>("logical_clock")
         .map_err(postgres_error)?;
+    let authority_id = row
+        .try_get::<Option<uuid::Uuid>, _>("authority_id")
+        .map_err(postgres_error)?;
+    let authority_epoch = row
+        .try_get::<Option<i64>, _>("authority_epoch")
+        .map_err(postgres_error)?;
+    let authority = match (authority_id, authority_epoch) {
+        (Some(authority_id), Some(authority_epoch)) => Some(aequora_types::AuthorityTimeline {
+            authority_id: AuthorityId::from_uuid(authority_id),
+            epoch: AuthorityEpoch::new(from_i64(authority_epoch, "audit authority epoch")?)
+                .map_err(|error| corrupt(error.to_string()))?,
+        }),
+        (None, None) => None,
+        _ => return Err(corrupt("partial PostgreSQL audit authority binding")),
+    };
     Ok(aequora_store::AuditRecord {
+        authority,
         offset: AuditOffset(from_i64(
             row.try_get::<i64, _>("audit_offset")
                 .map_err(postgres_error)?,
@@ -2251,6 +2679,19 @@ impl<B: PostgresBackend> SnapshotStore for PostgresStore<B> {
     ) -> Result<SnapshotDescriptor, StoreError> {
         self.backend
             .create_snapshot(tenant, scope, partitions)
+            .await
+    }
+
+    async fn create_snapshot_in_timeline(
+        &self,
+        tenant: TenantId,
+        scope: SyncScopeId,
+        partitions: &[Partition],
+        authority_id: AuthorityId,
+        authority_epoch: AuthorityEpoch,
+    ) -> Result<SnapshotDescriptor, StoreError> {
+        self.backend
+            .create_snapshot_in_timeline(tenant, scope, partitions, authority_id, authority_epoch)
             .await
     }
 
