@@ -6,6 +6,10 @@ use aequora_authority::{
     RecoveryVerification, compare_checkpoints,
 };
 use aequora_bootstrap::{BootstrapError, BootstrapJob, SnapshotManifest};
+use aequora_compat::{
+    ClientHello, CompatibilityError, CompatibilityPolicy, CompatibilityRegistry,
+    CompatibilityResult, ServerAuthorityContext, SupportStatus, canonical_registry, negotiate,
+};
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CURRENT_INTEGRITY_GENERATION, IntegrityError, IntegritySnapshot,
     PartitionScheme, RepairPlan,
@@ -84,6 +88,11 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("compat") => compat_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -91,7 +100,87 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora init <new-directory> <client|server>"
+}
+
+fn compat_command(
+    subject: Option<&str>,
+    path: Option<&str>,
+    policy_path: Option<&str>,
+) -> Result<String, CliError> {
+    match subject {
+        Some("show") if path.is_none() && policy_path.is_none() => {
+            let report = canonical_registry()?.report();
+            Ok(format!(
+                "compat: generation={} protocols={} capabilities={} operations={} writes=0",
+                report.registry_generation,
+                report.protocol_count,
+                report.capability_count,
+                report.operation_count
+            ))
+        }
+        Some("matrix") if path.is_none() && policy_path.is_none() => {
+            let registry = canonical_registry()?;
+            let rows = registry
+                .protocols
+                .iter()
+                .map(|entry| format!("v{}:{:?}", entry.version.0, entry.status))
+                .collect::<Vec<_>>()
+                .join(",");
+            Ok(format!("compat matrix: {rows} writes=0"))
+        }
+        Some("deprecated") if path.is_none() && policy_path.is_none() => {
+            let registry = canonical_registry()?;
+            let count = registry
+                .protocols
+                .iter()
+                .filter(|entry| entry.status == SupportStatus::Deprecated)
+                .count();
+            Ok(format!("compat deprecated: protocols={count} writes=0"))
+        }
+        Some("registry") if policy_path.is_none() => {
+            let registry = match path {
+                Some(path) => read_ron::<CompatibilityRegistry>(path, 2 * 1024 * 1024)?,
+                None => canonical_registry()?,
+            };
+            registry.validate()?;
+            Ok(format!(
+                "compat registry: ok generation={} writes=0",
+                registry.registry_generation
+            ))
+        }
+        Some("check-client") => {
+            let hello_path = path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora compat check-client <hello.ron> <policy.ron>".to_owned(),
+                )
+            })?;
+            let policy_path = policy_path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora compat check-client <hello.ron> <policy.ron>".to_owned(),
+                )
+            })?;
+            let hello: ClientHello = read_ron(hello_path, 2 * 1024 * 1024)?;
+            let policy: CompatibilityPolicy = read_ron(policy_path, 2 * 1024 * 1024)?;
+            let result = negotiate(
+                &hello,
+                &policy,
+                ServerAuthorityContext {
+                    authority_id: aequora_types::AuthorityId::LOCAL_DEVELOPMENT,
+                    authority_epoch: aequora_types::AuthorityEpoch::INITIAL,
+                },
+            )?;
+            let status = match result {
+                CompatibilityResult::Compatible(_) => "compatible",
+                CompatibilityResult::UpgradeRecommended { .. } => "upgrade-recommended",
+                CompatibilityResult::UpgradeRequired(_) => "upgrade-required",
+            };
+            Ok(format!("compat check-client: {status} writes=0"))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora compat <show|matrix|deprecated|check-client|registry> ...".to_owned(),
+        )),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -810,6 +899,8 @@ enum CliError {
     UnknownAdapter(String),
     #[error(transparent)]
     Compatibility(#[from] AdapterCompatibilityError),
+    #[error(transparent)]
+    ProtocolCompatibility(#[from] CompatibilityError),
     #[error("manifest serialization failed: {0}")]
     Serialize(String),
     #[error("schema RON is malformed: {0}")]
@@ -921,6 +1012,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("integrity status failed: {error}"));
         assert!(output.contains("integrity: supported generation=1"));
         assert!(output.contains("max_partitions=4096"));
+    }
+
+    #[test]
+    fn compatibility_registry_command_is_read_only_and_validated() {
+        let output = command(args(&["compat", "registry"]))
+            .unwrap_or_else(|error| panic!("compatibility registry failed: {error}"));
+        assert!(output.contains("compat registry: ok generation=1"));
+        assert!(output.contains("writes=0"));
     }
 
     #[test]

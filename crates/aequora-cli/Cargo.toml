@@ -23,6 +23,7 @@ path = "templates/server.rs"
 [dependencies]
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
+aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
@@ -32,6 +33,7 @@ aequora-model = { version = "0.1.0", path = "../aequora-model" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-schema = { version = "0.1.0", path = "../aequora-schema" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
 hex.workspace = true
 ron.workspace = true
 serde.workspace = true
