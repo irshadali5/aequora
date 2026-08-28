@@ -18,6 +18,7 @@ aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
