@@ -308,6 +308,37 @@ pub enum Capability {
     DeviceSignatureV1,
     /// The peer binds every synchronization cursor to an authority ID and epoch.
     AuthorityEpochV1,
+    /// The peer supplies coarse resource-aware transport limits without authorization meaning.
+    ResourceConstrainedV1,
+    /// The peer supports the explicit Part 21 client/server negotiation handshake.
+    CompatibilityNegotiationV1,
+}
+
+impl Capability {
+    /// Stable Part 21 registry ID. Values are append-only and never reused.
+    #[must_use]
+    pub const fn stable_id(self) -> u32 {
+        match self {
+            Self::PostcardV1 => 1,
+            Self::Zstd => 2,
+            Self::SnapshotV1 => 3,
+            Self::Tombstones => 4,
+            Self::StreamingSnapshots => 5,
+            Self::PushHints => 6,
+            Self::Quic => 7,
+            Self::MultiRegion => 8,
+            Self::LineageV1 => 9,
+            Self::IntegrityV1 => 10,
+            Self::ScopeV1 => 11,
+            Self::LiveV1 => 12,
+            Self::SignedSnapshotV1 => 13,
+            Self::EncryptedSnapshotV1 => 14,
+            Self::DeviceSignatureV1 => 15,
+            Self::AuthorityEpochV1 => 16,
+            Self::ResourceConstrainedV1 => 17,
+            Self::CompatibilityNegotiationV1 => 18,
+        }
+    }
 }
 
 /// Client-enforced response limits advertised to the server.
@@ -670,6 +701,40 @@ mod compatibility_tests {
             assert_eq!(
                 postcard::to_stdvec(&policy).unwrap_or_else(|error| panic!("{error}")),
                 vec![u8::try_from(discriminant).unwrap_or(u8::MAX)]
+            );
+        }
+    }
+
+    #[test]
+    fn capability_wire_discriminants_and_registry_ids_remain_append_only() {
+        let capabilities = [
+            Capability::PostcardV1,
+            Capability::Zstd,
+            Capability::SnapshotV1,
+            Capability::Tombstones,
+            Capability::StreamingSnapshots,
+            Capability::PushHints,
+            Capability::Quic,
+            Capability::MultiRegion,
+            Capability::LineageV1,
+            Capability::IntegrityV1,
+            Capability::ScopeV1,
+            Capability::LiveV1,
+            Capability::SignedSnapshotV1,
+            Capability::EncryptedSnapshotV1,
+            Capability::DeviceSignatureV1,
+            Capability::AuthorityEpochV1,
+            Capability::ResourceConstrainedV1,
+            Capability::CompatibilityNegotiationV1,
+        ];
+        for (discriminant, capability) in capabilities.into_iter().enumerate() {
+            assert_eq!(
+                postcard::to_stdvec(&capability).unwrap_or_else(|error| panic!("{error}")),
+                vec![u8::try_from(discriminant).unwrap_or(u8::MAX)]
+            );
+            assert_eq!(
+                capability.stable_id(),
+                u32::try_from(discriminant).unwrap_or(u32::MAX) + 1
             );
         }
     }
