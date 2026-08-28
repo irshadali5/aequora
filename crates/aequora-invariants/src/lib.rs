@@ -286,11 +286,47 @@ pub enum InvariantId {
     PerformanceBlobReferences,
     /// Admission and frame limits reject work before expensive allocation or execution.
     PerformanceEarlyAdmission,
+    /// Resource pressure cannot silently discard unsynchronized durable user intent.
+    ClientIntentPreservation,
+    /// Client cursors advance only after durable local application.
+    ClientCursorDurability,
+    /// Required security/governance directives are never silently ignored.
+    ClientRequiredDirective,
+    /// Large bootstrap and blob work stays memory-bounded on supported client profiles.
+    ClientBoundedLargeObject,
+    /// Every background unit leaves restart-recoverable durable state.
+    ClientCheckpointRecovery,
+    /// Eviction cannot remove base state pinned by unresolved pending intent.
+    ClientPendingBaseEviction,
+    /// Local-first success requires atomic domain mutation and outbox commit.
+    ClientLocalCommitAtomicity,
+    /// Resource profiles change limits and timing, never consistency semantics.
+    ClientSemanticParity,
+    /// Server-visible resource capability is coarse and never authorization evidence.
+    ClientTelemetryPrivacy,
+    /// Messages are decoded only with explicit protocol, kind, and payload-version context.
+    CompatExplicitVersionContext,
+    /// Required safety or semantic capabilities never silently downgrade.
+    CompatRequiredCapabilitySafety,
+    /// Possibly-sent operations retain immutable schema and payload semantics.
+    CompatPossiblySentImmutability,
+    /// Removed protocol and capability IDs are permanently reserved.
+    CompatStableIdReservation,
+    /// Fleet capabilities are complete before a new required feature activates.
+    CompatFleetActivationSafety,
+    /// Upgrade-required state preserves durable local user intent.
+    CompatUpgradeIntentPreservation,
+    /// Operation schema support covers the retry horizon or yields explicit recovery.
+    CompatRetryHorizon,
+    /// Protocol changes remain independent from authority epoch changes.
+    CompatAuthorityEpochIndependence,
+    /// Compatibility policy is versioned, auditable, and fail-closed.
+    CompatPolicyAuditability,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 138] = [
+    pub const ALL: [Self; 156] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -429,6 +465,24 @@ impl InvariantId {
         Self::PerformancePagedUiState,
         Self::PerformanceBlobReferences,
         Self::PerformanceEarlyAdmission,
+        Self::ClientIntentPreservation,
+        Self::ClientCursorDurability,
+        Self::ClientRequiredDirective,
+        Self::ClientBoundedLargeObject,
+        Self::ClientCheckpointRecovery,
+        Self::ClientPendingBaseEviction,
+        Self::ClientLocalCommitAtomicity,
+        Self::ClientSemanticParity,
+        Self::ClientTelemetryPrivacy,
+        Self::CompatExplicitVersionContext,
+        Self::CompatRequiredCapabilitySafety,
+        Self::CompatPossiblySentImmutability,
+        Self::CompatStableIdReservation,
+        Self::CompatFleetActivationSafety,
+        Self::CompatUpgradeIntentPreservation,
+        Self::CompatRetryHorizon,
+        Self::CompatAuthorityEpochIndependence,
+        Self::CompatPolicyAuditability,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -574,6 +628,24 @@ impl InvariantId {
             Self::PerformancePagedUiState => "AEQ-INV-PERF007",
             Self::PerformanceBlobReferences => "AEQ-INV-PERF008",
             Self::PerformanceEarlyAdmission => "AEQ-INV-PERF009",
+            Self::ClientIntentPreservation => "AEQ-INV-CLIENT001",
+            Self::ClientCursorDurability => "AEQ-INV-CLIENT002",
+            Self::ClientRequiredDirective => "AEQ-INV-CLIENT003",
+            Self::ClientBoundedLargeObject => "AEQ-INV-CLIENT004",
+            Self::ClientCheckpointRecovery => "AEQ-INV-CLIENT005",
+            Self::ClientPendingBaseEviction => "AEQ-INV-CLIENT006",
+            Self::ClientLocalCommitAtomicity => "AEQ-INV-CLIENT007",
+            Self::ClientSemanticParity => "AEQ-INV-CLIENT008",
+            Self::ClientTelemetryPrivacy => "AEQ-INV-CLIENT009",
+            Self::CompatExplicitVersionContext => "AEQ-INV-COMP001",
+            Self::CompatRequiredCapabilitySafety => "AEQ-INV-COMP002",
+            Self::CompatPossiblySentImmutability => "AEQ-INV-COMP003",
+            Self::CompatStableIdReservation => "AEQ-INV-COMP004",
+            Self::CompatFleetActivationSafety => "AEQ-INV-COMP005",
+            Self::CompatUpgradeIntentPreservation => "AEQ-INV-COMP006",
+            Self::CompatRetryHorizon => "AEQ-INV-COMP007",
+            Self::CompatAuthorityEpochIndependence => "AEQ-INV-COMP008",
+            Self::CompatPolicyAuditability => "AEQ-INV-COMP009",
         }
     }
 
@@ -982,6 +1054,60 @@ impl InvariantId {
             Self::PerformanceEarlyAdmission => {
                 "framing and admission reject excessive work before expensive allocation decode or execution"
             }
+            Self::ClientIntentPreservation => {
+                "resource pressure never discards unsynchronized durable user intent without an explicit decision"
+            }
+            Self::ClientCursorDurability => {
+                "client cursors advance only after required local application commits durably"
+            }
+            Self::ClientRequiredDirective => {
+                "resource deferral never silently ignores required security or governance directives"
+            }
+            Self::ClientBoundedLargeObject => {
+                "bootstrap and blob operations remain memory-bounded on every supported client profile"
+            }
+            Self::ClientCheckpointRecovery => {
+                "process death at a bounded work boundary leaves restart-recoverable durable state"
+            }
+            Self::ClientPendingBaseEviction => {
+                "storage eviction cannot remove base state pinned by an unresolved pending operation"
+            }
+            Self::ClientLocalCommitAtomicity => {
+                "local-first success requires an atomic durable domain mutation and outbox append"
+            }
+            Self::ClientSemanticParity => {
+                "resource profiles change scheduling and bounds but never domain consistency semantics"
+            }
+            Self::ClientTelemetryPrivacy => {
+                "server-visible resource capability is coarse and never accepted as authorization evidence"
+            }
+            Self::CompatExplicitVersionContext => {
+                "a message is decoded only with explicit protocol, kind, and payload-version context"
+            }
+            Self::CompatRequiredCapabilitySafety => {
+                "a required safety or semantic capability is never silently downgraded"
+            }
+            Self::CompatPossiblySentImmutability => {
+                "possibly-sent operations retain immutable schema and payload semantics across upgrades"
+            }
+            Self::CompatStableIdReservation => {
+                "removed protocol and capability IDs are never reused with different semantics"
+            }
+            Self::CompatFleetActivationSafety => {
+                "a required capability activates only after every required serving path supports it"
+            }
+            Self::CompatUpgradeIntentPreservation => {
+                "upgrade-required compatibility state preserves durable local user intent"
+            }
+            Self::CompatRetryHorizon => {
+                "operation schema support covers the legitimate retry horizon or provides explicit recovery"
+            }
+            Self::CompatAuthorityEpochIndependence => {
+                "protocol version changes remain independent from authority epoch changes"
+            }
+            Self::CompatPolicyAuditability => {
+                "compatibility policy changes are versioned, auditable, and fail closed"
+            }
         }
     }
 
@@ -1132,6 +1258,24 @@ impl InvariantId {
             Self::PerformancePagedUiState => 135,
             Self::PerformanceBlobReferences => 136,
             Self::PerformanceEarlyAdmission => 137,
+            Self::ClientIntentPreservation => 138,
+            Self::ClientCursorDurability => 139,
+            Self::ClientRequiredDirective => 140,
+            Self::ClientBoundedLargeObject => 141,
+            Self::ClientCheckpointRecovery => 142,
+            Self::ClientPendingBaseEviction => 143,
+            Self::ClientLocalCommitAtomicity => 144,
+            Self::ClientSemanticParity => 145,
+            Self::ClientTelemetryPrivacy => 146,
+            Self::CompatExplicitVersionContext => 147,
+            Self::CompatRequiredCapabilitySafety => 148,
+            Self::CompatPossiblySentImmutability => 149,
+            Self::CompatStableIdReservation => 150,
+            Self::CompatFleetActivationSafety => 151,
+            Self::CompatUpgradeIntentPreservation => 152,
+            Self::CompatRetryHorizon => 153,
+            Self::CompatAuthorityEpochIndependence => 154,
+            Self::CompatPolicyAuditability => 155,
         }
     }
 }
@@ -1183,7 +1327,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 138] = [
+pub const REGISTRY: [InvariantEntry; 156] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -2149,6 +2293,132 @@ pub const REGISTRY: [InvariantEntry; 138] = [
         "header_limit_property",
         "verify_frame_admission_order",
         "late_frame_rejection_total",
+    ),
+    entry(
+        InvariantId::ClientIntentPreservation,
+        "client_intent_preserved",
+        "resource_pressure_intent_property",
+        "verify_client_eviction_policy",
+        "client_intent_discard_total",
+    ),
+    entry(
+        InvariantId::ClientCursorDurability,
+        "client_cursor_after_durable_apply",
+        "checkpoint_cursor_property",
+        "verify_client_checkpoint_order",
+        "client_early_cursor_total",
+    ),
+    entry(
+        InvariantId::ClientRequiredDirective,
+        "required_directive_retained",
+        "security_work_admission_property",
+        "verify_client_required_work",
+        "client_required_directive_deferred_total",
+    ),
+    entry(
+        InvariantId::ClientBoundedLargeObject,
+        "client_large_object_bounded",
+        "client_chunk_bound_property",
+        "verify_client_streaming_limits",
+        "client_large_object_overflow_total",
+    ),
+    entry(
+        InvariantId::ClientCheckpointRecovery,
+        "client_checkpoint_recoverable",
+        "process_kill_checkpoint_property",
+        "verify_client_restart_recovery",
+        "client_checkpoint_recovery_failure_total",
+    ),
+    entry(
+        InvariantId::ClientPendingBaseEviction,
+        "pending_base_pinned",
+        "scope_eviction_pin_property",
+        "verify_client_scope_eviction",
+        "client_pending_base_eviction_total",
+    ),
+    entry(
+        InvariantId::ClientLocalCommitAtomicity,
+        "local_save_atomic",
+        "local_commit_receipt_property",
+        "verify_client_local_commit",
+        "client_false_local_save_total",
+    ),
+    entry(
+        InvariantId::ClientSemanticParity,
+        "client_profile_semantic_parity",
+        "resource_profile_equivalence_property",
+        "verify_client_profile_limits",
+        "client_resource_semantic_change_total",
+    ),
+    entry(
+        InvariantId::ClientTelemetryPrivacy,
+        "client_capability_coarse",
+        "capability_privacy_property",
+        "verify_client_capability_profile",
+        "client_precise_resource_telemetry_total",
+    ),
+    entry(
+        InvariantId::CompatExplicitVersionContext,
+        "explicit_version_context",
+        "golden_versioned_hello",
+        "compatibility_contracts",
+        "compat_decode_without_context_total",
+    ),
+    entry(
+        InvariantId::CompatRequiredCapabilitySafety,
+        "required_capability_fail_closed",
+        "downgrade_required_capability",
+        "compatibility_contracts",
+        "compat_required_capability_missing_total",
+    ),
+    entry(
+        InvariantId::CompatPossiblySentImmutability,
+        "possibly_sent_immutable",
+        "retry_payload_immutability",
+        "compatibility_contracts",
+        "compat_retry_payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::CompatStableIdReservation,
+        "removed_ids_reserved",
+        "registry_reservation_validation",
+        "compatibility_registry",
+        "compat_registry_reuse_total",
+    ),
+    entry(
+        InvariantId::CompatFleetActivationSafety,
+        "fleet_complete_before_required",
+        "mixed_fleet_feature_gate",
+        "compatibility_contracts",
+        "compat_early_activation_total",
+    ),
+    entry(
+        InvariantId::CompatUpgradeIntentPreservation,
+        "upgrade_preserves_intent",
+        "upgrade_state_intent_evidence",
+        "compatibility_contracts",
+        "compat_intent_loss_total",
+    ),
+    entry(
+        InvariantId::CompatRetryHorizon,
+        "retry_horizon_or_recovery",
+        "retry_only_operation_admission",
+        "compatibility_registry",
+        "compat_schema_retry_rejected_total",
+    ),
+    entry(
+        InvariantId::CompatAuthorityEpochIndependence,
+        "protocol_epoch_independent",
+        "session_cache_epoch_invalidation",
+        "compatibility_contracts",
+        "compat_epoch_conflation_total",
+    ),
+    entry(
+        InvariantId::CompatPolicyAuditability,
+        "versioned_auditable_policy",
+        "invalid_policy_fail_closed",
+        "compatibility_registry",
+        "compat_invalid_policy_total",
     ),
 ];
 
