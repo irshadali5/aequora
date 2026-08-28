@@ -340,11 +340,47 @@ pub enum InvariantId {
     MetadataMigrationIntentPreservation,
     /// Ordinary metadata records never contain private key material.
     MetadataSecretKeyExclusion,
+    /// Required asynchronous work is durable before execution can be depended upon.
+    JobDurableBeforeExecution,
+    /// Only the current fence holder may checkpoint or terminally transition a job.
+    JobCurrentFenceOnly,
+    /// Domain-side external effects require a committed immutable intent.
+    JobCommittedSideEffectIntent,
+    /// Workers submit business mutations through authoritative domain handlers.
+    JobAuthoritativeResultOperation,
+    /// Ambiguous provider outcomes follow an explicit recovery policy.
+    JobExplicitAmbiguityRecovery,
+    /// Required job and workflow state is never process-memory-only.
+    JobDurableState,
+    /// Expired stale workers cannot overwrite a newer claim.
+    JobStaleWorkerRejection,
+    /// Long-running jobs checkpoint bounded progress.
+    JobBoundedCheckpoint,
+    /// Retry scheduling is backed off and cannot hot-loop.
+    JobBoundedRetry,
+    /// Admin mutations cannot bypass the responsible correctness service.
+    AdminNoDomainBypass,
+    /// High-risk admin mutations have authenticated durable attribution.
+    AdminDurableAttribution,
+    /// An admin idempotency identity cannot change its action payload.
+    AdminPayloadImmutability,
+    /// Destructive execution binds the exact reviewed non-stale plan.
+    AdminReviewedPlanBinding,
+    /// Admin authorization is evaluated by the server-side core.
+    AdminServerAuthorization,
+    /// Admin responses never expose private cryptographic key material.
+    AdminPrivateKeyExclusion,
+    /// Force operations remain distinct and more strongly guarded.
+    AdminOverrideSeparation,
+    /// Data-plane correctness does not depend on control-plane availability.
+    AdminDataPlaneIndependence,
+    /// High-risk completion requires verified postconditions.
+    AdminVerifiedCompletion,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 165] = [
+    pub const ALL: [Self; 183] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -510,6 +546,24 @@ impl InvariantId {
         Self::MetadataStaleFenceRejection,
         Self::MetadataMigrationIntentPreservation,
         Self::MetadataSecretKeyExclusion,
+        Self::JobDurableBeforeExecution,
+        Self::JobCurrentFenceOnly,
+        Self::JobCommittedSideEffectIntent,
+        Self::JobAuthoritativeResultOperation,
+        Self::JobExplicitAmbiguityRecovery,
+        Self::JobDurableState,
+        Self::JobStaleWorkerRejection,
+        Self::JobBoundedCheckpoint,
+        Self::JobBoundedRetry,
+        Self::AdminNoDomainBypass,
+        Self::AdminDurableAttribution,
+        Self::AdminPayloadImmutability,
+        Self::AdminReviewedPlanBinding,
+        Self::AdminServerAuthorization,
+        Self::AdminPrivateKeyExclusion,
+        Self::AdminOverrideSeparation,
+        Self::AdminDataPlaneIndependence,
+        Self::AdminVerifiedCompletion,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -682,6 +736,24 @@ impl InvariantId {
             Self::MetadataStaleFenceRejection => "AEQ-INV-META007",
             Self::MetadataMigrationIntentPreservation => "AEQ-INV-META008",
             Self::MetadataSecretKeyExclusion => "AEQ-INV-META009",
+            Self::JobDurableBeforeExecution => "AEQ-INV-JOB001",
+            Self::JobCurrentFenceOnly => "AEQ-INV-JOB002",
+            Self::JobCommittedSideEffectIntent => "AEQ-INV-JOB003",
+            Self::JobAuthoritativeResultOperation => "AEQ-INV-JOB004",
+            Self::JobExplicitAmbiguityRecovery => "AEQ-INV-JOB005",
+            Self::JobDurableState => "AEQ-INV-JOB006",
+            Self::JobStaleWorkerRejection => "AEQ-INV-JOB007",
+            Self::JobBoundedCheckpoint => "AEQ-INV-JOB008",
+            Self::JobBoundedRetry => "AEQ-INV-JOB009",
+            Self::AdminNoDomainBypass => "AEQ-INV-ADMIN001",
+            Self::AdminDurableAttribution => "AEQ-INV-ADMIN002",
+            Self::AdminPayloadImmutability => "AEQ-INV-ADMIN003",
+            Self::AdminReviewedPlanBinding => "AEQ-INV-ADMIN004",
+            Self::AdminServerAuthorization => "AEQ-INV-ADMIN005",
+            Self::AdminPrivateKeyExclusion => "AEQ-INV-ADMIN006",
+            Self::AdminOverrideSeparation => "AEQ-INV-ADMIN007",
+            Self::AdminDataPlaneIndependence => "AEQ-INV-ADMIN008",
+            Self::AdminVerifiedCompletion => "AEQ-INV-ADMIN009",
         }
     }
 
@@ -1171,6 +1243,60 @@ impl InvariantId {
             Self::MetadataSecretKeyExclusion => {
                 "ordinary metadata records contain no private secret key material"
             }
+            Self::JobDurableBeforeExecution => {
+                "required asynchronous work exists durably before execution can be depended upon"
+            }
+            Self::JobCurrentFenceOnly => {
+                "only the current fencing token holder may checkpoint or terminally transition a job"
+            }
+            Self::JobCommittedSideEffectIntent => {
+                "domain-side external execution requires a committed immutable SideEffectIntent"
+            }
+            Self::JobAuthoritativeResultOperation => {
+                "workers submit business-state changes through authoritative domain handlers"
+            }
+            Self::JobExplicitAmbiguityRecovery => {
+                "ambiguous external outcomes follow explicit reconciliation policy instead of blind retry"
+            }
+            Self::JobDurableState => {
+                "required job and workflow correctness state is never stored only in process memory"
+            }
+            Self::JobStaleWorkerRejection => {
+                "an expired stale worker cannot overwrite progress committed by a newer claim"
+            }
+            Self::JobBoundedCheckpoint => {
+                "long-running jobs checkpoint bounded progress for restart-safe recovery"
+            }
+            Self::JobBoundedRetry => {
+                "retry scheduling is backed off and cannot create an uncontrolled tight loop"
+            }
+            Self::AdminNoDomainBypass => {
+                "admin mutations execute through the correctness service responsible for the affected invariant"
+            }
+            Self::AdminDurableAttribution => {
+                "high-risk admin mutations bind an authenticated principal and durable AdminOperationId"
+            }
+            Self::AdminPayloadImmutability => {
+                "one AdminOperationId cannot be retried with a different semantic payload"
+            }
+            Self::AdminReviewedPlanBinding => {
+                "destructive execution binds the exact reviewed plan and rejects stale safety state"
+            }
+            Self::AdminServerAuthorization => {
+                "admin authorization is evaluated server-side independent of UI visibility"
+            }
+            Self::AdminPrivateKeyExclusion => {
+                "admin API responses never contain private cryptographic key material"
+            }
+            Self::AdminOverrideSeparation => {
+                "force and override actions are distinct and more strongly authorized than normal actions"
+            }
+            Self::AdminDataPlaneIndependence => {
+                "control-plane unavailability does not invalidate normal data-plane correctness"
+            }
+            Self::AdminVerifiedCompletion => {
+                "high-risk admin actions complete only after their defined postconditions verify"
+            }
         }
     }
 
@@ -1348,6 +1474,24 @@ impl InvariantId {
             Self::MetadataStaleFenceRejection => 162,
             Self::MetadataMigrationIntentPreservation => 163,
             Self::MetadataSecretKeyExclusion => 164,
+            Self::JobDurableBeforeExecution => 165,
+            Self::JobCurrentFenceOnly => 166,
+            Self::JobCommittedSideEffectIntent => 167,
+            Self::JobAuthoritativeResultOperation => 168,
+            Self::JobExplicitAmbiguityRecovery => 169,
+            Self::JobDurableState => 170,
+            Self::JobStaleWorkerRejection => 171,
+            Self::JobBoundedCheckpoint => 172,
+            Self::JobBoundedRetry => 173,
+            Self::AdminNoDomainBypass => 174,
+            Self::AdminDurableAttribution => 175,
+            Self::AdminPayloadImmutability => 176,
+            Self::AdminReviewedPlanBinding => 177,
+            Self::AdminServerAuthorization => 178,
+            Self::AdminPrivateKeyExclusion => 179,
+            Self::AdminOverrideSeparation => 180,
+            Self::AdminDataPlaneIndependence => 181,
+            Self::AdminVerifiedCompletion => 182,
         }
     }
 }
@@ -1399,7 +1543,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 165] = [
+pub const REGISTRY: [InvariantEntry; 183] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -2554,6 +2698,132 @@ pub const REGISTRY: [InvariantEntry; 165] = [
         "metadata_secret_field_scan",
         "metadata_export_contract",
         "metadata_secret_violation_total",
+    ),
+    entry(
+        InvariantId::JobDurableBeforeExecution,
+        "job_durable_before_execution",
+        "job_insert_crash_matrix",
+        "job_store_insert_contract",
+        "job_durability_gap_total",
+    ),
+    entry(
+        InvariantId::JobCurrentFenceOnly,
+        "job_current_fence_only",
+        "double_worker_fencing",
+        "job_store_fence_contract",
+        "job_stale_fence_total",
+    ),
+    entry(
+        InvariantId::JobCommittedSideEffectIntent,
+        "job_committed_side_effect_intent",
+        "authoritative_outbox_crash_matrix",
+        "side_effect_transaction_contract",
+        "side_effect_intent_gap_total",
+    ),
+    entry(
+        InvariantId::JobAuthoritativeResultOperation,
+        "job_authoritative_result_operation",
+        "provider_result_operation_path",
+        "authoritative_result_sink_contract",
+        "job_domain_bypass_total",
+    ),
+    entry(
+        InvariantId::JobExplicitAmbiguityRecovery,
+        "job_explicit_ambiguity_recovery",
+        "provider_timeout_ambiguity",
+        "provider_reconciliation_contract",
+        "side_effect_ambiguous_total",
+    ),
+    entry(
+        InvariantId::JobDurableState,
+        "job_durable_state",
+        "worker_restart_recovery",
+        "job_workflow_store_contract",
+        "job_memory_only_state_total",
+    ),
+    entry(
+        InvariantId::JobStaleWorkerRejection,
+        "job_stale_worker_rejection",
+        "lease_expiry_reclaim_race",
+        "job_store_fence_contract",
+        "job_stale_worker_update_total",
+    ),
+    entry(
+        InvariantId::JobBoundedCheckpoint,
+        "job_bounded_checkpoint",
+        "chunk_crash_resume",
+        "job_checkpoint_contract",
+        "job_checkpoint_bound_violation_total",
+    ),
+    entry(
+        InvariantId::JobBoundedRetry,
+        "job_bounded_retry",
+        "provider_outage_backoff",
+        "job_retry_contract",
+        "job_retry_storm_total",
+    ),
+    entry(
+        InvariantId::AdminNoDomainBypass,
+        "admin_no_domain_bypass",
+        "admin_subsystem_guard_matrix",
+        "admin_executor_contract",
+        "admin_domain_bypass_total",
+    ),
+    entry(
+        InvariantId::AdminDurableAttribution,
+        "admin_durable_attribution",
+        "admin_auth_attribution",
+        "admin_store_contract",
+        "admin_unattributed_mutation_total",
+    ),
+    entry(
+        InvariantId::AdminPayloadImmutability,
+        "admin_payload_immutability",
+        "admin_idempotency_payload_drift",
+        "admin_store_idempotency_contract",
+        "admin_payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::AdminReviewedPlanBinding,
+        "admin_reviewed_plan_binding",
+        "admin_plan_staleness_matrix",
+        "admin_plan_store_contract",
+        "admin_stale_plan_total",
+    ),
+    entry(
+        InvariantId::AdminServerAuthorization,
+        "admin_server_authorization",
+        "admin_role_scope_matrix",
+        "admin_authorization_contract",
+        "admin_denied_total",
+    ),
+    entry(
+        InvariantId::AdminPrivateKeyExclusion,
+        "admin_private_key_exclusion",
+        "admin_response_secret_scan",
+        "admin_dto_contract",
+        "admin_secret_violation_total",
+    ),
+    entry(
+        InvariantId::AdminOverrideSeparation,
+        "admin_override_separation",
+        "admin_force_action_policy",
+        "admin_permission_registry_contract",
+        "admin_force_action_total",
+    ),
+    entry(
+        InvariantId::AdminDataPlaneIndependence,
+        "admin_data_plane_independence",
+        "admin_outage_data_plane",
+        "server_plane_separation_contract",
+        "admin_dependency_data_plane_total",
+    ),
+    entry(
+        InvariantId::AdminVerifiedCompletion,
+        "admin_verified_completion",
+        "admin_postcondition_failure",
+        "admin_executor_verification_contract",
+        "admin_unverified_completion_total",
     ),
 ];
 
