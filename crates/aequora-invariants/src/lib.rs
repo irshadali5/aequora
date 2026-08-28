@@ -322,11 +322,29 @@ pub enum InvariantId {
     CompatAuthorityEpochIndependence,
     /// Compatibility policy is versioned, auditable, and fail-closed.
     CompatPolicyAuditability,
+    /// Every durable store declares one supported internal metadata schema before operation.
+    MetadataStoreSchemaDeclaration,
+    /// Operation ledger identity is unique and semantic payload drift is rejected.
+    MetadataLedgerOperationIdentity,
+    /// Authoritative client apply and cursor advancement share one local transaction.
+    MetadataClientCursorAtomicity,
+    /// Required authority metadata commits atomically with its business mutation.
+    MetadataAuthoritativeAtomicity,
+    /// Published snapshots contain only durable verified chunks from one boundary.
+    MetadataSnapshotPublicationSafety,
+    /// Physical adapters preserve logical metadata semantics.
+    MetadataAdapterSemanticEquivalence,
+    /// Stale fencing tokens cannot update durable metadata state.
+    MetadataStaleFenceRejection,
+    /// Internal migrations preserve pending intent or leave no partial migration.
+    MetadataMigrationIntentPreservation,
+    /// Ordinary metadata records never contain private key material.
+    MetadataSecretKeyExclusion,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 156] = [
+    pub const ALL: [Self; 165] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -483,6 +501,15 @@ impl InvariantId {
         Self::CompatRetryHorizon,
         Self::CompatAuthorityEpochIndependence,
         Self::CompatPolicyAuditability,
+        Self::MetadataStoreSchemaDeclaration,
+        Self::MetadataLedgerOperationIdentity,
+        Self::MetadataClientCursorAtomicity,
+        Self::MetadataAuthoritativeAtomicity,
+        Self::MetadataSnapshotPublicationSafety,
+        Self::MetadataAdapterSemanticEquivalence,
+        Self::MetadataStaleFenceRejection,
+        Self::MetadataMigrationIntentPreservation,
+        Self::MetadataSecretKeyExclusion,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -646,6 +673,15 @@ impl InvariantId {
             Self::CompatRetryHorizon => "AEQ-INV-COMP007",
             Self::CompatAuthorityEpochIndependence => "AEQ-INV-COMP008",
             Self::CompatPolicyAuditability => "AEQ-INV-COMP009",
+            Self::MetadataStoreSchemaDeclaration => "AEQ-INV-META001",
+            Self::MetadataLedgerOperationIdentity => "AEQ-INV-META002",
+            Self::MetadataClientCursorAtomicity => "AEQ-INV-META003",
+            Self::MetadataAuthoritativeAtomicity => "AEQ-INV-META004",
+            Self::MetadataSnapshotPublicationSafety => "AEQ-INV-META005",
+            Self::MetadataAdapterSemanticEquivalence => "AEQ-INV-META006",
+            Self::MetadataStaleFenceRejection => "AEQ-INV-META007",
+            Self::MetadataMigrationIntentPreservation => "AEQ-INV-META008",
+            Self::MetadataSecretKeyExclusion => "AEQ-INV-META009",
         }
     }
 
@@ -1108,6 +1144,33 @@ impl InvariantId {
             Self::CompatPolicyAuditability => {
                 "compatibility policy changes are versioned, auditable, and fail closed"
             }
+            Self::MetadataStoreSchemaDeclaration => {
+                "every durable store declares one supported MetadataSchemaVersion before operation"
+            }
+            Self::MetadataLedgerOperationIdentity => {
+                "OperationId is unique in the ledger and semantic payload drift is rejected"
+            }
+            Self::MetadataClientCursorAtomicity => {
+                "authoritative client apply and cursor advancement commit in one local transaction"
+            }
+            Self::MetadataAuthoritativeAtomicity => {
+                "required authority metadata commits atomically with the business mutation"
+            }
+            Self::MetadataSnapshotPublicationSafety => {
+                "published snapshots contain only durable verified chunks from one boundary"
+            }
+            Self::MetadataAdapterSemanticEquivalence => {
+                "physical adapters preserve logical uniqueness ordering transaction and retention semantics"
+            }
+            Self::MetadataStaleFenceRejection => {
+                "a stale fencing token cannot update durable metadata state"
+            }
+            Self::MetadataMigrationIntentPreservation => {
+                "metadata migrations preserve pending intent or commit no partial migration"
+            }
+            Self::MetadataSecretKeyExclusion => {
+                "ordinary metadata records contain no private secret key material"
+            }
         }
     }
 
@@ -1276,6 +1339,15 @@ impl InvariantId {
             Self::CompatRetryHorizon => 153,
             Self::CompatAuthorityEpochIndependence => 154,
             Self::CompatPolicyAuditability => 155,
+            Self::MetadataStoreSchemaDeclaration => 156,
+            Self::MetadataLedgerOperationIdentity => 157,
+            Self::MetadataClientCursorAtomicity => 158,
+            Self::MetadataAuthoritativeAtomicity => 159,
+            Self::MetadataSnapshotPublicationSafety => 160,
+            Self::MetadataAdapterSemanticEquivalence => 161,
+            Self::MetadataStaleFenceRejection => 162,
+            Self::MetadataMigrationIntentPreservation => 163,
+            Self::MetadataSecretKeyExclusion => 164,
         }
     }
 }
@@ -1327,7 +1399,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 156] = [
+pub const REGISTRY: [InvariantEntry; 165] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -2419,6 +2491,69 @@ pub const REGISTRY: [InvariantEntry; 156] = [
         "invalid_policy_fail_closed",
         "compatibility_registry",
         "compat_invalid_policy_total",
+    ),
+    entry(
+        InvariantId::MetadataStoreSchemaDeclaration,
+        "metadata_schema_declared",
+        "metadata_root_schema_gate",
+        "metadata_store_startup",
+        "metadata_schema_rejection_total",
+    ),
+    entry(
+        InvariantId::MetadataLedgerOperationIdentity,
+        "metadata_operation_identity",
+        "ledger_payload_mismatch",
+        "metadata_ledger_contract",
+        "metadata_payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::MetadataClientCursorAtomicity,
+        "metadata_cursor_atomicity",
+        "cursor_crash_matrix",
+        "metadata_local_transaction",
+        "metadata_cursor_gap_total",
+    ),
+    entry(
+        InvariantId::MetadataAuthoritativeAtomicity,
+        "metadata_authority_atomicity",
+        "authoritative_crash_matrix",
+        "metadata_authority_transaction",
+        "metadata_authority_gap_total",
+    ),
+    entry(
+        InvariantId::MetadataSnapshotPublicationSafety,
+        "metadata_snapshot_publication",
+        "snapshot_publish_matrix",
+        "metadata_snapshot_contract",
+        "metadata_snapshot_invalid_total",
+    ),
+    entry(
+        InvariantId::MetadataAdapterSemanticEquivalence,
+        "metadata_adapter_equivalence",
+        "cross_adapter_export_equivalence",
+        "metadata_mapping_contract",
+        "metadata_adapter_drift_total",
+    ),
+    entry(
+        InvariantId::MetadataStaleFenceRejection,
+        "metadata_stale_fence_rejected",
+        "metadata_fencing_race",
+        "metadata_fence_contract",
+        "metadata_stale_fence_total",
+    ),
+    entry(
+        InvariantId::MetadataMigrationIntentPreservation,
+        "metadata_migration_intent",
+        "metadata_migration_failure_matrix",
+        "metadata_migration_contract",
+        "metadata_migration_intent_loss_total",
+    ),
+    entry(
+        InvariantId::MetadataSecretKeyExclusion,
+        "metadata_secret_exclusion",
+        "metadata_secret_field_scan",
+        "metadata_export_contract",
+        "metadata_secret_violation_total",
     ),
 ];
 
