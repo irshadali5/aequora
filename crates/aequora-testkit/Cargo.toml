@@ -8,6 +8,7 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
 aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
@@ -23,6 +24,7 @@ aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
+aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
@@ -32,10 +34,12 @@ aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
+aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
 async-trait.workspace = true
 futures-util.workspace = true
 postcard.workspace = true
