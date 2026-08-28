@@ -1,5 +1,11 @@
 //! Authoritative sync-session orchestration.
 
+/// Thin server-side boundary for a separately hosted operational control plane.
+pub mod admin;
+
+/// Database-neutral server orchestration for durable background work.
+pub mod jobs;
+
 /// Stable plug-and-play entry point for constructing an authoritative service.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AequoraServer;
@@ -14,6 +20,10 @@ impl AequoraServer {
 
 /// Focused imports for application server integrations.
 pub mod prelude {
+    pub use crate::admin::{AdminControlPlane, AdminPlaneConfig};
+    pub use crate::jobs::{
+        JobAccessPolicy, JobAdminService, JobWorkerConfig, JobWorkerPlanner, WorkerShutdown,
+    };
     pub use crate::{
         AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,
         ServerCommandOutcome, ServerConfig, ServerError, ServerRegionalReadGuard, SyncServer,
@@ -30,13 +40,18 @@ pub mod prelude {
         AuthContext, DerivedEventProvenance, DomainOperation, JobProvenance, OperationExecutor,
         OperationHandler, OperationRegistry, ScopeAuthorizer, TrustedProvenance,
     };
+    pub use aequora_jobs::{JobRegistry, JobStore};
     pub use aequora_region::{
         ReadResponseMetadata, RegionError, RegionalReadRequest, ReplicaObservation,
+    };
+    pub use aequora_side_effects::{
+        AuthoritativeOperationSink, SideEffectProvider, SideEffectStore,
     };
     pub use aequora_store::{
         AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRequirements,
         AdapterRole, AdapterTier, AuthoritativeStore, ProductionAdapterPair,
     };
+    pub use aequora_workflow::{WorkflowDefinition, WorkflowStore};
 }
 
 use aequora_admission::{
