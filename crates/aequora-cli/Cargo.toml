@@ -21,6 +21,7 @@ name = "generated_server_starter"
 path = "templates/server.rs"
 
 [dependencies]
+aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }

@@ -1,5 +1,6 @@
 //! Payload-free diagnostics for statically linked Aequora database adapters.
 
+use aequora_admin::{ADMIN_API_VERSION, AdminAction, AdminListenerPolicy};
 use aequora_authority::{
     AuthorityController, AuthorityError, AuthorityPromotionPlan, AuthorityPromotionPolicy,
     AuthorityState, CheckpointComparison, JournalCheckpoint, PromotionEvidence,
@@ -93,6 +94,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("admin") => admin_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -100,7 +102,52 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora init <new-directory> <client|server>"
+}
+
+fn admin_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    match subject {
+        Some("capabilities") if path.is_none() => Ok(format!(
+            "admin: api_version={ADMIN_API_VERSION} formats=postcard,ron,json mutations=require-auth writes=0"
+        )),
+        Some("validate-listener") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora admin validate-listener <policy.ron>".to_owned(),
+                )
+            })?;
+            let policy: AdminListenerPolicy = read_ron(path, 256 * 1024)?;
+            policy.validate()?;
+            Ok(format!(
+                "admin listener: valid=true state={:?} scope={:?} destructive={:?} writes=0",
+                policy.state, policy.bind_scope, policy.destructive_actions
+            ))
+        }
+        Some("inspect-action") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora admin inspect-action <action.ron>".to_owned())
+            })?;
+            let action: AdminAction = read_ron(path, 512 * 1024)?;
+            let digest = action.digest()?;
+            Ok(format!(
+                "admin action: id={} kind={:?} risk={:?} permission={:?} digest={} plan_required={} writes=0",
+                action.admin_operation_id.as_uuid(),
+                action.command.kind(),
+                action.command.risk(),
+                action.command.permission(),
+                hex::encode(digest),
+                aequora_admin::requires_plan(&action.command),
+            ))
+        }
+        Some("explain") if path.is_none() => Ok(
+            "admin: mutations require a private listener, strong authentication, server-side permission checks, stable AdminOperationId, exact plan digest when high risk, second-person approval when destructive, subsystem guards, verified postconditions, and durable audit"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora admin <capabilities|validate-listener|inspect-action|explain> ..."
+                .to_owned(),
+        )),
+    }
 }
 
 fn compat_command(
@@ -897,6 +944,8 @@ enum CliError {
     Usage(String),
     #[error("unknown built-in adapter {0:?}")]
     UnknownAdapter(String),
+    #[error(transparent)]
+    Admin(#[from] aequora_admin::AdminError),
     #[error(transparent)]
     Compatibility(#[from] AdapterCompatibilityError),
     #[error(transparent)]
