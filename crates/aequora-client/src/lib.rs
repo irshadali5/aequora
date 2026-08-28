@@ -1,5 +1,7 @@
 //! One-shot client synchronization and atomic reconciliation.
 
+pub mod resources;
+
 /// Stable plug-and-play entry point for constructing a client engine.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AequoraClient;
@@ -14,6 +16,13 @@ impl AequoraClient {
 
 /// Focused imports for application client integrations.
 pub mod prelude {
+    pub use crate::resources::{
+        AppLifecycleEvent, BackgroundBudget, ClientCapabilityProfile, ClientResourceAdmission,
+        ClientResourceContext, ClientResourcePolicy, ClientResourceProfile, ClientStatus,
+        ClientWork, ClientWorkKind, DefaultResourceAdmission, DurableWorkCheckpoint, EvictionPlan,
+        LocalCommitReceipt, MemoryClass, PlatformResourceMonitor, ResourceDecision,
+        ScopeCachePolicy, SnapshotCachePolicy, StorageState, ThermalState,
+    };
     pub use crate::{
         AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, BootstrapOutcome, ClientBuildError,
         ClientConfig, ClientError, ClientReadSession, ClientSyncEngine, ClientSyncEngineBuilder,
@@ -71,6 +80,10 @@ use aequora_transport::{
 use aequora_types::{
     AuthorityEpoch, AuthorityId, Cursor, OperationId, ProtocolVersion, RequestId, Sequence,
     SnapshotId,
+};
+use resources::{
+    ClientResourceAdmission, ClientResourceContext, ClientResourcePolicy, ClientWork,
+    ClientWorkKind, DefaultResourceAdmission, ResourceDecision, ResourceReason, WorkEstimate,
 };
 use std::{
     collections::HashSet,
@@ -362,13 +375,16 @@ pub struct ClientConfig {
     pub adaptive_batching: Option<AdaptiveBatchConfig>,
     /// Platform-neutral `QoS` profile and hard scheduling limits.
     pub scheduler: SchedulerPolicy,
+    /// Device resource caps layered after scheduler desire and server maximums.
+    pub resources: ClientResourcePolicy,
 }
 
 impl ClientConfig {
     /// Creates a configuration with conservative deterministic defaults.
     #[must_use]
     pub fn new(session: SessionMetadata) -> Self {
-        Self {
+        let resources = ClientResourcePolicy::default();
+        let mut config = Self {
             protocol: ProtocolVersion::V1,
             session,
             push_batch_size: 256,
@@ -380,12 +396,92 @@ impl ClientConfig {
                 Capability::LineageV1,
                 Capability::IntegrityV1,
                 Capability::AuthorityEpochV1,
+                Capability::ResourceConstrainedV1,
             ],
             retry: RetryConfig::default(),
             max_exchanges_per_sync: 1_024,
             snapshot_limits: SnapshotLimits::default(),
             adaptive_batching: None,
             scheduler: SchedulerPolicy::default(),
+            resources,
+        };
+        config.apply_resource_policy(resources);
+        config
+    }
+
+    /// Selects a validated built-in resource baseline and caps all related wire/scheduler limits.
+    #[must_use]
+    pub fn with_resource_profile(mut self, profile: resources::ClientResourceProfile) -> Self {
+        self.apply_resource_policy(ClientResourcePolicy::for_profile(profile));
+        self
+    }
+
+    /// Applies client resource ceilings without ever increasing application-configured limits.
+    pub fn apply_resource_policy(&mut self, policy: ClientResourcePolicy) {
+        self.resources = policy;
+        let memory = policy.memory;
+        self.push_batch_size = self
+            .push_batch_size
+            .min(memory.max_batch_operations as usize)
+            .max(1);
+        self.push_batch_bytes = self
+            .push_batch_bytes
+            .min(memory.sync_decode_bytes as usize)
+            .max(1);
+        self.limits.max_changes = self
+            .limits
+            .max_changes
+            .min(memory.max_batch_operations)
+            .max(1);
+        self.limits.max_response_bytes = self
+            .limits
+            .max_response_bytes
+            .min(memory.sync_response_bytes)
+            .max(1);
+        self.snapshot_limits.max_entities = self
+            .snapshot_limits
+            .max_entities
+            .min(memory.max_batch_operations.saturating_mul(4))
+            .max(1);
+        self.snapshot_limits.max_payload_bytes = self
+            .snapshot_limits
+            .max_payload_bytes
+            .min(memory.snapshot_chunk_bytes)
+            .max(1);
+        self.scheduler.batch.max_ops = self
+            .scheduler
+            .batch
+            .max_ops
+            .min(memory.max_batch_operations as usize)
+            .max(1);
+        self.scheduler.batch.target_ops = self
+            .scheduler
+            .batch
+            .target_ops
+            .min(self.scheduler.batch.max_ops)
+            .max(self.scheduler.batch.min_ops);
+        self.scheduler.batch.max_bytes = self
+            .scheduler
+            .batch
+            .max_bytes
+            .min(memory.sync_decode_bytes as usize)
+            .max(1);
+        self.scheduler.batch.target_bytes = self
+            .scheduler
+            .batch
+            .target_bytes
+            .min(self.scheduler.batch.max_bytes)
+            .max(self.scheduler.batch.min_bytes);
+        self.scheduler.concurrency = self
+            .scheduler
+            .concurrency
+            .min(usize::from(memory.max_parallel_transfers))
+            .max(1);
+        if !self
+            .capabilities
+            .contains(&Capability::ResourceConstrainedV1)
+        {
+            self.capabilities.push(Capability::ResourceConstrainedV1);
         }
     }
 }
@@ -1103,6 +1199,18 @@ pub enum ClientError {
         /// Stable local-only deferral reason.
         reason: DeferralReason,
     },
+    /// Durable work remains queued until one local resource constraint clears.
+    #[error("client work deferred by resource policy: {reason:?}")]
+    ResourceDeferred { reason: ResourceReason },
+    /// Explicit user approval is needed for the requested data/resource override.
+    #[error("client work requires explicit resource override approval: {reason:?}")]
+    ResourceApprovalRequired { reason: ResourceReason },
+    /// A hard storage/background limit makes this unit unsafe to start.
+    #[error("client resource is unavailable for safe durable work: {reason:?}")]
+    ResourceUnavailable { reason: ResourceReason },
+    /// Client resource limits are internally inconsistent.
+    #[error(transparent)]
+    ResourcePolicy(#[from] resources::PolicyError),
     /// Local persistence failed.
     #[error("local sync storage failed: {0}")]
     Store(#[from] StoreError),
@@ -1191,6 +1299,8 @@ impl ClientError {
     pub const fn is_transient(&self) -> bool {
         matches!(self, Self::SyncInProgress)
             || matches!(self, Self::SchedulerDeferred { .. })
+            || matches!(self, Self::ResourceDeferred { .. })
+            || matches!(self, Self::ResourceUnavailable { .. })
             || matches!(
                 self,
                 Self::Store(error) if matches!(error.kind, StoreErrorKind::Transient)
@@ -1216,6 +1326,7 @@ pub struct ClientSyncEngine<L, T> {
     coordination_required: AtomicBool,
     scheduler: Mutex<AdaptiveScheduler>,
     scheduling_context: Mutex<SchedulingContext>,
+    resource_context: Mutex<ClientResourceContext>,
     requested_work_class: Mutex<WorkClass>,
 }
 
@@ -1356,6 +1467,9 @@ pub enum ClientBuildError {
     /// Scheduler limits are internally inconsistent.
     #[error(transparent)]
     Scheduler(#[from] aequora_scheduler::SchedulerError),
+    /// Client resource limits are internally inconsistent.
+    #[error(transparent)]
+    Resources(#[from] resources::PolicyError),
 }
 
 impl<L, T> ClientSyncEngineBuilder<L, T>
@@ -1371,6 +1485,7 @@ where
     pub fn build(self) -> Result<ClientSyncEngine<L, T>, ClientBuildError> {
         let config = self.config.ok_or(ClientBuildError::MissingConfig)?;
         config.scheduler.validate()?;
+        config.resources.validate()?;
         let scheduler_policy = config.scheduler;
         let mut engine =
             ClientSyncEngine::new(self.store, self.transport, config).with_observer(self.observer);
@@ -1440,6 +1555,7 @@ impl<L, T> ClientSyncEngine<L, T> {
             coordination_required: AtomicBool::new(false),
             scheduler: Mutex::new(scheduler),
             scheduling_context: Mutex::new(SchedulingContext::default()),
+            resource_context: Mutex::new(ClientResourceContext::default()),
             requested_work_class: Mutex::new(WorkClass::Normal),
         }
     }
@@ -1500,6 +1616,11 @@ impl<L, T> ClientSyncEngine<L, T> {
         *self.scheduling_context() = context.normalized();
     }
 
+    /// Replaces normalized platform resource signals used by subsequent admission decisions.
+    pub fn update_resource_context(&self, context: ClientResourceContext) {
+        *self.resource_context() = context.normalized();
+    }
+
     /// Requests a bounded `QoS` class for the next synchronization drain.
     ///
     /// This is local scheduling metadata only and cannot bypass authorization or dependencies.
@@ -1521,6 +1642,12 @@ impl<L, T> ClientSyncEngine<L, T> {
 
     fn scheduler(&self) -> MutexGuard<'_, AdaptiveScheduler> {
         self.scheduler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn resource_context(&self) -> MutexGuard<'_, ClientResourceContext> {
+        self.resource_context
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -1552,10 +1679,40 @@ impl<L, T> ClientSyncEngine<L, T> {
             estimated_bytes: self.config.push_batch_bytes,
             emergency_override: false,
         };
+        let resource_work = ClientWork {
+            kind: client_work_kind(kind, class),
+            estimate: WorkEstimate {
+                operations: u32::try_from(work.estimated_operations).unwrap_or(u32::MAX),
+                bytes: u64::try_from(work.estimated_bytes).unwrap_or(u64::MAX),
+                storage_delta_bytes: if matches!(
+                    kind,
+                    WorkKind::Bootstrap | WorkKind::LargeBootstrapTransfer
+                ) {
+                    u64::try_from(work.estimated_bytes).unwrap_or(u64::MAX)
+                } else {
+                    0
+                },
+                cpu: resources::CpuClass::Moderate,
+            },
+            user_initiated: class == WorkClass::Interactive,
+        };
+        let admission = DefaultResourceAdmission::new(self.config.resources)?;
+        let resource_limits = match admission.allow(&resource_work, &self.resource_context()) {
+            ResourceDecision::RunNow(limits) | ResourceDecision::RunReduced(limits) => limits,
+            ResourceDecision::Defer(reason) => {
+                return Err(ClientError::ResourceDeferred { reason });
+            }
+            ResourceDecision::RequireUserApproval(reason) => {
+                return Err(ClientError::ResourceApprovalRequired { reason });
+            }
+            ResourceDecision::RejectUntilResourceAvailable(reason) => {
+                return Err(ClientError::ResourceUnavailable { reason });
+            }
+        };
         let selected = self
             .scheduler()
             .select(&[work], &std::collections::BTreeSet::new(), &context)
-            .map(|selected| selected.decision);
+            .map(|selected| resource_limits.constrain_scheduler(selected.decision));
         if let Some(decision) = selected {
             self.observer.record(MetricEvent::Scheduler {
                 kind: SchedulerEventKind::Selected,
@@ -1687,6 +1844,33 @@ where
             active_scopes: usize_to_u64(active_scopes),
         });
         Ok(outcome)
+    }
+}
+
+fn client_work_kind(kind: WorkKind, class: WorkClass) -> ClientWorkKind {
+    if class == WorkClass::Critical {
+        return match kind {
+            WorkKind::Repair => ClientWorkKind::SmallRepair,
+            WorkKind::PushOperations | WorkKind::PullChanges | WorkKind::LiveCatchUp => {
+                ClientWorkKind::CriticalSync
+            }
+            _ => ClientWorkKind::SecurityDirective,
+        };
+    }
+    match kind {
+        WorkKind::PushOperations => ClientWorkKind::InteractivePush,
+        WorkKind::PullChanges | WorkKind::LiveCatchUp => ClientWorkKind::InteractivePull,
+        WorkKind::Bootstrap
+        | WorkKind::ScopeTransition
+        | WorkKind::BulkMigration
+        | WorkKind::LargeBootstrapTransfer => ClientWorkKind::Bootstrap,
+        WorkKind::IntegrityCheck => ClientWorkKind::AntiEntropy,
+        WorkKind::Repair => ClientWorkKind::SmallRepair,
+        WorkKind::QueueCompaction | WorkKind::Maintenance => ClientWorkKind::Maintenance,
+        WorkKind::BlobTransfer => ClientWorkKind::BlobTransfer,
+        WorkKind::MigrationCutover | WorkKind::BootstrapActivation => {
+            ClientWorkKind::SecurityDirective
+        }
     }
 }
 
