@@ -28,6 +28,7 @@ pub use aequora_journal as journal;
 pub use aequora_live as live;
 #[cfg(feature = "record-sync")]
 pub use aequora_mapping as mapping;
+pub use aequora_metadata as metadata;
 #[cfg(feature = "record-sync")]
 pub use aequora_migration as migration;
 pub use aequora_observability as observability;

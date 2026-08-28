@@ -45,6 +45,7 @@ aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-macros = { version = "0.1.0", path = "../aequora-macros" }
+aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
 aequora-mapping = { version = "0.1.0", path = "../aequora-mapping", optional = true }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration", optional = true }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
