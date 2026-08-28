@@ -52,6 +52,7 @@ members = [
     "crates/aequora-validator",
     "crates/aequora-mapping",
     "crates/aequora-migration",
+    "crates/aequora-metadata",
 ]
 
 [workspace.package]

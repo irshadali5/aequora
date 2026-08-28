@@ -40,6 +40,7 @@ dependencies = [
  "aequora-live",
  "aequora-macros",
  "aequora-mapping",
+ "aequora-metadata",
  "aequora-migration",
  "aequora-observability",
  "aequora-partition",
@@ -447,6 +448,20 @@ dependencies = [
  "aequora-schema",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "aequora-metadata"
+version = "0.1.0"
+dependencies = [
+ "aequora-protocol",
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "postcard",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
