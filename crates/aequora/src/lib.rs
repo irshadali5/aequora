@@ -11,8 +11,10 @@ pub use aequora_blob as blob;
 pub use aequora_bootstrap as bootstrap;
 pub use aequora_client as client;
 pub use aequora_client::AequoraClient;
+pub use aequora_client::resources as client_resources;
 pub use aequora_clock as clock;
 pub use aequora_codec as codec;
+pub use aequora_compat as compatibility;
 pub use aequora_compute as compute;
 pub use aequora_config as config;
 pub use aequora_conflict as conflict;
@@ -121,6 +123,17 @@ pub mod prelude {
         SnapshotLease, SnapshotLeaseStore, SnapshotManifest, SnapshotReadView, SnapshotRequest,
         SnapshotSink, SnapshotSource, VerifiedActivation, verify_activation,
     };
+    pub use aequora_client::resources::{
+        AdmissionLimits as ClientAdmissionLimits, AppLifecycleEvent, BackgroundBudget,
+        ClientCapabilityClass, ClientCapabilityProfile, ClientMemoryLimits, ClientNetworkPolicy,
+        ClientPowerPolicy, ClientResourceAdmission, ClientResourceContext, ClientResourcePolicy,
+        ClientResourceProfile, ClientStatus, ClientThermalPolicy, ClientWork, ClientWorkKind,
+        DefaultResourceAdmission, DurableWorkCheckpoint, EvictionCandidate, EvictionPlan,
+        LocalCommitReceipt, LocalStoreFormatVersion, MemoryClass, PlatformResourceMonitor,
+        ResourceDecision, ResourceEvent, ResourceEventCoalescer, RetryCheckpoint, ScopeCachePolicy,
+        SnapshotCachePolicy, StorageAssetKind, StoragePolicy, StoragePreflight, StorageState,
+        ThermalState,
+    };
     pub use aequora_client::{
         AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, BootstrapOutcome, ClientBuildError,
         ClientConfig, ClientSyncEngine, ClientSyncEngineBuilder, CoordinatorClosed,
@@ -129,6 +142,21 @@ pub mod prelude {
         SyncSummary, SyncTrigger,
     };
     pub use aequora_clock::{Clock, SystemClock};
+    pub use aequora_compat::{
+        AdapterApiVersion, CapabilityAvailability, CapabilityCategory, CapabilityId,
+        CapabilityRequirementKind, CapabilitySet, ClientBuildId, ClientCompatibilityRuntime,
+        ClientCompatibilityState, ClientHello, ClientSecurityPolicy, CompatibilityError,
+        CompatibilityFailure, CompatibilityFailureCode, CompatibilityMode, CompatibilityPolicy,
+        CompatibilityPolicyGeneration, CompatibilityResult, CompatibilityWarning,
+        DurableIntentEvidence, FeatureState, FleetCapabilities,
+        LocalStoreFormatVersion as CompatibilityLocalStoreFormatVersion, MessageKind,
+        NegotiationTranscript, NodeCapabilities, OperationAdmission, OperationKindId,
+        OperationUpcaster, PayloadVersion, PlatformId, ProtocolHeader, ProtocolPolicy,
+        RecoveryInstruction, SemanticBuildVersion, SemanticPayloadHash, ServerAuthorityContext,
+        ServerFeatureGate, ServerHello, SessionProfile, SnapshotSchemaVersion, SupportStatus,
+        UpcasterRegistry, canonical_registry, capability_availability, classify_operation_attempt,
+        negotiate, validate_extensions,
+    };
     pub use aequora_config::{
         AdaptivePushConfig, AequoraConfig, CompressionAlgorithm, CompressionConfig,
         ComputePoolConfig, ConfigError, CoordinatorConfig, IntegrityConfig, OperationalConfig,
