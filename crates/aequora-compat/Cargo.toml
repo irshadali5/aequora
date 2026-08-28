@@ -1,0 +1,21 @@
+[package]
+name = "aequora-compat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Runtime-neutral protocol negotiation and compatibility governance for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+postcard.workspace = true
+
+[lints]
+workspace = true
