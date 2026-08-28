@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/aequora",
+    "crates/aequora-admin",
     "crates/aequora-admission",
     "crates/aequora-axum",
     "crates/aequora-authority",
@@ -24,6 +25,7 @@ members = [
     "crates/aequora-integrity",
     "crates/aequora-invariants",
     "crates/aequora-journal",
+    "crates/aequora-jobs",
     "crates/aequora-live",
     "crates/aequora-macros",
     "crates/aequora-model",
@@ -43,6 +45,7 @@ members = [
     "crates/aequora-scope",
     "crates/aequora-schema",
     "crates/aequora-server",
+    "crates/aequora-side-effects",
     "crates/aequora-store",
     "crates/aequora-store-postgres",
     "crates/aequora-store-stoolap",
@@ -50,6 +53,7 @@ members = [
     "crates/aequora-transport",
     "crates/aequora-types",
     "crates/aequora-validator",
+    "crates/aequora-workflow",
     "crates/aequora-mapping",
     "crates/aequora-migration",
     "crates/aequora-metadata",

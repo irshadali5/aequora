@@ -16,6 +16,7 @@ dependencies = [
 name = "aequora"
 version = "0.1.0"
 dependencies = [
+ "aequora-admin",
  "aequora-admission",
  "aequora-audit",
  "aequora-authority",
@@ -36,6 +37,7 @@ dependencies = [
  "aequora-governance",
  "aequora-http",
  "aequora-integrity",
+ "aequora-jobs",
  "aequora-journal",
  "aequora-live",
  "aequora-macros",
@@ -56,6 +58,7 @@ dependencies = [
  "aequora-schema",
  "aequora-scope",
  "aequora-server",
+ "aequora-side-effects",
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
@@ -63,6 +66,7 @@ dependencies = [
  "aequora-transport",
  "aequora-types",
  "aequora-validator",
+ "aequora-workflow",
  "async-trait",
  "axum",
  "hex",
@@ -71,6 +75,18 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "aequora-admin"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
+ "postcard",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -164,6 +180,7 @@ name = "aequora-cli"
 version = "0.1.0"
 dependencies = [
  "aequora",
+ "aequora-admin",
  "aequora-authority",
  "aequora-bootstrap",
  "aequora-compat",
@@ -410,6 +427,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-jobs"
+version = "0.1.0"
+dependencies = [
+ "aequora-scheduler",
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "aequora-journal"
 version = "0.1.0"
 dependencies = [
@@ -647,6 +677,7 @@ dependencies = [
 name = "aequora-server"
 version = "0.1.0"
 dependencies = [
+ "aequora-admin",
  "aequora-admission",
  "aequora-authority",
  "aequora-clock",
@@ -654,19 +685,35 @@ dependencies = [
  "aequora-compute",
  "aequora-conflict",
  "aequora-executor",
+ "aequora-jobs",
  "aequora-observability",
  "aequora-performance",
  "aequora-protocol",
  "aequora-region",
  "aequora-scheduler",
+ "aequora-side-effects",
  "aequora-store",
  "aequora-types",
  "aequora-validator",
+ "aequora-workflow",
  "async-trait",
  "blake3",
  "rayon",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "aequora-side-effects"
+version = "0.1.0"
+dependencies = [
+ "aequora-jobs",
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -733,6 +780,7 @@ dependencies = [
 name = "aequora-testkit"
 version = "0.1.0"
 dependencies = [
+ "aequora-admin",
  "aequora-audit",
  "aequora-authority",
  "aequora-bootstrap",
@@ -748,6 +796,7 @@ dependencies = [
  "aequora-governance",
  "aequora-integrity",
  "aequora-invariants",
+ "aequora-jobs",
  "aequora-journal",
  "aequora-live",
  "aequora-migration",
@@ -761,10 +810,12 @@ dependencies = [
  "aequora-schema",
  "aequora-scope",
  "aequora-server",
+ "aequora-side-effects",
  "aequora-store",
  "aequora-transport",
  "aequora-types",
  "aequora-validator",
+ "aequora-workflow",
  "async-trait",
  "blake3",
  "criterion",
@@ -802,6 +853,18 @@ dependencies = [
  "aequora-protocol",
  "aequora-types",
  "thiserror",
+]
+
+[[package]]
+name = "aequora-workflow"
+version = "0.1.0"
+dependencies = [
+ "aequora-jobs",
+ "aequora-types",
+ "async-trait",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]

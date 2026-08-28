@@ -61,6 +61,17 @@ jobs:
         run: |
           cargo +stable test -p aequora-region --locked
           cargo +stable test -p aequora-testkit --test regional_contracts --locked
+      - name: Enforce durable jobs, workflows, and side-effect recovery
+        run: |
+          bash scripts/check-jobs-architecture.sh
+          cargo +stable test -p aequora-jobs -p aequora-workflow -p aequora-side-effects --locked
+          cargo +stable test -p aequora-testkit --test job_workflow_side_effect_contracts --locked
+      - name: Enforce operational control-plane authorization and safety contracts
+        run: |
+          bash scripts/check-admin-architecture.sh
+          cargo +stable test -p aequora-admin --locked
+          cargo +stable test -p aequora-testkit --test admin_control_plane_contracts --locked
+          cargo +stable run -p aequora-cli --locked -- admin capabilities
       - name: Enforce protocol negotiation and compatibility governance
         run: |
           bash scripts/check-compatibility-architecture.sh
