@@ -51,7 +51,7 @@ outside the reusable core.
 
 ## Implementation status
 
-The reusable repository implementation is complete through Part 19. Parts 20–30 remain
+The reusable repository implementation is complete through Part 21. Parts 22–30 remain
 authoritative architecture specifications; their implementation status must be recorded here only
 when corresponding code and evidence are delivered.
 
@@ -64,6 +64,8 @@ when corresponding code and evidence are delivered.
 | Parts 16–17: authority epochs and regional reads | Implemented | [Multi-region report](docs/multi-region-read-single-writer-global-completion.md) |
 | Part 18: backpressure and fair admission | Implemented | [Completion audit](docs/plan-completion.md) |
 | Part 19: performance and memory architecture | Implemented | [Part 19 report](docs/performance-engineering-memory-architecture-completion.md) |
+| Part 20: resource-constrained client architecture | Implemented | [Part 20 report](docs/resource-constrained-client-architecture-completion.md) |
+| Part 21: protocol negotiation and compatibility governance | Implemented | [Part 21 report](docs/protocol-negotiation-compatibility-governance-completion.md) |
 
 ## Implementation workflow
 
@@ -85,6 +87,8 @@ cargo fmt --all -- --check
 cargo run -q -p aequora-dev -- check
 bash scripts/check-database-neutrality.sh
 bash scripts/check-performance-architecture.sh
+bash scripts/check-client-resource-architecture.sh
+bash scripts/check-compatibility-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline

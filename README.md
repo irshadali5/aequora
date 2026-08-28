@@ -364,7 +364,7 @@ The workspace package count is reported by `aequora-dev summary`; the major owne
 | Area | Crates |
 |---|---|
 | Facade | `aequora` |
-| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-scope`, `aequora-live`, `aequora-bootstrap` |
+| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-compat`, `aequora-scope`, `aequora-live`, `aequora-bootstrap` |
 | Client/server kernel | `aequora-client`, `aequora-server`, `aequora-executor`, `aequora-validator` |
 | Storage contracts/adapters | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
 | Network boundaries | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic` |
@@ -388,6 +388,14 @@ Use `cargo run -q -p aequora-dev -- crypto policy` or `crypto registry-verify
 Use `cargo run -q -p aequora-dev -- performance explain`, `performance profile <name>`,
 `performance workload-verify <workload.ron>`, or `performance compare <baseline.ron>
 <candidate.ron>` for Part 19 memory budgets and reproducible regression diagnostics.
+Part 20 resource policy is available under `aequora::client_resources`; applications select a
+`ClientResourceProfile`, feed coarse platform signals through `PlatformResourceMonitor`, and retain
+durable work while admission reduces or defers bounded units.
+Part 21 compatibility policy is available under `aequora::compatibility`; the runtime-neutral
+negotiator selects a server-governed session profile, rejects security/semantic downgrades, and
+keeps protocol, authority epoch, operation schema, snapshot schema, and local-store versions
+independent. Use `aequora compat show`, `compat matrix`, `compat deprecated`, `compat check-client`,
+or `compat registry` for read-only release diagnostics.
 
 Payload-free built-in adapter diagnostics are available without database credentials:
 
@@ -399,6 +407,7 @@ cargo run -q -p aequora-cli -- verify pair stoolap postgresql
 cargo run -q -p aequora-cli -- verify export ./export.postcard ./schema.ron
 cargo run -q -p aequora-cli -- verify model
 cargo run -q -p aequora-cli -- verify trace ./failure.ron
+cargo run -q -p aequora-cli -- compat registry
 cargo run -q -p aequora-cli -- init ./my-aequora-client client
 ```
 
@@ -411,6 +420,8 @@ cargo fmt --all -- --check
 cargo +1.87.0 check --workspace --all-targets --all-features --locked
 cargo run -q -p aequora-dev --locked -- check
 bash scripts/check-database-neutrality.sh
+bash scripts/check-performance-architecture.sh
+bash scripts/check-client-resource-architecture.sh
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --locked
@@ -486,6 +497,8 @@ versioned.
 - [Part 14 data governance, retention, hold, and erasure evidence](docs/data-governance-retention-erasure-completion.md)
 - [Part 15 cryptographic integrity, key management, and protected payload evidence](docs/cryptographic-integrity-key-management-e2e-completion.md)
 - [Part 19 performance engineering and memory architecture evidence](docs/performance-engineering-memory-architecture-completion.md)
+- [Part 20 resource-constrained client architecture evidence](docs/resource-constrained-client-architecture-completion.md)
+- [Part 21 protocol negotiation and compatibility governance evidence](docs/protocol-negotiation-compatibility-governance-completion.md)
 - [Architecture implementation matrix](docs/next-completion.md)
 - [Plan completion evidence](docs/plan-completion.md)
 - [Custom database adapter guide](docs/custom-database-adapters.md)

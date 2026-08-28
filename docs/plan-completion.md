@@ -59,6 +59,8 @@ current `plan.md`.
 | 170 | Phase 9 bounded HTTP body ingestion | Deadline- and byte-bounded custom Axum body extraction after admission, transient `408`, permanent `413`, automatic permit release, strict RON mapping, payload-free metrics, and adversarial slow/oversized stream tests | Implemented |
 | 171 | Phase 10 Part 18 overload architecture | Runtime-neutral hierarchical admission, resource permits, request-shape limits, bounded fair queues, load hysteresis, security-preserving brownout, transport/server integration, and `AEQ-INV-LOAD001` through `LOAD009` | Implemented |
 | 172 | Phase 11 Part 19 performance and memory architecture | Runtime-neutral profiles/budgets, `Bytes` and borrowed codec boundaries, header-first rejection, bounded CPU submission, streaming snapshot/blob APIs, paged UI state, hot-query contracts, fixed workloads, attributed regression reports, and `AEQ-INV-PERF001` through `PERF009` | Implemented |
+| 173 | Phase 12 Part 20 resource-constrained client architecture | Platform-neutral device context, four validated profiles, resource admission and scheduler caps, protected eviction/preflight, durable checkpoints, lifecycle hooks, coarse negotiation, fault-profile contracts, and `AEQ-INV-CLIENT001` through `CLIENT009` | Implemented |
+| 174 | Phase 13 Part 21 protocol negotiation and compatibility governance | Runtime-neutral `aequora-compat`, independent version domains, bounded server-selected negotiation, fail-closed required capabilities, stable registry IDs, retry-only/upcaster contracts, read-only grace, fleet-aware feature gates, golden hello fixture, compatibility CLI, and `AEQ-INV-COMP001` through `COMP009` | Implemented |
 
 ## Release gates
 
@@ -68,6 +70,9 @@ Completion requires all of the following from the final workspace state:
 cargo fmt --all -- --check
 cargo run -p aequora-dev --locked -- check
 bash scripts/check-database-neutrality.sh
+bash scripts/check-performance-architecture.sh
+bash scripts/check-client-resource-architecture.sh
+bash scripts/check-compatibility-architecture.sh
 cargo +1.87.0 check --workspace --all-targets --all-features --offline
 cargo check --workspace --all-targets --all-features --offline
 cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
