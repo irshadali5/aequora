@@ -51,7 +51,7 @@ outside the reusable core.
 
 ## Implementation status
 
-The reusable repository implementation is complete through Part 22. Parts 23–30 remain
+The reusable repository implementation is complete through Part 24. Parts 25–30 remain
 authoritative architecture specifications; their implementation status must be recorded here only
 when corresponding code and evidence are delivered.
 
@@ -67,6 +67,8 @@ when corresponding code and evidence are delivered.
 | Part 20: resource-constrained client architecture | Implemented | [Part 20 report](docs/resource-constrained-client-architecture-completion.md) |
 | Part 21: protocol negotiation and compatibility governance | Implemented | [Part 21 report](docs/protocol-negotiation-compatibility-governance-completion.md) |
 | Part 22: sync metadata schema and internal persistence | Implemented | [Part 22 report](docs/sync-metadata-schema-internal-persistence-completion.md) |
+| Part 23: background jobs, durable workflows, and side effects | Implemented | [Part 23 report](docs/background-jobs-durable-workflows-side-effects-completion.md) |
+| Part 24: operational control plane and admin API | Implemented | [Part 24 report](docs/operational-control-plane-admin-api-completion.md) |
 
 ## Implementation workflow
 
@@ -91,6 +93,8 @@ bash scripts/check-performance-architecture.sh
 bash scripts/check-client-resource-architecture.sh
 bash scripts/check-compatibility-architecture.sh
 bash scripts/check-metadata-architecture.sh
+bash scripts/check-jobs-architecture.sh
+bash scripts/check-admin-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
