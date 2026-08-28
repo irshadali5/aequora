@@ -26,6 +26,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-compat"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
+ "ron",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-conflict"
 version = "0.1.0"
 dependencies = [
@@ -73,6 +84,7 @@ name = "aequora-fuzz"
 version = "0.0.0"
 dependencies = [
  "aequora-codec",
+ "aequora-compat",
  "aequora-conflict",
  "aequora-crypto",
  "aequora-executor",
@@ -154,10 +166,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "bitflags"
+version = "2.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "blake2"
@@ -666,6 +693,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
+]
+
+[[package]]
+name = "ron"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beceb6f7bf81c73e73aeef6dd1356d9a1b2b4909e1f0fc3e59b034f9572d7b7f"
+dependencies = [
+ "base64",
+ "bitflags",
+ "serde",
+ "serde_derive",
+ "unicode-ident",
 ]
 
 [[package]]
