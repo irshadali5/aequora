@@ -4,6 +4,7 @@ extern crate self as aequora;
 
 pub use aequora_macros::{AequoraAggregate, AequoraOperation};
 
+pub use aequora_admin as admin;
 pub use aequora_admission as admission;
 pub use aequora_audit as audit;
 pub use aequora_authority as authority;
@@ -24,6 +25,7 @@ pub use aequora_crypto as crypto;
 pub use aequora_executor as executor;
 pub use aequora_governance as governance;
 pub use aequora_integrity as integrity;
+pub use aequora_jobs as jobs;
 pub use aequora_journal as journal;
 pub use aequora_live as live;
 #[cfg(feature = "record-sync")]
@@ -46,10 +48,12 @@ pub use aequora_schema as schema;
 pub use aequora_scope as scope;
 pub use aequora_server as server;
 pub use aequora_server::AequoraServer;
+pub use aequora_side_effects as side_effects;
 pub use aequora_store as store;
 pub use aequora_transport as transport;
 pub use aequora_types as types;
 pub use aequora_validator as validator;
+pub use aequora_workflow as workflow;
 
 #[cfg(feature = "axum")]
 pub use aequora_axum as axum;
@@ -73,6 +77,23 @@ pub use aequora_testkit as testkit;
 
 /// Common imports needed to build client and server integrations.
 pub mod prelude {
+    pub use aequora_admin::{
+        ADMIN_API_VERSION, AdminAction, AdminActionKind, AdminApproval, AdminAuditEvent,
+        AdminAuditEventKind, AdminAuditSink, AdminAuthConfiguration, AdminBindScope,
+        AdminCapabilities, AdminCommand, AdminCommandExecutor, AdminError, AdminErrorCode,
+        AdminListenerPolicy, AdminListenerState, AdminOperationId, AdminOperationRecord,
+        AdminOperationStatus, AdminPlan, AdminPrincipal, AdminQuery, AdminReadProvider,
+        AdminReadService, AdminReasonCode, AdminResultCode, AdminService, AdminStore, AdminTarget,
+        AdminView, AdminWireFormat, ApprovalId, ApprovalStatus, AssuranceLevel,
+        AuthorityStatusView, BeginOperation, BreakGlassSessionId, BrowserSessionPolicy,
+        ConfigGeneration, CryptoKeyView, DestructiveActionPolicy, DynamicConfigRecord,
+        DynamicConfigRegistry, DynamicPolicy, ExecutionResult, HealthCheckView, InMemoryAdminStore,
+        InMemoryMaintenanceStateStore, JobStatusView, MaintenanceId,
+        MaintenanceMode as AdminMaintenanceMode, MaintenanceState, MaintenanceStateStore,
+        PermissionId, PlanId, PlanReference, RegionStatusView, RiskClass, SafetySnapshot,
+        SnapshotStatusView, requires_approval as admin_requires_approval,
+        requires_plan as admin_requires_plan,
+    };
     pub use aequora_admission::{
         AdmissionController, AdmissionMetricsSnapshot, AdmissionPermit, AdmissionPolicy,
         AdmissionRejection, BrownoutPolicy, ClassBudget, CostUnits, FairQueue, FairQueueConfig,
@@ -228,6 +249,18 @@ pub mod prelude {
         RepairApplication, RepairPlan, RepairPolicy, RepairStrategy, VerificationEvent,
         VerificationState, apply_authoritative_repair, classify_divergence, plan_repair,
     };
+    pub use aequora_jobs::{
+        AdminAction as JobAdminAction, ClaimRequest as JobClaimRequest, ClaimedJob,
+        ConcurrencyClass as JobConcurrencyClass, EpochRecoveryAction, ErrorClass as JobErrorClass,
+        FencedUpdate as JobFencedUpdate, FencingToken as JobFencingToken, JobCheckpoint,
+        JobDependency, JobDescriptor, JobEpochPolicy, JobExecutionRegionPolicy,
+        JobGovernanceMetadata, JobHandler, JobHandlerContext, JobKind, JobLease, JobPayloadRef,
+        JobPayloadSchemaVersion, JobPayloadUpcaster, JobProgress, JobRecord, JobRegistry,
+        JobRunOutcome, JobState, JobStatus, JobStore, JobStoreError, MissedOccurrencePolicy,
+        NewJob, OccurrenceId, RecurringSchedule, RetryPolicy as JobRetryPolicy, ScheduleId,
+        ScheduleRule, ScheduleStore, TenantFairnessPolicy, WaitCondition, WorkerCapability,
+        WorkerId, WorkflowId, epoch_recovery_action, validate_fenced_update, verify_dependency_dag,
+    };
     pub use aequora_journal::{CursorWatermarks, TombstoneRetention, tombstone_collectable};
     pub use aequora_live::{
         FanoutOutcome, HintBroker, HintSubscription, HintTopic, HintWakeOutcome, HintWakeTracker,
@@ -341,6 +374,14 @@ pub mod prelude {
         AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,
         ServerCommandOutcome, ServerConfig, ServerError, SyncServer, SyncServerBuilder,
     };
+    pub use aequora_side_effects::{
+        AmbiguousRecoveryPolicy, AuthoritativeOperationSink, AuthoritativeResultOperation,
+        ExternalIdempotencyKey, ExternalOutcome, ExternalOutcomeKind, ProviderCapabilities,
+        ProviderError, ReconciliationResult, RecoveryAction, SideEffectExecution,
+        SideEffectExecutionState, SideEffectIntent as DurableSideEffectIntent, SideEffectIntentId,
+        SideEffectIntentWrite, SideEffectKind, SideEffectPayload, SideEffectProvider,
+        SideEffectStore, SideEffectStoreError, recovery_action,
+    };
     pub use aequora_store::{
         AdapterCapabilities, AdapterCompatibilityError, AdapterManifest, AdapterManifestProvider,
         AdapterRequirements, AdapterRole, AdapterTier, AuditLog, AuditOffset, AuditPage,
@@ -355,6 +396,11 @@ pub mod prelude {
         EventId, HybridTimestamp, IntegritySessionId, JobId, LineageContext, LineageRef, NodeId,
         OperationId, ProtocolVersion, RegionId, RepairId, RequestId, SchemaVersion, Sequence,
         SessionId, SnapshotId, SyncScopeId, TenantId,
+    };
+    pub use aequora_workflow::{
+        WorkflowAction, WorkflowCheckpoint, WorkflowDefinition, WorkflowEvent, WorkflowKind,
+        WorkflowRecord, WorkflowState, WorkflowStore, WorkflowStoreError, WorkflowTransaction,
+        WorkflowTransition, WorkflowVersion, WorkflowVersionDisposition,
     };
 }
 

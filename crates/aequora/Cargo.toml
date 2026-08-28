@@ -23,6 +23,7 @@ record-sync = ["dep:aequora-mapping", "dep:aequora-migration", "dep:aequora-sche
 
 [dependencies]
 aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
+aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
 aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
@@ -43,6 +44,7 @@ aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
+aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-macros = { version = "0.1.0", path = "../aequora-macros" }
 aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
@@ -62,6 +64,7 @@ aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-schema = { version = "0.1.0", path = "../aequora-schema", optional = true }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
+aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
@@ -69,6 +72,7 @@ aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = t
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
 tokio = { workspace = true, optional = true }
 
 [[example]]
