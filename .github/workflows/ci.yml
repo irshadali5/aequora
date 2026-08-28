@@ -61,6 +61,12 @@ jobs:
         run: |
           cargo +stable test -p aequora-region --locked
           cargo +stable test -p aequora-testkit --test regional_contracts --locked
+      - name: Enforce protocol negotiation and compatibility governance
+        run: |
+          bash scripts/check-compatibility-architecture.sh
+          cargo +stable test -p aequora-compat --locked
+          cargo +stable test -p aequora-testkit --test compatibility_contracts --locked
+          cargo +stable run -p aequora-cli --locked -- compat registry
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh

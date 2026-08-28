@@ -25,6 +25,7 @@ dependencies = [
  "aequora-client",
  "aequora-clock",
  "aequora-codec",
+ "aequora-compat",
  "aequora-compute",
  "aequora-config",
  "aequora-conflict",
@@ -164,6 +165,7 @@ dependencies = [
  "aequora",
  "aequora-authority",
  "aequora-bootstrap",
+ "aequora-compat",
  "aequora-integrity",
  "aequora-migration",
  "aequora-model",
@@ -173,6 +175,7 @@ dependencies = [
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
+ "aequora-types",
  "hex",
  "ron",
  "serde",
@@ -197,6 +200,7 @@ dependencies = [
  "aequora-transport",
  "aequora-types",
  "loom",
+ "serde",
  "thiserror",
  "tokio",
 ]
@@ -221,6 +225,18 @@ dependencies = [
  "serde_json",
  "thiserror",
  "zstd",
+]
+
+[[package]]
+name = "aequora-compat"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
+ "postcard",
+ "ron",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -708,6 +724,7 @@ dependencies = [
  "aequora-client",
  "aequora-clock",
  "aequora-codec",
+ "aequora-compat",
  "aequora-compute",
  "aequora-conflict",
  "aequora-coordination",

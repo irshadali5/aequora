@@ -14,6 +14,7 @@ members = [
     "crates/aequora-conflict",
     "crates/aequora-crypto",
     "crates/aequora-compute",
+    "crates/aequora-compat",
     "crates/aequora-coordination",
     "crates/aequora-config",
     "crates/aequora-crdt",
