@@ -22,6 +22,23 @@ use guppy::{
 
 const BOUNDARY_RULES: &[(&str, &[&str])] = &[
     (
+        "aequora-compat",
+        &[
+            "aequora-axum",
+            "aequora-client",
+            "aequora-http",
+            "aequora-quic",
+            "aequora-server",
+            "aequora-store-postgres",
+            "aequora-store-stoolap",
+            "axum",
+            "reqwest",
+            "sqlx",
+            "stoolap",
+            "tokio",
+        ],
+    ),
+    (
         "aequora-performance",
         &[
             "aequora-admission",
