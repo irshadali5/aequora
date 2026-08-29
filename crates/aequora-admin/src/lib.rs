@@ -103,6 +103,9 @@ pub enum PermissionId {
     ConfigView = 110,
     ConfigUpdate = 111,
     OperationsView = 120,
+    ConsumersView = 130,
+    ConsumersManage = 131,
+    ConsumersReset = 132,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -138,6 +141,10 @@ pub enum AdminActionKind {
     CreateIncidentBundle = 101,
     UpdateDynamicConfig = 110,
     RollbackDynamicConfig = 111,
+    PauseConsumer = 130,
+    ResumeConsumer = 131,
+    RebuildConsumer = 132,
+    ResetConsumer = 133,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -370,6 +377,18 @@ pub enum AdminCommand {
         expected_generation: ConfigGeneration,
         restore_generation: ConfigGeneration,
     },
+    PauseConsumer {
+        target: AdminTarget,
+    },
+    ResumeConsumer {
+        target: AdminTarget,
+    },
+    RebuildConsumer {
+        target: AdminTarget,
+    },
+    ResetConsumer {
+        target: AdminTarget,
+    },
 }
 
 impl AdminCommand {
@@ -406,6 +425,10 @@ impl AdminCommand {
             Self::CreateIncidentBundle { .. } => AdminActionKind::CreateIncidentBundle,
             Self::UpdateDynamicConfig { .. } => AdminActionKind::UpdateDynamicConfig,
             Self::RollbackDynamicConfig { .. } => AdminActionKind::RollbackDynamicConfig,
+            Self::PauseConsumer { .. } => AdminActionKind::PauseConsumer,
+            Self::ResumeConsumer { .. } => AdminActionKind::ResumeConsumer,
+            Self::RebuildConsumer { .. } => AdminActionKind::RebuildConsumer,
+            Self::ResetConsumer { .. } => AdminActionKind::ResetConsumer,
         }
     }
 
@@ -441,7 +464,11 @@ impl AdminCommand {
             | Self::CreateExport { target }
             | Self::CreateIncidentBundle { target }
             | Self::UpdateDynamicConfig { target, .. }
-            | Self::RollbackDynamicConfig { target, .. } => target,
+            | Self::RollbackDynamicConfig { target, .. }
+            | Self::PauseConsumer { target }
+            | Self::ResumeConsumer { target }
+            | Self::RebuildConsumer { target }
+            | Self::ResetConsumer { target } => target,
         }
     }
 
@@ -455,7 +482,8 @@ impl AdminCommand {
             | Self::ReleaseLegalHold { .. }
             | Self::ExecuteGovernancePlan { .. }
             | Self::BumpScopeGeneration { .. }
-            | Self::ExpireSnapshot { .. } => RiskClass::Destructive,
+            | Self::ExpireSnapshot { .. }
+            | Self::ResetConsumer { .. } => RiskClass::Destructive,
             Self::PromoteAuthority { .. }
             | Self::RepairIntegrity { .. }
             | Self::RotateKey { .. }
@@ -467,7 +495,8 @@ impl AdminCommand {
             | Self::RevokeDevice { .. }
             | Self::ForceRebootstrap { .. }
             | Self::UpdateDynamicConfig { .. }
-            | Self::RollbackDynamicConfig { .. } => RiskClass::High,
+            | Self::RollbackDynamicConfig { .. }
+            | Self::RebuildConsumer { .. } => RiskClass::High,
             _ => RiskClass::Routine,
         }
     }
@@ -508,6 +537,10 @@ impl AdminCommand {
             Self::UpdateDynamicConfig { .. } | Self::RollbackDynamicConfig { .. } => {
                 PermissionId::ConfigUpdate
             }
+            Self::PauseConsumer { .. }
+            | Self::ResumeConsumer { .. }
+            | Self::RebuildConsumer { .. } => PermissionId::ConsumersManage,
+            Self::ResetConsumer { .. } => PermissionId::ConsumersReset,
         }
     }
 
@@ -1328,6 +1361,7 @@ pub enum AdminQuery {
     DeepHealth,
     RuntimeDiagnostics,
     Operation { target: AdminTarget },
+    Consumers { tenant_id: Option<TenantId> },
 }
 
 impl AdminQuery {
@@ -1346,6 +1380,7 @@ impl AdminQuery {
             Self::CryptoKeys => PermissionId::CryptoView,
             Self::Regions => PermissionId::RegionView,
             Self::Operation { .. } => PermissionId::OperationsView,
+            Self::Consumers { .. } => PermissionId::ConsumersView,
         }
     }
 
@@ -1355,7 +1390,8 @@ impl AdminQuery {
             Self::Jobs { tenant_id }
             | Self::Snapshots { tenant_id }
             | Self::IntegrityStatus { tenant_id }
-            | Self::GovernanceStatus { tenant_id } => *tenant_id,
+            | Self::GovernanceStatus { tenant_id }
+            | Self::Consumers { tenant_id } => *tenant_id,
             Self::Operation { target } => target.tenant_id,
             _ => None,
         }
