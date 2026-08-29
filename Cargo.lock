@@ -33,6 +33,7 @@ dependencies = [
  "aequora-coordination",
  "aequora-crdt",
  "aequora-crypto",
+ "aequora-diagnostics",
  "aequora-executor",
  "aequora-governance",
  "aequora-http",
@@ -184,6 +185,7 @@ dependencies = [
  "aequora-authority",
  "aequora-bootstrap",
  "aequora-compat",
+ "aequora-diagnostics",
  "aequora-integrity",
  "aequora-migration",
  "aequora-model",
@@ -207,6 +209,7 @@ version = "0.1.0"
 dependencies = [
  "aequora-codec",
  "aequora-coordination",
+ "aequora-diagnostics",
  "aequora-live",
  "aequora-observability",
  "aequora-protocol",
@@ -358,6 +361,18 @@ dependencies = [
  "aequora-scope",
  "guppy",
  "ron",
+]
+
+[[package]]
+name = "aequora-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -684,6 +699,7 @@ dependencies = [
  "aequora-codec",
  "aequora-compute",
  "aequora-conflict",
+ "aequora-diagnostics",
  "aequora-executor",
  "aequora-jobs",
  "aequora-observability",
@@ -792,6 +808,7 @@ dependencies = [
  "aequora-conflict",
  "aequora-coordination",
  "aequora-crypto",
+ "aequora-diagnostics",
  "aequora-executor",
  "aequora-governance",
  "aequora-integrity",

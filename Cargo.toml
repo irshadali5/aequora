@@ -20,6 +20,7 @@ members = [
     "crates/aequora-config",
     "crates/aequora-crdt",
     "crates/aequora-dev",
+    "crates/aequora-diagnostics",
     "crates/aequora-executor",
     "crates/aequora-http",
     "crates/aequora-integrity",

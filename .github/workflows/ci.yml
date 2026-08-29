@@ -72,6 +72,12 @@ jobs:
           cargo +stable test -p aequora-admin --locked
           cargo +stable test -p aequora-testkit --test admin_control_plane_contracts --locked
           cargo +stable run -p aequora-cli --locked -- admin capabilities
+      - name: Enforce bounded diagnostics, bundle safety, and replay isolation
+        run: |
+          bash scripts/check-diagnostics-architecture.sh
+          cargo +stable test -p aequora-diagnostics --locked
+          cargo +stable test -p aequora-testkit --test diagnostic_incident_contracts --locked
+          cargo +stable run -p aequora-cli --locked -- incident explain
       - name: Enforce protocol negotiation and compatibility governance
         run: |
           bash scripts/check-compatibility-architecture.sh
