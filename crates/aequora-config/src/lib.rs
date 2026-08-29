@@ -6,6 +6,11 @@ use aequora_client::{
     SyncCoordinatorConfig,
 };
 use aequora_compute::ComputeConfig;
+use aequora_conformance::{
+    CatalogRecord, CertificationArtifact, CertificationTier, ConformanceError,
+    DeploymentCertificationPolicy, DeploymentDecision, EnforcementMode, TrustLevel,
+    evaluate_deployment,
+};
 use aequora_coordination::{LocalProcessMode, ProcessInstanceId};
 use aequora_crypto::CryptoPolicy;
 use aequora_performance::{PerformancePolicy, PerformanceProfile};
@@ -60,6 +65,8 @@ pub struct AequoraConfig {
     pub crypto: CryptoPolicy,
     /// Production server admission, deadline, and readiness controls.
     pub operational: OperationalConfig,
+    /// Exact certification requirements evaluated during deployment preflight and startup.
+    pub certification: DeploymentCertificationPolicy,
 }
 
 /// Named, conservative starting points for common deployment shapes.
@@ -509,6 +516,22 @@ impl OperationalConfig {
 }
 
 impl AequoraConfig {
+    /// Evaluates deployment certification using this configuration's startup policy.
+    ///
+    /// This check complements, and never replaces, normal configuration, compatibility,
+    /// authorization, and runtime validation.
+    ///
+    /// # Errors
+    ///
+    /// Production mode rejects inactive, mismatched, obsolete, or below-policy evidence.
+    pub fn certification_readiness(
+        &self,
+        artifact: &CertificationArtifact,
+        record: &CatalogRecord,
+    ) -> Result<DeploymentDecision, ConformanceError> {
+        evaluate_deployment(artifact, record, &self.certification)
+    }
+
     /// Returns safe defaults for a named deployment profile.
     ///
     /// The returned value remains ordinary typed configuration: integrations may override public
@@ -516,6 +539,11 @@ impl AequoraConfig {
     #[must_use]
     pub fn for_profile(profile: DeploymentProfile) -> Self {
         let mut config = Self::default();
+        if profile != DeploymentProfile::Development {
+            config.certification.mode = EnforcementMode::ProductionReject;
+            config.certification.minimum_tier = CertificationTier::CoreTransactional;
+            config.certification.minimum_trust = TrustLevel::MaintainerVerified;
+        }
         match profile {
             DeploymentProfile::Development => {
                 config.admission.global.max_in_flight = 32;
@@ -542,6 +570,7 @@ impl AequoraConfig {
             }
             DeploymentProfile::SmallProduction => {}
             DeploymentProfile::Enterprise => {
+                config.certification.minimum_tier = CertificationTier::Enterprise;
                 config.admission.global.max_in_flight = 512;
                 config.admission.tenant.budget.max_in_flight = 64;
                 config.admission.tenant.max_tracked_tenants = 16_384;
@@ -701,6 +730,9 @@ impl AequoraConfig {
         }
         if let Some(reason) = self.operational.invalid_reason() {
             return Err(ConfigError::Invalid(reason));
+        }
+        if !self.certification.is_valid() {
+            return Err(ConfigError::Invalid("certification policy is inconsistent"));
         }
         Ok(())
     }
@@ -1068,6 +1100,29 @@ mod tests {
                 .quic_config()
                 .unwrap_or_else(|error| panic!("{error}"))
                 .zstd_enabled
+        );
+    }
+
+    #[test]
+    fn production_profiles_fail_closed_on_certification_policy() {
+        let development = AequoraConfig::for_profile(DeploymentProfile::Development);
+        assert_eq!(
+            development.certification.mode,
+            EnforcementMode::DevelopmentWarn
+        );
+        let production = AequoraConfig::for_profile(DeploymentProfile::SmallProduction);
+        assert_eq!(
+            production.certification.mode,
+            EnforcementMode::ProductionReject
+        );
+        assert_eq!(
+            production.certification.minimum_tier,
+            CertificationTier::CoreTransactional
+        );
+        let enterprise = AequoraConfig::for_profile(DeploymentProfile::Enterprise);
+        assert_eq!(
+            enterprise.certification.minimum_tier,
+            CertificationTier::Enterprise
         );
     }
 }

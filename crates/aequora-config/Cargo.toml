@@ -20,6 +20,7 @@ aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
