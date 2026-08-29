@@ -51,10 +51,10 @@ part-specific completion reports.
 
 ## Repository status
 
-The reusable implementation is complete through Part 19. See the [implementation plan](plan.md)
+The reusable implementation is complete through Part 30. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
-evidence and compatibility decisions. Parts 20–30 remain architecture specifications until code
-and direct evidence are added.
+evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
+each built binary and environment and is not inferred from repository ownership.
 
 ## Change policy
 

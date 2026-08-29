@@ -71,6 +71,7 @@ implicitly claim completion of an earlier part.
 | Part 25: diagnostics, forensics, and reproducible incident bundles | Implemented | [Part 25 report](docs/diagnostics-forensics-reproducible-incident-bundles-completion.md) |
 | Part 26: legacy application compatibility and incremental adoption | Implemented | [Part 26 report](docs/legacy-application-compatibility-incremental-adoption-completion.md) |
 | Part 29: schema, operation registry, and developer governance | Implemented | [Part 29 report](docs/schema-operation-registry-developer-governance-completion.md) |
+| Part 30: certification, conformance, and ecosystem architecture | Implemented | [Part 30 report](docs/certification-conformance-ecosystem-completion.md) |
 
 ## Implementation workflow
 

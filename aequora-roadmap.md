@@ -487,6 +487,8 @@ Implementation evidence: [Part 29 completion report](docs/schema-operation-regis
 
 ### Part 30 — Certification, Conformance, and Ecosystem Architecture
 
+Implementation evidence: [Part 30 completion report](docs/certification-conformance-ecosystem-completion.md).
+
 - adapter certification;
 - transport certification;
 - official vs community support;
