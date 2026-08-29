@@ -27,6 +27,8 @@ members = [
     "crates/aequora-invariants",
     "crates/aequora-journal",
     "crates/aequora-jobs",
+    "crates/aequora-legacy",
+    "crates/aequora-legacy-api",
     "crates/aequora-live",
     "crates/aequora-macros",
     "crates/aequora-model",

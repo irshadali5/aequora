@@ -92,6 +92,11 @@ jobs:
           cargo +stable test -p aequora-bootstrap --locked
           cargo +stable test -p aequora-blob --locked
           cargo +stable test -p aequora-compute --locked
+      - name: Enforce legacy adoption ownership, bridge, facade, and cutover contracts
+        run: |
+          bash scripts/check-legacy-architecture.sh
+          cargo +stable test -p aequora-legacy -p aequora-legacy-api --locked
+          cargo +stable test -p aequora-testkit --test legacy_adoption_contracts --locked
       - name: Strict Clippy
         run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Workspace tests

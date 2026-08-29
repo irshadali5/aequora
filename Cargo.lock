@@ -40,6 +40,8 @@ dependencies = [
  "aequora-integrity",
  "aequora-jobs",
  "aequora-journal",
+ "aequora-legacy",
+ "aequora-legacy-api",
  "aequora-live",
  "aequora-macros",
  "aequora-mapping",
@@ -187,6 +189,7 @@ dependencies = [
  "aequora-compat",
  "aequora-diagnostics",
  "aequora-integrity",
+ "aequora-legacy",
  "aequora-migration",
  "aequora-model",
  "aequora-queue",
@@ -461,6 +464,31 @@ dependencies = [
  "aequora-protocol",
  "aequora-types",
  "thiserror",
+]
+
+[[package]]
+name = "aequora-legacy"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "aequora-legacy-api"
+version = "0.1.0"
+dependencies = [
+ "aequora-legacy",
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -815,6 +843,8 @@ dependencies = [
  "aequora-invariants",
  "aequora-jobs",
  "aequora-journal",
+ "aequora-legacy",
+ "aequora-legacy-api",
  "aequora-live",
  "aequora-migration",
  "aequora-observability",
