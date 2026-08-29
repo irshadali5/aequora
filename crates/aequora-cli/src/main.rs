@@ -11,6 +11,10 @@ use aequora_compat::{
     ClientHello, CompatibilityError, CompatibilityPolicy, CompatibilityRegistry,
     CompatibilityResult, ServerAuthorityContext, SupportStatus, canonical_registry, negotiate,
 };
+use aequora_conformance::{
+    CertificationArtifact, CertificationRequest, ConformanceDomain, ConformanceError,
+    REFERENCE_TESTS, markdown_report,
+};
 use aequora_diagnostics::{
     DiagnosticError, DiagnosticPolicy, IncidentBundleManifest, OperationExplanationInput,
     explain_operation,
@@ -54,7 +58,11 @@ use std::{env, fs, io, path::Path, process::ExitCode};
 use thiserror::Error;
 
 fn main() -> ExitCode {
-    match command(env::args().skip(1)) {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments.first().map(String::as_str) == Some("conform") {
+        return conform_main(&arguments[1..]);
+    }
+    match command(arguments) {
         Ok(output) => {
             println!("{output}");
             ExitCode::SUCCESS
@@ -107,6 +115,9 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("conform") => {
+            conform_command(arguments.next().as_deref(), arguments.next().as_deref())
+        }
         Some("admin") => admin_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("incident") => incident_command(
             arguments.next().as_deref(),
@@ -125,7 +136,95 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora conform run <request.ron>\naequora conform storage|protocol|client|server\naequora conform report <artifact.ron>\naequora conform verify <artifact.ron>\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+}
+
+fn conform_main(arguments: &[String]) -> ExitCode {
+    match conform_command(
+        arguments.first().map(String::as_str),
+        arguments.get(1).map(String::as_str),
+    ) {
+        Ok(output) => {
+            println!("{output}");
+            if output.contains("result=Failed") {
+                ExitCode::from(1)
+            } else if output.contains("result=Unsupported") {
+                ExitCode::from(3)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(error) => {
+            eprintln!("aequora: {error}");
+            match error {
+                CliError::Conformance(ConformanceError::UnsupportedFormat) => ExitCode::from(3),
+                CliError::Conformance(_) => ExitCode::from(1),
+                _ => ExitCode::from(2),
+            }
+        }
+    }
+}
+
+fn conform_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    match subject {
+        Some("run") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora conform run <request.ron>".to_owned())
+            })?;
+            let artifact = read_ron::<CertificationRequest>(path, 16 * 1024 * 1024)?.execute()?;
+            let encoded = ron::ser::to_string_pretty(&artifact, ron::ser::PrettyConfig::default())
+                .map_err(|error| CliError::Serialize(error.to_string()))?;
+            Ok(format!(
+                "conformance artifact: result={:?}\n{encoded}",
+                artifact.result
+            ))
+        }
+        Some("report") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora conform report <artifact.ron>".to_owned())
+            })?;
+            let artifact = read_ron::<CertificationArtifact>(path, 16 * 1024 * 1024)?;
+            artifact.verify_identity()?;
+            Ok(markdown_report(&artifact))
+        }
+        Some("verify") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora conform verify <artifact.ron>".to_owned())
+            })?;
+            let artifact = read_ron::<CertificationArtifact>(path, 16 * 1024 * 1024)?;
+            artifact.verify_identity()?;
+            Ok(format!(
+                "conformance: valid=true certification={} suite={} profile={:?} tier={:?} result={:?} writes=0",
+                artifact.certification_id,
+                artifact.suite_version,
+                artifact.profile,
+                artifact.tier,
+                artifact.result
+            ))
+        }
+        Some("storage" | "protocol" | "client" | "server") if path.is_none() => {
+            let domain = match subject {
+                Some("storage") => ConformanceDomain::StorageAdapter,
+                Some("protocol") => ConformanceDomain::ProtocolImplementation,
+                Some("client") => ConformanceDomain::ClientRuntime,
+                Some("server") => ConformanceDomain::ServerRuntime,
+                _ => unreachable!(),
+            };
+            let tests = REFERENCE_TESTS
+                .iter()
+                .filter(|test| test.domain == domain)
+                .map(|test| format!("{}:{}", test.id.0, test.name))
+                .collect::<Vec<_>>()
+                .join(",");
+            Ok(format!(
+                "conformance domain: {domain:?} tests=[{tests}] writes=0"
+            ))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora conform <run|storage|protocol|client|server|report|verify> ..."
+                .to_owned(),
+        )),
+    }
 }
 
 fn security_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
@@ -1152,6 +1251,8 @@ impl StarterProfile {
 enum CliError {
     #[error("{0}")]
     Usage(String),
+    #[error(transparent)]
+    Conformance(#[from] ConformanceError),
     #[error("unknown built-in adapter {0:?}")]
     UnknownAdapter(String),
     #[error(transparent)]
