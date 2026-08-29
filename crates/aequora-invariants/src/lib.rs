@@ -450,11 +450,29 @@ pub enum InvariantId {
     FeedResetSafety,
     /// Governed consumer stores participate in governance and residency policy.
     FeedGovernanceCoverage,
+    /// Published durable IDs never acquire different semantics.
+    RegistryIdNonReuse,
+    /// Durable IDs resolve canonically or fail closed as unknown.
+    RegistryCanonicalResolution,
+    /// Breaking semantics require versioned migration, upcast, or incompatibility.
+    RegistryBreakingChangePath,
+    /// Runtime lookup tables cannot diverge from canonical sources.
+    RegistryGeneratedSourceParity,
+    /// Retired IDs remain reserved and historically interpretable.
+    RegistryHistoricalReservation,
+    /// Application and extension allocations cannot collide.
+    RegistryNamespaceIsolation,
+    /// Security-sensitive registry changes require explicit review.
+    RegistrySecurityReview,
+    /// Dynamic configuration cannot redefine compiled durable semantics.
+    RegistryRuntimeImmutability,
+    /// Supported historical artifacts retain durable-ID resolution.
+    RegistryHistoricalResolution,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 220] = [
+    pub const ALL: [Self; 229] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -675,6 +693,15 @@ impl InvariantId {
         Self::FeedOrderingSafety,
         Self::FeedResetSafety,
         Self::FeedGovernanceCoverage,
+        Self::RegistryIdNonReuse,
+        Self::RegistryCanonicalResolution,
+        Self::RegistryBreakingChangePath,
+        Self::RegistryGeneratedSourceParity,
+        Self::RegistryHistoricalReservation,
+        Self::RegistryNamespaceIsolation,
+        Self::RegistrySecurityReview,
+        Self::RegistryRuntimeImmutability,
+        Self::RegistryHistoricalResolution,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -902,6 +929,15 @@ impl InvariantId {
             Self::FeedOrderingSafety => "AEQ-INV-FEED007",
             Self::FeedResetSafety => "AEQ-INV-FEED008",
             Self::FeedGovernanceCoverage => "AEQ-INV-FEED009",
+            Self::RegistryIdNonReuse => "AEQ-INV-REGISTRY001",
+            Self::RegistryCanonicalResolution => "AEQ-INV-REGISTRY002",
+            Self::RegistryBreakingChangePath => "AEQ-INV-REGISTRY003",
+            Self::RegistryGeneratedSourceParity => "AEQ-INV-REGISTRY004",
+            Self::RegistryHistoricalReservation => "AEQ-INV-REGISTRY005",
+            Self::RegistryNamespaceIsolation => "AEQ-INV-REGISTRY006",
+            Self::RegistrySecurityReview => "AEQ-INV-REGISTRY007",
+            Self::RegistryRuntimeImmutability => "AEQ-INV-REGISTRY008",
+            Self::RegistryHistoricalResolution => "AEQ-INV-REGISTRY009",
         }
     }
 
@@ -1556,6 +1592,33 @@ impl InvariantId {
             Self::FeedGovernanceCoverage => {
                 "governed consumer stores participate in governance and residency policy"
             }
+            Self::RegistryIdNonReuse => {
+                "a published durable registry ID is never reused for different semantics"
+            }
+            Self::RegistryCanonicalResolution => {
+                "every durable identifier resolves canonically or is rejected as unknown"
+            }
+            Self::RegistryBreakingChangePath => {
+                "breaking durable semantics require a new version migration upcaster or declared incompatibility"
+            }
+            Self::RegistryGeneratedSourceParity => {
+                "generated constants and lookup tables derive from canonical registry sources"
+            }
+            Self::RegistryHistoricalReservation => {
+                "deprecated and removed IDs remain reserved and historically interpretable"
+            }
+            Self::RegistryNamespaceIsolation => {
+                "application and extension namespaces cannot collide with core or each other"
+            }
+            Self::RegistrySecurityReview => {
+                "security-sensitive registry changes require explicit compatibility and security review"
+            }
+            Self::RegistryRuntimeImmutability => {
+                "runtime configuration cannot redefine compiled durable registry semantics"
+            }
+            Self::RegistryHistoricalResolution => {
+                "supported replay audit and incident tooling can resolve retained historical IDs"
+            }
         }
     }
 
@@ -1788,6 +1851,15 @@ impl InvariantId {
             Self::FeedOrderingSafety => 217,
             Self::FeedResetSafety => 218,
             Self::FeedGovernanceCoverage => 219,
+            Self::RegistryIdNonReuse => 220,
+            Self::RegistryCanonicalResolution => 221,
+            Self::RegistryBreakingChangePath => 222,
+            Self::RegistryGeneratedSourceParity => 223,
+            Self::RegistryHistoricalReservation => 224,
+            Self::RegistryNamespaceIsolation => 225,
+            Self::RegistrySecurityReview => 226,
+            Self::RegistryRuntimeImmutability => 227,
+            Self::RegistryHistoricalResolution => 228,
         }
     }
 }
@@ -1839,7 +1911,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 220] = [
+pub static REGISTRY: [InvariantEntry; 229] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -3379,6 +3451,69 @@ pub static REGISTRY: [InvariantEntry; 220] = [
         "governance_residency_coverage",
         "feed_governance_contract",
         "consumer_governance_gap_total",
+    ),
+    entry(
+        InvariantId::RegistryIdNonReuse,
+        "registry_id_non_reuse",
+        "removed_id_reuse",
+        "registry_lock_contract",
+        "registry_id_reuse_total",
+    ),
+    entry(
+        InvariantId::RegistryCanonicalResolution,
+        "registry_canonical_resolution",
+        "unknown_id_rejection",
+        "generated_registry_contract",
+        "registry_unknown_id_total",
+    ),
+    entry(
+        InvariantId::RegistryBreakingChangePath,
+        "registry_breaking_change_path",
+        "breaking_field_change",
+        "registry_compatibility_contract",
+        "registry_unmigrated_break_total",
+    ),
+    entry(
+        InvariantId::RegistryGeneratedSourceParity,
+        "registry_generated_source_parity",
+        "generated_artifact_drift",
+        "registry_codegen_contract",
+        "registry_codegen_drift_total",
+    ),
+    entry(
+        InvariantId::RegistryHistoricalReservation,
+        "registry_historical_reservation",
+        "retired_id_resolution",
+        "registry_lock_contract",
+        "registry_history_gap_total",
+    ),
+    entry(
+        InvariantId::RegistryNamespaceIsolation,
+        "registry_namespace_isolation",
+        "extension_collision",
+        "registry_namespace_contract",
+        "registry_collision_total",
+    ),
+    entry(
+        InvariantId::RegistrySecurityReview,
+        "registry_security_review",
+        "security_change_without_proposal",
+        "registry_review_contract",
+        "registry_security_review_gap_total",
+    ),
+    entry(
+        InvariantId::RegistryRuntimeImmutability,
+        "registry_runtime_immutability",
+        "runtime_redefinition_rejected",
+        "generated_registry_contract",
+        "registry_runtime_mutation_total",
+    ),
+    entry(
+        InvariantId::RegistryHistoricalResolution,
+        "registry_historical_resolution",
+        "historical_id_resolution",
+        "registry_history_contract",
+        "registry_historical_unknown_total",
     ),
 ];
 
