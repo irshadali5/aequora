@@ -1,0 +1,8 @@
+(
+entries: [
+    (domain: ArtifactFormat, id: 1, name: "SnapshotV1", owner: (team: "bootstrap", crate_name: "aequora-bootstrap", module: "snapshot"), status: Current, introduced_in: "0.1.0", description: "Streaming snapshot artifact format version one.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ArtifactFormat, id: 2, name: "IncidentBundleV1", owner: (team: "diagnostics", crate_name: "aequora-diagnostics", module: "bundle"), status: Current, introduced_in: "0.1.0", description: "Redacted reproducible incident bundle format version one.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ArtifactFormat, id: 3, name: "FeedArchiveV1", owner: (team: "integrations", crate_name: "aequora-feed", module: "archive"), status: Current, introduced_in: "0.1.0", description: "Multi-consumer change-feed archive format version one.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ArtifactFormat, id: 4, name: "ReplayBundleV1", owner: (team: "replay", crate_name: "aequora-replay", module: "bundle"), status: Current, introduced_in: "0.1.0", description: "Deterministic replay bundle format version one.", schema_version: Some(1), supported_schema_versions: [1]),
+],
+)

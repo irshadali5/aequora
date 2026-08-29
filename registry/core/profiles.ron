@@ -1,0 +1,13 @@
+(
+entries: [
+    (domain: ConsistencyProfile, id: 1, name: "ImmutableAppendOnly", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Append-only immutable aggregate semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 2, name: "OptimisticVersioned", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Reject-stale optimistic aggregate semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 3, name: "Commutative", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Order-independent commutative operation semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 4, name: "LastWriterWins", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Explicit last-writer-wins field semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 5, name: "ManualConflict", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Conflict materialization requiring manual resolution.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 6, name: "StrongAggregate", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Authority-serialized strong aggregate semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 7, name: "ServerOnly", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Server-originated operation semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 8, name: "DeviceLocal", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Device-local non-replicated semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+    (domain: ConsistencyProfile, id: 9, name: "DerivedProjection", owner: (team: "semantics", crate_name: "aequora-profile", module: "builtins"), status: Current, introduced_in: "0.1.0", description: "Rebuildable derived projection semantics.", schema_version: Some(1), supported_schema_versions: [1]),
+],
+)

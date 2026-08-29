@@ -1,0 +1,13 @@
+(
+entries: [
+    (domain: Protocol, id: 1, name: "ProtocolV1", owner: (team: "protocol", crate_name: "aequora-protocol", module: "wire"), status: Current, introduced_in: "0.1.0", description: "Initial checksummed Aequora synchronization protocol.", attributes: {"compatibility": "Negotiated"}),
+    (domain: Message, id: 1, name: "SyncRequest", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Bounded client synchronization request."),
+    (domain: Message, id: 2, name: "SyncResponse", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Bounded authoritative synchronization response."),
+    (domain: Message, id: 3, name: "BootstrapRequest", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Bootstrap negotiation request."),
+    (domain: Message, id: 4, name: "BootstrapResponse", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Bootstrap negotiation response."),
+    (domain: Message, id: 5, name: "SnapshotStreamRequest", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Request for a bounded snapshot page."),
+    (domain: Message, id: 6, name: "SnapshotStreamResponse", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "One bounded snapshot page response."),
+    (domain: Message, id: 7, name: "PushHint", owner: (team: "live-sync", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Advisory journal-advance notification."),
+    (domain: Message, id: 8, name: "TransportError", owner: (team: "protocol", crate_name: "aequora-codec", module: "framing"), status: Current, introduced_in: "0.1.0", description: "Payload-free transport failure response."),
+],
+)
