@@ -1,5 +1,6 @@
 //! One-shot client synchronization and atomic reconciliation.
 
+pub mod diagnostics;
 pub mod resources;
 
 /// Stable plug-and-play entry point for constructing a client engine.
@@ -16,6 +17,7 @@ impl AequoraClient {
 
 /// Focused imports for application client integrations.
 pub mod prelude {
+    pub use crate::diagnostics::{ClientDiagnosticSnapshot, ClientDiagnostics};
     pub use crate::resources::{
         AppLifecycleEvent, BackgroundBudget, ClientCapabilityProfile, ClientResourceAdmission,
         ClientResourceContext, ClientResourcePolicy, ClientResourceProfile, ClientStatus,

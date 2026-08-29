@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
