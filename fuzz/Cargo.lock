@@ -72,6 +72,7 @@ name = "aequora-executor"
 version = "0.1.0"
 dependencies = [
  "aequora-protocol",
+ "aequora-security",
  "aequora-types",
  "async-trait",
  "postcard",
@@ -104,6 +105,18 @@ dependencies = [
  "aequora-types",
  "serde",
  "smallvec",
+]
+
+[[package]]
+name = "aequora-security"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
+ "serde",
+ "thiserror",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

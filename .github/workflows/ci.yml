@@ -78,6 +78,18 @@ jobs:
           cargo +stable test -p aequora-diagnostics --locked
           cargo +stable test -p aequora-testkit --test diagnostic_incident_contracts --locked
           cargo +stable run -p aequora-cli --locked -- incident explain
+      - name: Enforce security threat model and abuse-resistance contracts
+        run: |
+          bash scripts/check-security-architecture.sh
+          cargo +stable test -p aequora-security --locked
+          cargo +stable test -p aequora-testkit --test security_abuse_contracts --locked
+          cargo +stable run -p aequora-cli --locked -- security show
+      - name: Enforce multi-consumer change-feed contracts
+        run: |
+          bash scripts/check-change-feed-architecture.sh
+          cargo +stable test -p aequora-feed --locked
+          cargo +stable test -p aequora-testkit --test change_feed_contracts --locked
+          cargo +stable run -p aequora-cli --locked -- feed show
       - name: Enforce protocol negotiation and compatibility governance
         run: |
           bash scripts/check-compatibility-architecture.sh

@@ -35,6 +35,7 @@ dependencies = [
  "aequora-crypto",
  "aequora-diagnostics",
  "aequora-executor",
+ "aequora-feed",
  "aequora-governance",
  "aequora-http",
  "aequora-integrity",
@@ -60,6 +61,7 @@ dependencies = [
  "aequora-scheduler",
  "aequora-schema",
  "aequora-scope",
+ "aequora-security",
  "aequora-server",
  "aequora-side-effects",
  "aequora-store",
@@ -188,6 +190,7 @@ dependencies = [
  "aequora-bootstrap",
  "aequora-compat",
  "aequora-diagnostics",
+ "aequora-feed",
  "aequora-integrity",
  "aequora-legacy",
  "aequora-migration",
@@ -195,6 +198,7 @@ dependencies = [
  "aequora-queue",
  "aequora-region",
  "aequora-schema",
+ "aequora-security",
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
@@ -356,12 +360,14 @@ dependencies = [
  "aequora-audit",
  "aequora-coordination",
  "aequora-crypto",
+ "aequora-feed",
  "aequora-governance",
  "aequora-performance",
  "aequora-profile",
  "aequora-replay",
  "aequora-scheduler",
  "aequora-scope",
+ "aequora-security",
  "guppy",
  "ron",
 ]
@@ -383,12 +389,29 @@ name = "aequora-executor"
 version = "0.1.0"
 dependencies = [
  "aequora-protocol",
+ "aequora-security",
  "aequora-types",
  "async-trait",
  "postcard",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "aequora-feed"
+version = "0.1.0"
+dependencies = [
+ "aequora-metadata",
+ "aequora-protocol",
+ "aequora-types",
+ "async-trait",
+ "blake3",
+ "futures-util",
+ "ron",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -717,6 +740,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-security"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "blake3",
+ "ron",
+ "serde",
+ "thiserror",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "aequora-server"
 version = "0.1.0"
 dependencies = [
@@ -838,6 +874,7 @@ dependencies = [
  "aequora-crypto",
  "aequora-diagnostics",
  "aequora-executor",
+ "aequora-feed",
  "aequora-governance",
  "aequora-integrity",
  "aequora-invariants",
@@ -856,6 +893,7 @@ dependencies = [
  "aequora-scheduler",
  "aequora-schema",
  "aequora-scope",
+ "aequora-security",
  "aequora-server",
  "aequora-side-effects",
  "aequora-store",
@@ -869,6 +907,7 @@ dependencies = [
  "futures-util",
  "postcard",
  "proptest",
+ "ron",
  "thiserror",
  "tokio",
  "uuid",
