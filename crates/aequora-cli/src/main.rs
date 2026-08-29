@@ -11,6 +11,10 @@ use aequora_compat::{
     ClientHello, CompatibilityError, CompatibilityPolicy, CompatibilityRegistry,
     CompatibilityResult, ServerAuthorityContext, SupportStatus, canonical_registry, negotiate,
 };
+use aequora_diagnostics::{
+    DiagnosticError, DiagnosticPolicy, IncidentBundleManifest, OperationExplanationInput,
+    explain_operation,
+};
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CURRENT_INTEGRITY_GENERATION, IntegrityError, IntegritySnapshot,
     PartitionScheme, RepairPlan,
@@ -95,6 +99,11 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
         ),
         Some("admin") => admin_command(arguments.next().as_deref(), arguments.next().as_deref()),
+        Some("incident") => incident_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -102,7 +111,62 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora init <new-directory> <client|server>"
+}
+
+fn incident_command(
+    subject: Option<&str>,
+    path: Option<&str>,
+    policy_path: Option<&str>,
+) -> Result<String, CliError> {
+    match subject {
+        Some("inspect") => {
+            let manifest_path = path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora incident inspect <manifest.ron> <policy.ron>".to_owned(),
+                )
+            })?;
+            let policy_path = policy_path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora incident inspect <manifest.ron> <policy.ron>".to_owned(),
+                )
+            })?;
+            let manifest: IncidentBundleManifest = read_ron(manifest_path, 2 * 1024 * 1024)?;
+            let policy: DiagnosticPolicy = read_ron(policy_path, 256 * 1024)?;
+            manifest.validate(&policy)?;
+            Ok(format!(
+                "incident bundle: id={} incident={} producer={:?} mode={:?} complete={} state={:?} writes=0",
+                manifest.bundle_id.as_uuid(),
+                manifest.incident_id.as_uuid(),
+                manifest.producer,
+                manifest.mode,
+                manifest.completeness.is_complete(),
+                manifest.state,
+            ))
+        }
+        Some("explain-operation") if policy_path.is_none() => {
+            let input_path = path.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora incident explain-operation <input.ron>".to_owned(),
+                )
+            })?;
+            let input: OperationExplanationInput = read_ron(input_path, 256 * 1024)?;
+            let summary = explain_operation(input);
+            Ok(format!(
+                "incident operation: classification={:?} confidence={:?} evidence={} writes=0",
+                summary.classification,
+                summary.confidence,
+                summary.supporting_refs.len(),
+            ))
+        }
+        Some("explain") if path.is_none() && policy_path.is_none() => Ok(
+            "incident: collection is bounded, tenant-authorized, sanitized before export, encryption-required in production, signed in forensic mode, and replay is isolated from production side effects"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora incident <inspect|explain-operation|explain> ...".to_owned(),
+        )),
+    }
 }
 
 fn admin_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
@@ -947,6 +1011,8 @@ enum CliError {
     #[error(transparent)]
     Admin(#[from] aequora_admin::AdminError),
     #[error(transparent)]
+    Diagnostic(#[from] DiagnosticError),
+    #[error(transparent)]
     Compatibility(#[from] AdapterCompatibilityError),
     #[error(transparent)]
     ProtocolCompatibility(#[from] CompatibilityError),
@@ -1069,6 +1135,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("compatibility registry failed: {error}"));
         assert!(output.contains("compat registry: ok generation=1"));
         assert!(output.contains("writes=0"));
+    }
+
+    #[test]
+    fn incident_explain_describes_fail_closed_read_only_boundary() {
+        let output = command(args(&["incident", "explain"]))
+            .unwrap_or_else(|error| panic!("incident explanation failed: {error}"));
+        assert!(output.contains("tenant-authorized"));
+        assert!(output.contains("replay is isolated"));
     }
 
     #[test]

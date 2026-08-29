@@ -25,6 +25,7 @@ aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
+aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
