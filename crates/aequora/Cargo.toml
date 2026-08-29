@@ -37,6 +37,7 @@ aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
+aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-crdt = { version = "0.1.0", path = "../aequora-crdt" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }

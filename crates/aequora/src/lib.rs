@@ -22,6 +22,7 @@ pub use aequora_conflict as conflict;
 pub use aequora_coordination as coordination;
 pub use aequora_crdt as crdt;
 pub use aequora_crypto as crypto;
+pub use aequora_diagnostics as diagnostics;
 pub use aequora_executor as executor;
 pub use aequora_governance as governance;
 pub use aequora_integrity as integrity;
@@ -218,6 +219,27 @@ pub mod prelude {
         domain_digest, encrypt_payload, sign_artifact, sign_checkpoint, sign_digest,
         sign_key_registry, sign_operation, verify_artifact, verify_checkpoint, verify_digest,
         verify_operation_signature,
+    };
+    pub use aequora_diagnostics::{
+        ArchiveObservation, AuthorityForensicView, BuildIdentity, BundleBoundary, BundleEncryptor,
+        BundlePlan, BundleProducer, BundleRetentionDecision, BundleSigner, BundleState,
+        BundleVerification, ClassifiedValue, ClientReconcileState, ClientSendState,
+        ConclusionConfidence, DataClassification, DataInclusion, DefaultDiagnosticSanitizer,
+        DeviceForensicView, DiagnosticError, DiagnosticEvent, DiagnosticEventId,
+        DiagnosticEventKind, DiagnosticMode, DiagnosticPolicy, DiagnosticProvider,
+        DiagnosticRecord, DiagnosticRequest, DiagnosticRing, DiagnosticRingLimits,
+        DiagnosticSanitizer, DiagnosticSection, DiagnosticSectionId, DiagnosticSelector,
+        DiagnosticValue, EntityForensicView, EvidenceConfidence, FailureTraceMinimizer,
+        ForensicQueryProvider, ForensicView, HashEntry, HashInventory, IncidentBundleId,
+        IncidentBundleManifest, IncidentBundleRecord, IncidentBundleSchemaVersion, IncidentClass,
+        IncidentId, IncidentRecord, IncidentRegistry, IncidentState, IncidentSummary,
+        JobForensicView, MissingSectionReason, OperationExplanationInput, OperationForensicView,
+        ProtectedBundle, ProtectionRequirement, ReplayManifest,
+        ReplayOutcome as DiagnosticReplayOutcome, ReplayReport as DiagnosticReplayReport,
+        ReplaySandbox as DiagnosticReplaySandbox, ReproductionLevel, RootCauseClassification,
+        RuntimeInventory, ScopeForensicView, SectionCompleteness, TimeRange, TimelineEvent,
+        TimelineRefs, evaluate_bundle_retention, explain_operation, minimize_fault_script,
+        protect_bundle, replay_in_sandbox, verify_bundle,
     };
     pub use aequora_executor::{
         AuthContext, AuthenticatedOperation, AuthoritativeMutation, AuthorizedOperation,
