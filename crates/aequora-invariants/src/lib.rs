@@ -394,11 +394,29 @@ pub enum InvariantId {
     DiagnosticVerifiedBundle,
     /// Replay cannot mutate production authority or client state.
     DiagnosticReplayProductionIsolation,
+    /// Every aggregate has one effective authoritative writer.
+    LegacySingleWriteOwner,
+    /// CDC cursors advance only with a durable canonical bridge result.
+    LegacyCursorAfterDurability,
+    /// Duplicate legacy changes produce one canonical effect.
+    LegacyBridgeIdempotency,
+    /// Direct legacy writes are fenced after Aequora cutover.
+    LegacyPostCutoverFence,
+    /// Legacy APIs enter authority through typed domain operations.
+    LegacyTypedFacade,
+    /// Unknown legacy business states never silently become valid canonical states.
+    LegacyMappingFailClosed,
+    /// Shadow execution cannot commit or perform real external effects.
+    LegacyShadowIsolation,
+    /// Governance covers legacy copies until formal retirement.
+    LegacyGovernanceCoverage,
+    /// Cutover completion requires fencing, final-boundary apply, and verification.
+    LegacyVerifiedCutover,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 192] = [
+    pub const ALL: [Self; 201] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -591,6 +609,15 @@ impl InvariantId {
         Self::DiagnosticPrePublicationSanitization,
         Self::DiagnosticVerifiedBundle,
         Self::DiagnosticReplayProductionIsolation,
+        Self::LegacySingleWriteOwner,
+        Self::LegacyCursorAfterDurability,
+        Self::LegacyBridgeIdempotency,
+        Self::LegacyPostCutoverFence,
+        Self::LegacyTypedFacade,
+        Self::LegacyMappingFailClosed,
+        Self::LegacyShadowIsolation,
+        Self::LegacyGovernanceCoverage,
+        Self::LegacyVerifiedCutover,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -790,6 +817,15 @@ impl InvariantId {
             Self::DiagnosticPrePublicationSanitization => "AEQ-INV-DIAG007",
             Self::DiagnosticVerifiedBundle => "AEQ-INV-DIAG008",
             Self::DiagnosticReplayProductionIsolation => "AEQ-INV-DIAG009",
+            Self::LegacySingleWriteOwner => "AEQ-INV-LEG001",
+            Self::LegacyCursorAfterDurability => "AEQ-INV-LEG002",
+            Self::LegacyBridgeIdempotency => "AEQ-INV-LEG003",
+            Self::LegacyPostCutoverFence => "AEQ-INV-LEG004",
+            Self::LegacyTypedFacade => "AEQ-INV-LEG005",
+            Self::LegacyMappingFailClosed => "AEQ-INV-LEG006",
+            Self::LegacyShadowIsolation => "AEQ-INV-LEG007",
+            Self::LegacyGovernanceCoverage => "AEQ-INV-LEG008",
+            Self::LegacyVerifiedCutover => "AEQ-INV-LEG009",
         }
     }
 
@@ -1360,6 +1396,33 @@ impl InvariantId {
             Self::DiagnosticReplayProductionIsolation => {
                 "diagnostic replay cannot mutate production authority or production client state"
             }
+            Self::LegacySingleWriteOwner => {
+                "each migrated aggregate has exactly one effective authoritative write owner"
+            }
+            Self::LegacyCursorAfterDurability => {
+                "legacy CDC position advances only with a durably recorded canonical result"
+            }
+            Self::LegacyBridgeIdempotency => {
+                "duplicate legacy delivery cannot duplicate canonical authoritative effects"
+            }
+            Self::LegacyPostCutoverFence => {
+                "direct legacy writes after Aequora cutover are fenced or critical violations"
+            }
+            Self::LegacyTypedFacade => {
+                "legacy compatibility APIs translate into typed Aequora operations"
+            }
+            Self::LegacyMappingFailClosed => {
+                "unknown legacy business states are never silently coerced into canonical state"
+            }
+            Self::LegacyShadowIsolation => {
+                "shadow execution produces neither authoritative mutation nor real side effects"
+            }
+            Self::LegacyGovernanceCoverage => {
+                "governance accounts for legacy copies until formal retirement"
+            }
+            Self::LegacyVerifiedCutover => {
+                "cutover completes only after writer fencing final-boundary apply and canonical verification"
+            }
         }
     }
 
@@ -1564,6 +1627,15 @@ impl InvariantId {
             Self::DiagnosticPrePublicationSanitization => 189,
             Self::DiagnosticVerifiedBundle => 190,
             Self::DiagnosticReplayProductionIsolation => 191,
+            Self::LegacySingleWriteOwner => 192,
+            Self::LegacyCursorAfterDurability => 193,
+            Self::LegacyBridgeIdempotency => 194,
+            Self::LegacyPostCutoverFence => 195,
+            Self::LegacyTypedFacade => 196,
+            Self::LegacyMappingFailClosed => 197,
+            Self::LegacyShadowIsolation => 198,
+            Self::LegacyGovernanceCoverage => 199,
+            Self::LegacyVerifiedCutover => 200,
         }
     }
 }
@@ -1615,7 +1687,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 192] = [
+pub static REGISTRY: [InvariantEntry; 201] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -2959,6 +3031,69 @@ pub static REGISTRY: [InvariantEntry; 192] = [
         "diagnostic_production_attachment_rejected",
         "diagnostic_replay_contract",
         "diagnostic_production_replay_total",
+    ),
+    entry(
+        InvariantId::LegacySingleWriteOwner,
+        "legacy_single_write_owner",
+        "cutover_ownership_state_machine",
+        "legacy_ownership_store_contract",
+        "legacy_owner_violation_total",
+    ),
+    entry(
+        InvariantId::LegacyCursorAfterDurability,
+        "legacy_cursor_after_durability",
+        "cdc_crash_before_checkpoint",
+        "legacy_bridge_store_contract",
+        "legacy_cursor_ahead_total",
+    ),
+    entry(
+        InvariantId::LegacyBridgeIdempotency,
+        "legacy_bridge_idempotency",
+        "cdc_duplicate_delivery",
+        "legacy_bridge_store_contract",
+        "legacy_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::LegacyPostCutoverFence,
+        "legacy_post_cutover_fence",
+        "stale_legacy_node_write",
+        "legacy_write_guard_contract",
+        "legacy_write_after_cutover_total",
+    ),
+    entry(
+        InvariantId::LegacyTypedFacade,
+        "legacy_typed_facade",
+        "legacy_facade_retry",
+        "legacy_facade_contract",
+        "legacy_domain_bypass_total",
+    ),
+    entry(
+        InvariantId::LegacyMappingFailClosed,
+        "legacy_mapping_fail_closed",
+        "unknown_legacy_status",
+        "legacy_mapper_contract",
+        "legacy_mapping_failure_total",
+    ),
+    entry(
+        InvariantId::LegacyShadowIsolation,
+        "legacy_shadow_isolation",
+        "shadow_side_effect_capture",
+        "legacy_shadow_executor_contract",
+        "legacy_shadow_real_effect_total",
+    ),
+    entry(
+        InvariantId::LegacyGovernanceCoverage,
+        "legacy_governance_coverage",
+        "migration_erasure_surfaces",
+        "legacy_governance_contract",
+        "legacy_governance_gap_total",
+    ),
+    entry(
+        InvariantId::LegacyVerifiedCutover,
+        "legacy_verified_cutover",
+        "cutover_race_matrix",
+        "legacy_cutover_contract",
+        "legacy_unverified_cutover_total",
     ),
 ];
 
