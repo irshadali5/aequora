@@ -236,6 +236,9 @@ fn validate_entry(entry: &RegistryEntry) -> Result<(), RegistryError> {
         RegistryDomain::Consumer => &["ordering", "retention", "visibility"][..],
         RegistryDomain::Migration => &["kind", "checksum"][..],
         RegistryDomain::Protocol => &["compatibility"][..],
+        RegistryDomain::ConformanceProfile => &["domains", "minimum_tier"][..],
+        RegistryDomain::ConformanceTest => &["domain", "minimum_tier", "invariants"][..],
+        RegistryDomain::CertificationTier => &["rank", "required_result"][..],
         _ => &[],
     };
     if let Some(missing) = required
@@ -457,6 +460,9 @@ pub fn generated_rust(set: &RegistrySet) -> String {
         RegistryDomain::Reason,
         RegistryDomain::DecisionRule,
         RegistryDomain::ArtifactFormat,
+        RegistryDomain::ConformanceProfile,
+        RegistryDomain::ConformanceTest,
+        RegistryDomain::CertificationTier,
     ] {
         let _ = writeln!(
             output,
@@ -499,6 +505,9 @@ fn rust_id_type(domain: RegistryDomain) -> &'static str {
         RegistryDomain::Reason => "ReasonCode",
         RegistryDomain::DecisionRule => "DecisionRuleId",
         RegistryDomain::ArtifactFormat => "ArtifactFormatId",
+        RegistryDomain::ConformanceProfile => "ConformanceProfileId",
+        RegistryDomain::ConformanceTest => "ConformanceTestId",
+        RegistryDomain::CertificationTier => "CertificationTierId",
     }
 }
 
@@ -527,7 +536,7 @@ pub fn registry_digest(set: &RegistrySet) -> String {
 #[must_use]
 pub fn generated_markdown(set: &RegistrySet) -> String {
     let mut output = format!(
-        "# Aequora durable registry\n\nGeneration: `{}`  \nDigest: `{}`\n\n| Domain | ID | Name | Status | Owner | Schema | Description |\n|---|---:|---|---|---|---:|---|\n",
+        "# Aequora durable registry\n\nGeneration: `{}`\n\nDigest: `{}`\n\n| Domain | ID | Name | Status | Owner | Schema | Description |\n|---|---:|---|---|---|---:|---|\n",
         set.manifest.generation,
         registry_digest(set)
     );

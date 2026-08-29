@@ -50,6 +50,21 @@ numeric_id!(
 numeric_id!(DecisionRuleId, u32, "Stable decision-rule identifier.");
 numeric_id!(ArtifactFormatId, u32, "Stable artifact-format identifier.");
 numeric_id!(
+    ConformanceProfileId,
+    u32,
+    "Stable conformance-profile identifier."
+);
+numeric_id!(
+    ConformanceTestId,
+    u32,
+    "Stable conformance-test identifier."
+);
+numeric_id!(
+    CertificationTierId,
+    u32,
+    "Stable certification-tier identifier."
+);
+numeric_id!(
     VendorNamespaceId,
     u16,
     "Registered extension namespace identifier."
@@ -76,6 +91,9 @@ pub enum RegistryDomain {
     Reason,
     DecisionRule,
     ArtifactFormat,
+    ConformanceProfile,
+    ConformanceTest,
+    CertificationTier,
 }
 
 impl RegistryDomain {
@@ -100,6 +118,9 @@ impl RegistryDomain {
             Self::Reason => "reason",
             Self::DecisionRule => "decision-rule",
             Self::ArtifactFormat => "artifact-format",
+            Self::ConformanceProfile => "conformance-profile",
+            Self::ConformanceTest => "conformance-test",
+            Self::CertificationTier => "certification-tier",
         }
     }
 }

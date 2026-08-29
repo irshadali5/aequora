@@ -29,7 +29,8 @@ if rg -q '(^|[^[:alnum:]_-])(sqlx|stoolap|tokio|axum|quinn|reqwest)([^[:alnum:]_
 fi
 
 for domain in Entity Operation Event Field Capability ConsistencyProfile Error Job Consumer \
-    AuditAction Migration Protocol Message Permission AdminAction Reason DecisionRule ArtifactFormat; do
+    AuditAction Migration Protocol Message Permission AdminAction Reason DecisionRule ArtifactFormat \
+    ConformanceProfile ConformanceTest CertificationTier; do
     rg -q "${domain}" crates/aequora-registry-types/src/lib.rs
 done
 

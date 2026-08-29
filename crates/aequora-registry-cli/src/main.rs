@@ -154,6 +154,9 @@ fn parse_domain(value: &str) -> Result<RegistryDomain, Box<dyn Error>> {
         "reason" => Ok(RegistryDomain::Reason),
         "decision-rule" => Ok(RegistryDomain::DecisionRule),
         "artifact-format" => Ok(RegistryDomain::ArtifactFormat),
+        "conformance-profile" => Ok(RegistryDomain::ConformanceProfile),
+        "conformance-test" => Ok(RegistryDomain::ConformanceTest),
+        "certification-tier" => Ok(RegistryDomain::CertificationTier),
         _ => Err(format!("unknown registry domain `{value}`").into()),
     }
 }

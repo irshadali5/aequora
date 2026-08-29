@@ -1,7 +1,8 @@
 # Aequora durable registry
 
-Generation: `1`  
-Digest: `72abedfde41101068f2b3dd5de88984ae4490a029a76cd1572f3a2a1c169a070`
+Generation: `2`
+
+Digest: `d614f0c00d7c3b99df2a42bad5d8387cc36114ed6372e2d0c31e8381fd935882`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -136,3 +137,36 @@ Digest: `72abedfde41101068f2b3dd5de88984ae4490a029a76cd1572f3a2a1c169a070`
 | artifact-format | 2 | IncidentBundleV1 | Current | diagnostics | 1 | Redacted reproducible incident bundle format version one. |
 | artifact-format | 3 | FeedArchiveV1 | Current | integrations | 1 | Multi-consumer change-feed archive format version one. |
 | artifact-format | 4 | ReplayBundleV1 | Current | replay | 1 | Deterministic replay bundle format version one. |
+| conformance-profile | 1 | StorageCore | Current | conformance | - | Core local and authoritative storage contracts. |
+| conformance-profile | 2 | StorageFullSync | Current | conformance | - | Storage plus snapshot, cursor, fencing, and anti-entropy contracts. |
+| conformance-profile | 10 | ClientCore | Current | conformance | - | Core offline client behavior. |
+| conformance-profile | 11 | ClientFullSync | Current | conformance | - | Full client synchronization and bounded-resource behavior. |
+| conformance-profile | 20 | ServerCore | Current | conformance | - | Core authoritative server behavior. |
+| conformance-profile | 21 | ServerEnterprise | Current | conformance | - | Enterprise server, provider, security, and feed behavior. |
+| conformance-profile | 30 | ProtocolCore | Current | conformance | - | Protocol negotiation and canonical trace behavior. |
+| conformance-profile | 40 | Provider | Current | conformance | - | Snapshot, crypto, job, and feed provider behavior. |
+| conformance-profile | 50 | Integration | Current | conformance | - | Legacy bridge, extension, and application integration behavior. |
+| conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
+| conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
+| conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
+| conformance-test | 4 | CursorAfterDurableApply | Current | conformance | - | Cursors advance only after durable apply. |
+| conformance-test | 5 | AuthorityFencing | Current | conformance | - | Stale authority epochs cannot commit. |
+| conformance-test | 6 | SnapshotRoundTrip | Current | conformance | - | Snapshots verify and restore exact logical state. |
+| conformance-test | 7 | TombstoneAndAntiEntropy | Current | conformance | - | Repair preserves tombstones and canonical agreement. |
+| conformance-test | 8 | GovernanceRestore | Current | conformance | - | Restore preserves erasure and legal-hold truth. |
+| conformance-test | 9 | ProtocolUnknownIdFailClosed | Current | conformance | - | Unknown required protocol IDs fail closed. |
+| conformance-test | 10 | ProtocolDifferentialTrace | Current | conformance | - | Canonical reference and subject traces agree. |
+| conformance-test | 11 | ClientOfflineReplay | Current | conformance | - | Offline replay preserves operation identity and intent. |
+| conformance-test | 12 | ClientResourceBounds | Current | conformance | - | Client buffering and retries obey hard bounds. |
+| conformance-test | 13 | ServerFailoverFencing | Current | conformance | - | Server failover rejects stale writers. |
+| conformance-test | 14 | ServerSecurityFailClosed | Current | conformance | - | Server identity and authorization failures fail closed. |
+| conformance-test | 15 | CryptoKnownAnswerAndMisuse | Current | conformance | - | Crypto known-answer, rotation, and misuse tests pass. |
+| conformance-test | 16 | JobExactlyOnceEffect | Current | conformance | - | Durable job retry does not duplicate logical effects. |
+| conformance-test | 17 | FeedCursorAndDuplicateSafety | Current | conformance | - | Feed consumers durably effect before cursor and tolerate duplicates. |
+| conformance-test | 18 | LegacyShadowAndCutover | Current | conformance | - | Legacy shadow execution is isolated and cutover is verified. |
+| conformance-test | 19 | ExtensionNamespaceIsolation | Current | conformance | - | Extension IDs cannot collide with core or other namespaces. |
+| conformance-test | 20 | ApplicationCapabilityTruthfulness | Current | conformance | - | Applications cannot advertise unverified capabilities. |
+| certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
+| certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
+| certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
+| certification-tier | 30 | Enterprise | Current | conformance | - | Governance, security, provider, and operational semantics. |
