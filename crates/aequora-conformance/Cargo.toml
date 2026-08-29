@@ -1,0 +1,20 @@
+[package]
+name = "aequora-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Database-neutral conformance and certification contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
+blake3.workspace = true
+hex.workspace = true
+postcard.workspace = true
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
