@@ -24,6 +24,7 @@ pub use aequora_crdt as crdt;
 pub use aequora_crypto as crypto;
 pub use aequora_diagnostics as diagnostics;
 pub use aequora_executor as executor;
+pub use aequora_feed as feed;
 pub use aequora_governance as governance;
 pub use aequora_integrity as integrity;
 pub use aequora_jobs as jobs;
@@ -49,6 +50,7 @@ pub use aequora_scheduler as scheduler;
 #[cfg(feature = "record-sync")]
 pub use aequora_schema as schema;
 pub use aequora_scope as scope;
+pub use aequora_security as security;
 pub use aequora_server as server;
 pub use aequora_server::AequoraServer;
 pub use aequora_side_effects as side_effects;
@@ -393,6 +395,11 @@ pub mod prelude {
         ScopeStatus, ScopeTransition, ScopeTransitionId, ScopeTransitionInstruction,
         ScopeTransitionKind, ScopeTransitionOutcome, ScopeVersion, Subscription, SubscriptionId,
         SubscriptionState, project_filtered_page,
+    };
+    pub use aequora_security::{
+        AssuranceLevel as SecurityAssuranceLevel, AuthenticationEvidence, AuthenticationPolicy,
+        SecurityError, SecurityEvent, SecurityEventKind, SecurityLevel, SecurityPolicy,
+        SecuritySeverity, ValidatedAuthContext,
     };
     pub use aequora_server::{
         AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,

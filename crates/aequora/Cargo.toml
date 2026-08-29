@@ -41,6 +41,7 @@ aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-crdt = { version = "0.1.0", path = "../aequora-crdt" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
 aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
@@ -64,6 +65,7 @@ aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
 aequora-routing = { version = "0.1.0", path = "../aequora-routing" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
+aequora-security = { version = "0.1.0", path = "../aequora-security" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-schema = { version = "0.1.0", path = "../aequora-schema", optional = true }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
