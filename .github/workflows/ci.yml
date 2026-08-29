@@ -102,6 +102,14 @@ jobs:
           cargo +stable test -p aequora-registry-types -p aequora-registry-codegen -p aequora-registry-generated -p aequora-registry-cli --locked
           cargo +stable test -p aequora-testkit --test registry_contracts --locked
           cargo +stable run -p aequora-registry-cli --locked --bin aequora-registry -- verify .
+      - name: Enforce certification, conformance, and ecosystem trust contracts
+        run: |
+          bash scripts/check-certification-architecture.sh
+          cargo +stable test -p aequora-conformance --locked
+          cargo +stable test -p aequora-testkit --test adapter_contracts --locked
+          cargo +stable test -p aequora-testkit --test conformance_certification_contracts --locked
+          cargo +stable test -p aequora-store-stoolap built_in_stoolap_passes_the_public_local_adapter_contract --locked
+          cargo +stable run -p aequora-cli --locked -- conform storage
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh

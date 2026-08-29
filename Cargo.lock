@@ -30,6 +30,7 @@ dependencies = [
  "aequora-compute",
  "aequora-config",
  "aequora-conflict",
+ "aequora-conformance",
  "aequora-coordination",
  "aequora-crdt",
  "aequora-crypto",
@@ -191,6 +192,7 @@ dependencies = [
  "aequora-authority",
  "aequora-bootstrap",
  "aequora-compat",
+ "aequora-conformance",
  "aequora-diagnostics",
  "aequora-feed",
  "aequora-integrity",
@@ -286,6 +288,7 @@ dependencies = [
  "aequora-axum",
  "aequora-client",
  "aequora-compute",
+ "aequora-conformance",
  "aequora-coordination",
  "aequora-crypto",
  "aequora-http",
@@ -308,6 +311,19 @@ dependencies = [
  "aequora-protocol",
  "aequora-types",
  "postcard",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-conformance"
+version = "0.1.0"
+dependencies = [
+ "aequora-registry-types",
+ "blake3",
+ "hex",
+ "postcard",
+ "ron",
  "serde",
  "thiserror",
 ]
@@ -909,6 +925,7 @@ dependencies = [
  "aequora-compat",
  "aequora-compute",
  "aequora-conflict",
+ "aequora-conformance",
  "aequora-coordination",
  "aequora-crypto",
  "aequora-diagnostics",
