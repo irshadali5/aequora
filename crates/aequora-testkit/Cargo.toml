@@ -22,6 +22,7 @@ aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
@@ -37,6 +38,7 @@ aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
+aequora-security = { version = "0.1.0", path = "../aequora-security" }
 aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
@@ -46,6 +48,7 @@ aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
 async-trait.workspace = true
 futures-util.workspace = true
 postcard.workspace = true
+ron.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
