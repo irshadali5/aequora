@@ -51,9 +51,8 @@ outside the reusable core.
 
 ## Implementation status
 
-The reusable repository implementation is complete through Part 26. Parts 27–30 remain
-authoritative architecture specifications; their implementation status must be recorded here only
-when corresponding code and evidence are delivered.
+The table below records implementation independently by part; an implemented later part does not
+implicitly claim completion of an earlier part.
 
 | Scope | Status | Evidence |
 |---|---|---|
@@ -71,6 +70,7 @@ when corresponding code and evidence are delivered.
 | Part 24: operational control plane and admin API | Implemented | [Part 24 report](docs/operational-control-plane-admin-api-completion.md) |
 | Part 25: diagnostics, forensics, and reproducible incident bundles | Implemented | [Part 25 report](docs/diagnostics-forensics-reproducible-incident-bundles-completion.md) |
 | Part 26: legacy application compatibility and incremental adoption | Implemented | [Part 26 report](docs/legacy-application-compatibility-incremental-adoption-completion.md) |
+| Part 29: schema, operation registry, and developer governance | Implemented | [Part 29 report](docs/schema-operation-registry-developer-governance-completion.md) |
 
 ## Implementation workflow
 

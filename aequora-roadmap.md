@@ -473,6 +473,8 @@ Implementation evidence: [Part 26 completion report](docs/legacy-application-com
 
 ### Part 29 — Schema / Operation Registry Service and Developer Governance
 
+Implementation evidence: [Part 29 completion report](docs/schema-operation-registry-developer-governance-completion.md).
+
 - operation ID allocation;
 - entity/field ID allocation;
 - ownership;
