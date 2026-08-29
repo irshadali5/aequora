@@ -96,6 +96,12 @@ jobs:
           cargo +stable test -p aequora-compat --locked
           cargo +stable test -p aequora-testkit --test compatibility_contracts --locked
           cargo +stable run -p aequora-cli --locked -- compat registry
+      - name: Enforce durable registry and developer governance
+        run: |
+          bash scripts/check-registry-architecture.sh
+          cargo +stable test -p aequora-registry-types -p aequora-registry-codegen -p aequora-registry-generated -p aequora-registry-cli --locked
+          cargo +stable test -p aequora-testkit --test registry_contracts --locked
+          cargo +stable run -p aequora-registry-cli --locked --bin aequora-registry -- verify .
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh

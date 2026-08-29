@@ -56,6 +56,8 @@ dependencies = [
  "aequora-queue",
  "aequora-quic",
  "aequora-region",
+ "aequora-registry-generated",
+ "aequora-registry-types",
  "aequora-replay",
  "aequora-routing",
  "aequora-scheduler",
@@ -376,6 +378,7 @@ dependencies = [
 name = "aequora-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "aequora-registry-generated",
  "aequora-types",
  "async-trait",
  "blake3",
@@ -685,6 +688,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-registry-cli"
+version = "0.1.0"
+dependencies = [
+ "aequora-registry-codegen",
+ "aequora-registry-types",
+ "ron",
+]
+
+[[package]]
+name = "aequora-registry-codegen"
+version = "0.1.0"
+dependencies = [
+ "aequora-registry-types",
+ "blake3",
+ "ron",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-registry-generated"
+version = "0.1.0"
+dependencies = [
+ "aequora-registry-codegen",
+ "aequora-registry-types",
+]
+
+[[package]]
+name = "aequora-registry-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-replay"
 version = "0.1.0"
 dependencies = [
@@ -889,6 +928,7 @@ dependencies = [
  "aequora-protocol",
  "aequora-queue",
  "aequora-region",
+ "aequora-registry-generated",
  "aequora-replay",
  "aequora-scheduler",
  "aequora-schema",
