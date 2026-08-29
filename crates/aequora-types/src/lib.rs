@@ -424,34 +424,41 @@ pub struct HybridTimestamp {
 /// The textual values are part of the operator-facing compatibility surface. Human-readable error
 /// messages may change without changing these codes.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[repr(u32)]
 pub enum OperationalErrorCode {
     /// Global or tenant admission capacity was exhausted.
-    Overloaded,
+    Overloaded = 1,
     /// An operator-selected maintenance mode rejected synchronization work.
-    Maintenance,
+    Maintenance = 2,
     /// The client is outside the supported upgrade window.
-    UpgradeRequired,
+    UpgradeRequired = 3,
     /// Authentication or authenticated identity validation failed.
-    Authentication,
+    Authentication = 4,
     /// Protocol framing, compatibility, or structural validation failed.
-    Protocol,
+    Protocol = 5,
     /// Authoritative persistence was unavailable or failed.
-    Storage,
+    Storage = 6,
     /// A domain conflict requires explicit resolution.
-    Conflict,
+    Conflict = 7,
     /// Request data failed a non-protocol validation rule.
-    Validation,
+    Validation = 8,
     /// A bounded receive, execution, or dependency deadline elapsed.
-    Deadline,
+    Deadline = 9,
     /// The server is draining and no longer admits new work.
-    Draining,
+    Draining = 10,
     /// A wire or decompressed payload exceeded a configured bound.
-    PayloadLimit,
+    PayloadLimit = 11,
     /// Authority identity, epoch, role, or fencing rejected the request.
-    Authority,
+    Authority = 12,
 }
 
 impl OperationalErrorCode {
+    /// Stable numeric registry identity. Never derive this from declaration order.
+    #[must_use]
+    pub const fn registry_id(self) -> u32 {
+        self as u32
+    }
+
     /// Stable machine-readable code sent through operational boundaries.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
