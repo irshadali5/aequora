@@ -25,6 +25,24 @@ pub const MAX_SELECTORS: usize = 32;
 pub const MAX_SECTIONS: usize = 64;
 pub const MAX_RELATIVE_PATH_BYTES: usize = 512;
 
+/// Build provenance for the canonical durable registry, safe for authenticated diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct DurableRegistryProvenance {
+    pub generation: u64,
+    pub digest: &'static str,
+    pub entry_count: usize,
+}
+
+/// Returns the immutable registry identity embedded into this binary.
+#[must_use]
+pub const fn durable_registry_provenance() -> DurableRegistryProvenance {
+    DurableRegistryProvenance {
+        generation: aequora_registry_generated::REGISTRY_GENERATION,
+        digest: aequora_registry_generated::REGISTRY_DIGEST,
+        entry_count: aequora_registry_generated::ENTRIES.len(),
+    }
+}
+
 macro_rules! uuid_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
