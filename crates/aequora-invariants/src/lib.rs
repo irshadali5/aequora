@@ -468,11 +468,29 @@ pub enum InvariantId {
     RegistryRuntimeImmutability,
     /// Supported historical artifacts retain durable-ID resolution.
     RegistryHistoricalResolution,
+    /// Certification tests only observable semantics, never physical implementation choices.
+    CertificationSemanticOnly,
+    /// A tier cannot be claimed when a required test fails, is skipped, or is unsupported.
+    CertificationTierTruthfulness,
+    /// Evidence binds the exact subject, features, suite, and environment.
+    CertificationExactBinding,
+    /// Claimed capabilities remain unverified until their required tests pass.
+    CertificationCapabilityTruthfulness,
+    /// Certification never replaces runtime input validation or startup safety checks.
+    CertificationRuntimeValidation,
+    /// Historical certification artifacts remain immutable and verifiable.
+    CertificationArtifactImmutability,
+    /// Evidence hashes and signatures are verified before trust is accepted.
+    CertificationEvidenceIntegrity,
+    /// Performance characterization cannot substitute for correctness evidence.
+    CertificationCorrectnessPriority,
+    /// Advisories change lifecycle status without reusing certification identity.
+    CertificationLifecycleIdentity,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 229] = [
+    pub const ALL: [Self; 238] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -702,6 +720,15 @@ impl InvariantId {
         Self::RegistrySecurityReview,
         Self::RegistryRuntimeImmutability,
         Self::RegistryHistoricalResolution,
+        Self::CertificationSemanticOnly,
+        Self::CertificationTierTruthfulness,
+        Self::CertificationExactBinding,
+        Self::CertificationCapabilityTruthfulness,
+        Self::CertificationRuntimeValidation,
+        Self::CertificationArtifactImmutability,
+        Self::CertificationEvidenceIntegrity,
+        Self::CertificationCorrectnessPriority,
+        Self::CertificationLifecycleIdentity,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -938,6 +965,15 @@ impl InvariantId {
             Self::RegistrySecurityReview => "AEQ-INV-REGISTRY007",
             Self::RegistryRuntimeImmutability => "AEQ-INV-REGISTRY008",
             Self::RegistryHistoricalResolution => "AEQ-INV-REGISTRY009",
+            Self::CertificationSemanticOnly => "AEQ-INV-CERT001",
+            Self::CertificationTierTruthfulness => "AEQ-INV-CERT002",
+            Self::CertificationExactBinding => "AEQ-INV-CERT003",
+            Self::CertificationCapabilityTruthfulness => "AEQ-INV-CERT004",
+            Self::CertificationRuntimeValidation => "AEQ-INV-CERT005",
+            Self::CertificationArtifactImmutability => "AEQ-INV-CERT006",
+            Self::CertificationEvidenceIntegrity => "AEQ-INV-CERT007",
+            Self::CertificationCorrectnessPriority => "AEQ-INV-CERT008",
+            Self::CertificationLifecycleIdentity => "AEQ-INV-CERT009",
         }
     }
 
@@ -1619,6 +1655,33 @@ impl InvariantId {
             Self::RegistryHistoricalResolution => {
                 "supported replay audit and incident tooling can resolve retained historical IDs"
             }
+            Self::CertificationSemanticOnly => {
+                "certification evaluates observable semantics rather than physical implementation choices"
+            }
+            Self::CertificationTierTruthfulness => {
+                "a certification tier is never claimed when a required test fails is skipped or is unsupported"
+            }
+            Self::CertificationExactBinding => {
+                "certification evidence binds the exact subject features suite and execution environment"
+            }
+            Self::CertificationCapabilityTruthfulness => {
+                "a claimed capability remains unverified until every required capability test passes"
+            }
+            Self::CertificationRuntimeValidation => {
+                "certification never replaces runtime validation compatibility negotiation or startup safety checks"
+            }
+            Self::CertificationArtifactImmutability => {
+                "historical certification artifacts remain immutable content-addressed and verifiable"
+            }
+            Self::CertificationEvidenceIntegrity => {
+                "evidence hashes and signatures are verified before certification trust is accepted"
+            }
+            Self::CertificationCorrectnessPriority => {
+                "performance characterization cannot substitute for a failed correctness requirement"
+            }
+            Self::CertificationLifecycleIdentity => {
+                "suspension revocation and supersession retain the original certification identity"
+            }
         }
     }
 
@@ -1860,6 +1923,15 @@ impl InvariantId {
             Self::RegistrySecurityReview => 226,
             Self::RegistryRuntimeImmutability => 227,
             Self::RegistryHistoricalResolution => 228,
+            Self::CertificationSemanticOnly => 229,
+            Self::CertificationTierTruthfulness => 230,
+            Self::CertificationExactBinding => 231,
+            Self::CertificationCapabilityTruthfulness => 232,
+            Self::CertificationRuntimeValidation => 233,
+            Self::CertificationArtifactImmutability => 234,
+            Self::CertificationEvidenceIntegrity => 235,
+            Self::CertificationCorrectnessPriority => 236,
+            Self::CertificationLifecycleIdentity => 237,
         }
     }
 }
@@ -1911,7 +1983,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 229] = [
+pub static REGISTRY: [InvariantEntry; 238] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -3514,6 +3586,69 @@ pub static REGISTRY: [InvariantEntry; 229] = [
         "historical_id_resolution",
         "registry_history_contract",
         "registry_historical_unknown_total",
+    ),
+    entry(
+        InvariantId::CertificationSemanticOnly,
+        "certification_semantic_observation_only",
+        "implementation_independence",
+        "conformance_observation_contract",
+        "certification_physical_assumption_total",
+    ),
+    entry(
+        InvariantId::CertificationTierTruthfulness,
+        "certification_required_tests_pass",
+        "required_skip_failure_matrix",
+        "conformance_tier_contract",
+        "certification_false_tier_total",
+    ),
+    entry(
+        InvariantId::CertificationExactBinding,
+        "certification_exact_subject_binding",
+        "binary_feature_environment_substitution",
+        "conformance_identity_contract",
+        "certification_binding_mismatch_total",
+    ),
+    entry(
+        InvariantId::CertificationCapabilityTruthfulness,
+        "certification_capability_evidence",
+        "false_capability_advertisement",
+        "conformance_capability_contract",
+        "certification_unverified_capability_total",
+    ),
+    entry(
+        InvariantId::CertificationRuntimeValidation,
+        "certification_runtime_checks_preserved",
+        "certified_invalid_input",
+        "conformance_runtime_contract",
+        "certification_validation_bypass_total",
+    ),
+    entry(
+        InvariantId::CertificationArtifactImmutability,
+        "certification_content_identity",
+        "historical_artifact_tamper",
+        "conformance_artifact_contract",
+        "certification_artifact_tamper_total",
+    ),
+    entry(
+        InvariantId::CertificationEvidenceIntegrity,
+        "certification_hash_signature_verification",
+        "report_and_signature_tamper",
+        "conformance_evidence_contract",
+        "certification_evidence_invalid_total",
+    ),
+    entry(
+        InvariantId::CertificationCorrectnessPriority,
+        "certification_correctness_precedes_performance",
+        "fast_but_incorrect_subject",
+        "conformance_correctness_contract",
+        "certification_performance_override_total",
+    ),
+    entry(
+        InvariantId::CertificationLifecycleIdentity,
+        "certification_lifecycle_identity_stable",
+        "suspend_revoke_supersede_matrix",
+        "conformance_catalog_contract",
+        "certification_identity_reuse_total",
     ),
 ];
 
