@@ -44,6 +44,8 @@ pub use aequora_profile as profile;
 pub use aequora_protocol as protocol;
 pub use aequora_queue as queue;
 pub use aequora_region as region;
+pub use aequora_registry_generated as registry;
+pub use aequora_registry_types as registry_types;
 pub use aequora_replay as replay;
 pub use aequora_routing as routing;
 pub use aequora_scheduler as scheduler;
