@@ -34,6 +34,7 @@ aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }

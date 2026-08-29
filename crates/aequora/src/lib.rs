@@ -19,6 +19,7 @@ pub use aequora_compat as compatibility;
 pub use aequora_compute as compute;
 pub use aequora_config as config;
 pub use aequora_conflict as conflict;
+pub use aequora_conformance as conformance;
 pub use aequora_coordination as coordination;
 pub use aequora_crdt as crdt;
 pub use aequora_crypto as crypto;
