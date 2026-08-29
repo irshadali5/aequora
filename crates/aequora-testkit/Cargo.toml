@@ -35,6 +35,7 @@ aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
+aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
