@@ -148,6 +148,7 @@ proptest! {
             minimum_active_cursor: Some(Sequence(active)),
             retention_sequence: Sequence(retention),
             audit_sequence: audit.map(Sequence),
+            minimum_pinning_consumer_cursor: None,
         });
         if let Some(plan) = plan {
             prop_assert!(plan.through.0 <= snapshot);

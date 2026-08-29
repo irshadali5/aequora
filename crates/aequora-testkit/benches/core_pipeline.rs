@@ -141,6 +141,7 @@ fn core_pipeline(criterion: &mut Criterion) {
                 minimum_active_cursor: Some(Sequence(9_000)),
                 retention_sequence: Sequence(8_000),
                 audit_sequence: Some(Sequence(7_000)),
+                minimum_pinning_consumer_cursor: None,
             }))
         });
     });

@@ -112,6 +112,8 @@ pub struct CompactionInputs {
     pub retention_sequence: Sequence,
     /// Optional upper bound when the sync journal also serves audit retention.
     pub audit_sequence: Option<Sequence>,
+    /// Optional upper bound held by the slowest justified Part 28 `PinJournal` consumer.
+    pub minimum_pinning_consumer_cursor: Option<Sequence>,
 }
 
 /// Conservative inclusive journal-deletion boundary.
@@ -131,6 +133,9 @@ pub fn plan_compaction(inputs: CompactionInputs) -> Option<CompactionPlan> {
         .min(inputs.retention_sequence);
     if let Some(audit) = inputs.audit_sequence {
         through = through.min(audit);
+    }
+    if let Some(consumer) = inputs.minimum_pinning_consumer_cursor {
+        through = through.min(consumer);
     }
     (through.0 > 0).then_some(CompactionPlan { through })
 }
@@ -196,11 +201,12 @@ mod tests {
             minimum_active_cursor: Some(Sequence(80)),
             retention_sequence: Sequence(90),
             audit_sequence: Some(Sequence(70)),
+            minimum_pinning_consumer_cursor: Some(Sequence(60)),
         });
         assert_eq!(
             plan,
             Some(CompactionPlan {
-                through: Sequence(70)
+                through: Sequence(60)
             })
         );
         assert_eq!(
@@ -209,6 +215,7 @@ mod tests {
                 minimum_active_cursor: None,
                 retention_sequence: Sequence(90),
                 audit_sequence: None,
+                minimum_pinning_consumer_cursor: None,
             }),
             None
         );
