@@ -16,6 +16,7 @@ aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
+aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
