@@ -376,11 +376,29 @@ pub enum InvariantId {
     AdminDataPlaneIndependence,
     /// High-risk completion requires verified postconditions.
     AdminVerifiedCompletion,
+    /// Diagnostic evidence never becomes authoritative business state.
+    DiagnosticNonAuthoritative,
+    /// Ordinary bundles exclude secret material by construction.
+    DiagnosticSecretExclusion,
+    /// Every bundle declares schema, scope, completeness, and content digest.
+    DiagnosticManifestCompleteness,
+    /// Reproduction never performs real external side effects.
+    DiagnosticReplaySideEffectIsolation,
+    /// Collection has explicit size, time, file, and record bounds.
+    DiagnosticCollectionBounds,
+    /// Explanations preserve evidence-source confidence.
+    DiagnosticEvidenceConfidence,
+    /// Redaction and governance precede artifact publication.
+    DiagnosticPrePublicationSanitization,
+    /// Verified bundles passed required schema, hash, and signature checks.
+    DiagnosticVerifiedBundle,
+    /// Replay cannot mutate production authority or client state.
+    DiagnosticReplayProductionIsolation,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 183] = [
+    pub const ALL: [Self; 192] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -564,6 +582,15 @@ impl InvariantId {
         Self::AdminOverrideSeparation,
         Self::AdminDataPlaneIndependence,
         Self::AdminVerifiedCompletion,
+        Self::DiagnosticNonAuthoritative,
+        Self::DiagnosticSecretExclusion,
+        Self::DiagnosticManifestCompleteness,
+        Self::DiagnosticReplaySideEffectIsolation,
+        Self::DiagnosticCollectionBounds,
+        Self::DiagnosticEvidenceConfidence,
+        Self::DiagnosticPrePublicationSanitization,
+        Self::DiagnosticVerifiedBundle,
+        Self::DiagnosticReplayProductionIsolation,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -754,6 +781,15 @@ impl InvariantId {
             Self::AdminOverrideSeparation => "AEQ-INV-ADMIN007",
             Self::AdminDataPlaneIndependence => "AEQ-INV-ADMIN008",
             Self::AdminVerifiedCompletion => "AEQ-INV-ADMIN009",
+            Self::DiagnosticNonAuthoritative => "AEQ-INV-DIAG001",
+            Self::DiagnosticSecretExclusion => "AEQ-INV-DIAG002",
+            Self::DiagnosticManifestCompleteness => "AEQ-INV-DIAG003",
+            Self::DiagnosticReplaySideEffectIsolation => "AEQ-INV-DIAG004",
+            Self::DiagnosticCollectionBounds => "AEQ-INV-DIAG005",
+            Self::DiagnosticEvidenceConfidence => "AEQ-INV-DIAG006",
+            Self::DiagnosticPrePublicationSanitization => "AEQ-INV-DIAG007",
+            Self::DiagnosticVerifiedBundle => "AEQ-INV-DIAG008",
+            Self::DiagnosticReplayProductionIsolation => "AEQ-INV-DIAG009",
         }
     }
 
@@ -1297,6 +1333,33 @@ impl InvariantId {
             Self::AdminVerifiedCompletion => {
                 "high-risk admin actions complete only after their defined postconditions verify"
             }
+            Self::DiagnosticNonAuthoritative => {
+                "incident diagnostics never become a source of authoritative business state"
+            }
+            Self::DiagnosticSecretExclusion => {
+                "ordinary incident bundles never contain private keys authentication secrets or raw secret values"
+            }
+            Self::DiagnosticManifestCompleteness => {
+                "every bundle declares schema selectors completeness and cryptographic content digest"
+            }
+            Self::DiagnosticReplaySideEffectIsolation => {
+                "diagnostic reproduction records simulated intents without real external side effects"
+            }
+            Self::DiagnosticCollectionBounds => {
+                "diagnostic collection obeys explicit size time file and record bounds"
+            }
+            Self::DiagnosticEvidenceConfidence => {
+                "forensic explanations distinguish authoritative durable derived and best-effort evidence"
+            }
+            Self::DiagnosticPrePublicationSanitization => {
+                "governance and redaction policy is applied before diagnostic artifact publication"
+            }
+            Self::DiagnosticVerifiedBundle => {
+                "a verified bundle passed required schema hash and signature checks for its mode"
+            }
+            Self::DiagnosticReplayProductionIsolation => {
+                "diagnostic replay cannot mutate production authority or production client state"
+            }
         }
     }
 
@@ -1492,6 +1555,15 @@ impl InvariantId {
             Self::AdminOverrideSeparation => 180,
             Self::AdminDataPlaneIndependence => 181,
             Self::AdminVerifiedCompletion => 182,
+            Self::DiagnosticNonAuthoritative => 183,
+            Self::DiagnosticSecretExclusion => 184,
+            Self::DiagnosticManifestCompleteness => 185,
+            Self::DiagnosticReplaySideEffectIsolation => 186,
+            Self::DiagnosticCollectionBounds => 187,
+            Self::DiagnosticEvidenceConfidence => 188,
+            Self::DiagnosticPrePublicationSanitization => 189,
+            Self::DiagnosticVerifiedBundle => 190,
+            Self::DiagnosticReplayProductionIsolation => 191,
         }
     }
 }
@@ -1543,7 +1615,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub const REGISTRY: [InvariantEntry; 183] = [
+pub static REGISTRY: [InvariantEntry; 192] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -2824,6 +2896,69 @@ pub const REGISTRY: [InvariantEntry; 183] = [
         "admin_postcondition_failure",
         "admin_executor_verification_contract",
         "admin_unverified_completion_total",
+    ),
+    entry(
+        InvariantId::DiagnosticNonAuthoritative,
+        "diagnostic_non_authoritative",
+        "diagnostic_read_only_state",
+        "diagnostic_provider_contract",
+        "diagnostic_authority_mutation_total",
+    ),
+    entry(
+        InvariantId::DiagnosticSecretExclusion,
+        "diagnostic_secret_exclusion",
+        "diagnostic_secret_redaction",
+        "diagnostic_sanitizer_contract",
+        "diagnostic_secret_violation_total",
+    ),
+    entry(
+        InvariantId::DiagnosticManifestCompleteness,
+        "diagnostic_manifest_complete",
+        "diagnostic_manifest_validation",
+        "diagnostic_bundle_contract",
+        "diagnostic_manifest_invalid_total",
+    ),
+    entry(
+        InvariantId::DiagnosticReplaySideEffectIsolation,
+        "diagnostic_replay_side_effect_isolation",
+        "diagnostic_replay_capture_only",
+        "diagnostic_replay_contract",
+        "diagnostic_real_side_effect_total",
+    ),
+    entry(
+        InvariantId::DiagnosticCollectionBounds,
+        "diagnostic_collection_bounds",
+        "diagnostic_archive_limit_matrix",
+        "diagnostic_provider_bounds_contract",
+        "diagnostic_limit_rejection_total",
+    ),
+    entry(
+        InvariantId::DiagnosticEvidenceConfidence,
+        "diagnostic_evidence_confidence",
+        "diagnostic_explanation_sources",
+        "diagnostic_view_contract",
+        "diagnostic_unlabelled_inference_total",
+    ),
+    entry(
+        InvariantId::DiagnosticPrePublicationSanitization,
+        "diagnostic_prepublication_sanitization",
+        "diagnostic_publication_redaction",
+        "diagnostic_sanitizer_contract",
+        "diagnostic_unsanitized_publish_total",
+    ),
+    entry(
+        InvariantId::DiagnosticVerifiedBundle,
+        "diagnostic_verified_bundle",
+        "diagnostic_hash_signature_matrix",
+        "diagnostic_verifier_contract",
+        "diagnostic_verification_failed_total",
+    ),
+    entry(
+        InvariantId::DiagnosticReplayProductionIsolation,
+        "diagnostic_replay_production_isolation",
+        "diagnostic_production_attachment_rejected",
+        "diagnostic_replay_contract",
+        "diagnostic_production_replay_total",
     ),
 ];
 
