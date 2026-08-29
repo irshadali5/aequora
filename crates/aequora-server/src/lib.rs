@@ -3,6 +3,9 @@
 /// Thin server-side boundary for a separately hosted operational control plane.
 pub mod admin;
 
+/// Read-only, tenant-authorized forensic collection boundary.
+pub mod diagnostics;
+
 /// Database-neutral server orchestration for durable background work.
 pub mod jobs;
 
@@ -21,6 +24,7 @@ impl AequoraServer {
 /// Focused imports for application server integrations.
 pub mod prelude {
     pub use crate::admin::{AdminControlPlane, AdminPlaneConfig};
+    pub use crate::diagnostics::{DiagnosticAccessPolicy, ServerDiagnosticCollector};
     pub use crate::jobs::{
         JobAccessPolicy, JobAdminService, JobWorkerConfig, JobWorkerPlanner, WorkerShutdown,
     };

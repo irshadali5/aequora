@@ -15,6 +15,7 @@ aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
