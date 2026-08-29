@@ -25,6 +25,30 @@ pub struct AuthContext {
     pub device_id: DeviceId,
 }
 
+impl AuthContext {
+    /// Converts a policy-validated security identity into the mandatory sync identity.
+    ///
+    /// This is the intended bridge from transport authentication into authoritative execution.
+    /// A protected sync request cannot proceed without an active, server-validated device binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`aequora_security::SecurityError::DeviceBindingRequired`] when the validated
+    /// authentication context does not bind an active device required by synchronization.
+    pub fn from_validated_security(
+        context: &aequora_security::ValidatedAuthContext,
+    ) -> Result<Self, aequora_security::SecurityError> {
+        let device_id = context
+            .device_id()
+            .ok_or(aequora_security::SecurityError::DeviceBindingRequired)?;
+        Ok(Self {
+            actor_id: context.principal_id(),
+            tenant_id: context.tenant_id(),
+            device_id,
+        })
+    }
+}
+
 /// Untrusted operation before authenticated identity claims are checked.
 #[derive(Clone, Copy, Debug)]
 pub struct IncomingOperation<'a>(&'a OperationEnvelope);
