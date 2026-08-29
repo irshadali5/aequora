@@ -435,6 +435,8 @@ Normative logical schema for:
 
 ### Part 26 — Compatibility With Existing / Legacy Applications
 
+Implementation evidence: [Part 26 completion report](docs/legacy-application-compatibility-incremental-adoption-completion.md).
+
 - shadow mode;
 - read-only observation;
 - CDC bridge;
