@@ -1,0 +1,7 @@
+(
+    test_id: 4,
+    status: Failed,
+    seed: Some(7301),
+    evidence: ["cursor-before-state-commit"],
+    message: "injected crash exposed cursor advancement before durable apply",
+)

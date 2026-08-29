@@ -1,0 +1,29 @@
+(
+    subject: (
+        name: "reference-storage-fixture",
+        version: "0.1.0",
+        source_commit: "fixture-source-commit",
+        binary_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        enabled_features: [],
+        build_configuration: {},
+    ),
+    environment: (
+        target: "x86_64-unknown-linux-gnu",
+        operating_system: "linux",
+        architecture: "x86_64",
+        rust_version: "1.87",
+        database_engine: None,
+        database_version: None,
+        provider_versions: {},
+    ),
+    profile: StorageCore,
+    tier: CoreTransactional,
+    claimed_capabilities: [],
+    observations: [
+        (test_id: 1, status: Passed, seed: Some(100), evidence: ["atomic-local-fixture"], message: "local mutation and intent committed atomically"),
+        (test_id: 2, status: Passed, seed: Some(101), evidence: ["atomic-authority-fixture"], message: "authority publication committed atomically"),
+        (test_id: 3, status: Passed, seed: Some(102), evidence: ["idempotency-fixture"], message: "duplicate operation retained one effect"),
+    ],
+    limitations: [],
+    issued_at_unix_ms: 1,
+)
