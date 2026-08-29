@@ -20,6 +20,7 @@ aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
+aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-feed = { version = "0.1.0", path = "../aequora-feed" }

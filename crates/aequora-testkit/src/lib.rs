@@ -1,6 +1,7 @@
 //! Deterministic, database-free stores and transport for synchronization tests.
 
 pub mod audit;
+pub mod conformance;
 pub mod contracts;
 pub mod large_bootstrap;
 pub mod live;
