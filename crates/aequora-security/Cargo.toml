@@ -1,0 +1,22 @@
+[package]
+name = "aequora-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Runtime-neutral security threat-model and abuse-resistance contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+blake3.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+ron.workspace = true
+
+[lints]
+workspace = true
