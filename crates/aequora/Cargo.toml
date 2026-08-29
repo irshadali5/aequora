@@ -46,6 +46,8 @@ aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
 aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
+aequora-legacy = { version = "0.1.0", path = "../aequora-legacy" }
+aequora-legacy-api = { version = "0.1.0", path = "../aequora-legacy-api" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-macros = { version = "0.1.0", path = "../aequora-macros" }
 aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }

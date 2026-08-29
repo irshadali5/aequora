@@ -28,6 +28,8 @@ pub use aequora_governance as governance;
 pub use aequora_integrity as integrity;
 pub use aequora_jobs as jobs;
 pub use aequora_journal as journal;
+pub use aequora_legacy as legacy;
+pub use aequora_legacy_api as legacy_api;
 pub use aequora_live as live;
 #[cfg(feature = "record-sync")]
 pub use aequora_mapping as mapping;
