@@ -1,0 +1,138 @@
+# Aequora durable registry
+
+Generation: `1`  
+Digest: `72abedfde41101068f2b3dd5de88984ae4490a029a76cd1572f3a2a1c169a070`
+
+| Domain | ID | Name | Status | Owner | Schema | Description |
+|---|---:|---|---|---|---:|---|
+| capability | 1 | PostcardV1 | Current | protocol | - | Postcard version one payload codec. |
+| capability | 2 | Zstd | Current | transport | - | Zstandard payload compression. |
+| capability | 3 | SnapshotV1 | Current | bootstrap | - | Snapshot format version one. |
+| capability | 4 | Tombstones | Current | protocol | - | Durable tombstone semantics. |
+| capability | 5 | StreamingSnapshots | Current | bootstrap | - | Bounded streaming snapshot transfer. |
+| capability | 6 | PushHints | Current | live-sync | - | Advisory push notifications. |
+| capability | 7 | Quic | Current | transport | - | QUIC transport support. |
+| capability | 8 | MultiRegion | Current | regional | - | Epoch-aware regional reads. |
+| capability | 9 | LineageV1 | Current | replay | - | Operation lineage format version one. |
+| capability | 10 | IntegrityV1 | Current | integrity | - | Integrity proof format version one. |
+| capability | 11 | ScopeV1 | Current | scope | - | Scope generation semantics version one. |
+| capability | 12 | LiveV1 | Current | live-sync | - | Live synchronization hints version one. |
+| capability | 13 | SignedSnapshotV1 | Current | crypto | - | Signed snapshot envelope version one. |
+| capability | 14 | EncryptedSnapshotV1 | Current | crypto | - | Encrypted snapshot envelope version one. |
+| capability | 15 | DeviceSignatureV1 | Current | security | - | Device operation signature version one. |
+| capability | 16 | AuthorityEpochV1 | Current | authority | - | Authority epoch fencing semantics. |
+| capability | 17 | ResourceConstrainedV1 | Current | client | - | Coarse constrained-client behavior profile. |
+| capability | 18 | NegotiationV1 | Current | protocol | - | Explicit compatibility negotiation version one. |
+| profile | 1 | ImmutableAppendOnly | Current | semantics | 1 | Append-only immutable aggregate semantics. |
+| profile | 2 | OptimisticVersioned | Current | semantics | 1 | Reject-stale optimistic aggregate semantics. |
+| profile | 3 | Commutative | Current | semantics | 1 | Order-independent commutative operation semantics. |
+| profile | 4 | LastWriterWins | Current | semantics | 1 | Explicit last-writer-wins field semantics. |
+| profile | 5 | ManualConflict | Current | semantics | 1 | Conflict materialization requiring manual resolution. |
+| profile | 6 | StrongAggregate | Current | semantics | 1 | Authority-serialized strong aggregate semantics. |
+| profile | 7 | ServerOnly | Current | semantics | 1 | Server-originated operation semantics. |
+| profile | 8 | DeviceLocal | Current | semantics | 1 | Device-local non-replicated semantics. |
+| profile | 9 | DerivedProjection | Current | semantics | 1 | Rebuildable derived projection semantics. |
+| error | 1 | Overloaded | Current | runtime | - | Admission capacity was exhausted. |
+| error | 2 | Maintenance | Current | operations | - | Maintenance policy rejected work. |
+| error | 3 | UpgradeRequired | Current | compatibility | - | Client is outside the support window. |
+| error | 4 | Authentication | Current | security | - | Authenticated identity validation failed. |
+| error | 5 | Protocol | Current | protocol | - | Protocol framing or compatibility validation failed. |
+| error | 6 | Storage | Current | storage | - | Authoritative persistence failed. |
+| error | 7 | Conflict | Current | semantics | - | Domain conflict requires resolution. |
+| error | 8 | Validation | Current | protocol | - | Request data failed validation. |
+| error | 9 | Deadline | Current | runtime | - | A bounded deadline elapsed. |
+| error | 10 | Draining | Current | operations | - | Server is draining new work. |
+| error | 11 | PayloadLimit | Current | security | - | Wire or decompressed payload exceeded policy. |
+| error | 12 | Authority | Current | authority | - | Authority role, epoch, or fencing rejected work. |
+| error | 100 | UnsupportedOperationKind | Current | registry | - | Operation kind has no canonical registry entry. |
+| protocol | 1 | ProtocolV1 | Current | protocol | - | Initial checksummed Aequora synchronization protocol. |
+| message | 1 | SyncRequest | Current | protocol | - | Bounded client synchronization request. |
+| message | 2 | SyncResponse | Current | protocol | - | Bounded authoritative synchronization response. |
+| message | 3 | BootstrapRequest | Current | protocol | - | Bootstrap negotiation request. |
+| message | 4 | BootstrapResponse | Current | protocol | - | Bootstrap negotiation response. |
+| message | 5 | SnapshotStreamRequest | Current | protocol | - | Request for a bounded snapshot page. |
+| message | 6 | SnapshotStreamResponse | Current | protocol | - | One bounded snapshot page response. |
+| message | 7 | PushHint | Current | live-sync | - | Advisory journal-advance notification. |
+| message | 8 | TransportError | Current | protocol | - | Payload-free transport failure response. |
+| permission | 1 | AuthorityView | Current | control-plane | - | View authority state. |
+| permission | 2 | AuthorityPromote | Current | control-plane | - | Promote an authority candidate. |
+| permission | 3 | AuthorityForcePromote | Current | control-plane | - | Force authority promotion under reviewed policy. |
+| permission | 10 | JobsView | Current | control-plane | - | View durable jobs. |
+| permission | 11 | JobsRetry | Current | control-plane | - | Retry a durable job. |
+| permission | 12 | JobsReconcile | Current | control-plane | - | Reconcile ambiguous durable work. |
+| permission | 13 | JobsCancel | Current | control-plane | - | Cancel a durable job. |
+| permission | 14 | JobsQuarantine | Current | control-plane | - | Quarantine a durable job. |
+| permission | 20 | SnapshotView | Current | control-plane | - | View snapshot state. |
+| permission | 21 | SnapshotBuild | Current | control-plane | - | Build a snapshot. |
+| permission | 22 | SnapshotVerify | Current | control-plane | - | Verify a snapshot. |
+| permission | 23 | SnapshotExpire | Current | control-plane | - | Expire a snapshot. |
+| permission | 30 | IntegrityScan | Current | control-plane | - | Run an integrity scan. |
+| permission | 31 | IntegrityRepair | Current | control-plane | - | Run a reviewed integrity repair. |
+| permission | 40 | GovernancePlan | Current | governance | - | Create a governance plan. |
+| permission | 41 | GovernanceExecute | Current | governance | - | Execute a reviewed governance plan. |
+| permission | 42 | LegalHoldManage | Current | governance | - | Manage legal holds. |
+| permission | 50 | CryptoView | Current | crypto | - | View key lifecycle state. |
+| permission | 51 | CryptoRotate | Current | crypto | - | Rotate a managed key. |
+| permission | 52 | CryptoRevoke | Current | crypto | - | Revoke a managed key. |
+| permission | 53 | CryptoDestroy | Current | crypto | - | Destroy key material under policy. |
+| permission | 60 | CompatibilityView | Current | compatibility | - | View compatibility policy. |
+| permission | 61 | CompatibilityUpdate | Current | compatibility | - | Update compatibility policy. |
+| permission | 70 | RegionView | Current | regional | - | View regional state. |
+| permission | 71 | RegionDrain | Current | regional | - | Drain a region. |
+| permission | 80 | MaintenanceManage | Current | control-plane | - | Manage maintenance and emergency stops. |
+| permission | 90 | TenantManage | Current | control-plane | - | Manage tenant operational state. |
+| permission | 91 | DeviceManage | Current | security | - | Manage device trust state. |
+| permission | 92 | ScopeManage | Current | scope | - | Manage scope generations. |
+| permission | 100 | DiagnosticsView | Current | diagnostics | - | View authenticated diagnostics. |
+| permission | 101 | DiagnosticsExport | Current | diagnostics | - | Export redacted diagnostic artifacts. |
+| permission | 110 | ConfigView | Current | control-plane | - | View dynamic configuration. |
+| permission | 111 | ConfigUpdate | Current | control-plane | - | Update dynamic configuration. |
+| permission | 120 | OperationsView | Current | control-plane | - | View operation status. |
+| permission | 130 | ConsumersView | Current | integrations | - | View feed consumers. |
+| permission | 131 | ConsumersManage | Current | integrations | - | Manage feed consumer activation. |
+| permission | 132 | ConsumersReset | Current | integrations | - | Reset feed consumer state. |
+| admin-action | 1 | PromoteAuthority | Current | control-plane | - | Promote an authority candidate. |
+| admin-action | 2 | ForcePromoteAuthority | Current | control-plane | - | Force authority promotion. |
+| admin-action | 10 | RetryJob | Current | control-plane | - | Retry a durable job. |
+| admin-action | 11 | ReconcileJob | Current | control-plane | - | Reconcile ambiguous durable work. |
+| admin-action | 12 | CancelJob | Current | control-plane | - | Cancel a durable job. |
+| admin-action | 13 | QuarantineJob | Current | control-plane | - | Quarantine a durable job. |
+| admin-action | 20 | BuildSnapshot | Current | bootstrap | - | Build a snapshot. |
+| admin-action | 21 | VerifySnapshot | Current | bootstrap | - | Verify a snapshot. |
+| admin-action | 22 | ExpireSnapshot | Current | bootstrap | - | Expire a snapshot. |
+| admin-action | 30 | ScanIntegrity | Current | integrity | - | Scan integrity state. |
+| admin-action | 31 | RepairIntegrity | Current | integrity | - | Repair integrity state. |
+| admin-action | 40 | ExecuteGovernancePlan | Current | governance | - | Execute a reviewed governance plan. |
+| admin-action | 41 | CreateLegalHold | Current | governance | - | Create a legal hold. |
+| admin-action | 42 | ReleaseLegalHold | Current | governance | - | Release a legal hold. |
+| admin-action | 50 | RotateKey | Current | crypto | - | Rotate a managed key. |
+| admin-action | 51 | RevokeKey | Current | crypto | - | Revoke a managed key. |
+| admin-action | 52 | DestroyKey | Current | crypto | - | Destroy managed key material. |
+| admin-action | 60 | UpdateCompatibility | Current | compatibility | - | Update compatibility policy. |
+| admin-action | 70 | DrainRegion | Current | regional | - | Drain a region. |
+| admin-action | 80 | SetMaintenanceMode | Current | control-plane | - | Set maintenance mode. |
+| admin-action | 81 | EmergencyStopWrites | Current | control-plane | - | Emergency stop authoritative writes. |
+| admin-action | 90 | SuspendTenant | Current | control-plane | - | Suspend a tenant. |
+| admin-action | 91 | SetTenantReadOnly | Current | control-plane | - | Set tenant read-only mode. |
+| admin-action | 92 | RevokeDevice | Current | security | - | Revoke a device. |
+| admin-action | 93 | ForceRebootstrap | Current | security | - | Force client rebootstrap. |
+| admin-action | 94 | BumpScopeGeneration | Current | scope | - | Bump a scope generation. |
+| admin-action | 100 | CreateExport | Current | governance | - | Create a governed export. |
+| admin-action | 101 | CreateIncidentBundle | Current | diagnostics | - | Create a redacted incident bundle. |
+| admin-action | 110 | UpdateDynamicConfig | Current | control-plane | - | Update dynamic configuration. |
+| admin-action | 111 | RollbackDynamicConfig | Current | control-plane | - | Rollback dynamic configuration. |
+| admin-action | 130 | PauseConsumer | Current | integrations | - | Pause a feed consumer. |
+| admin-action | 131 | ResumeConsumer | Current | integrations | - | Resume a feed consumer. |
+| admin-action | 132 | RebuildConsumer | Current | integrations | - | Rebuild a feed consumer projection. |
+| admin-action | 133 | ResetConsumer | Current | integrations | - | Reset feed consumer state. |
+| reason | 1 | PlannedMaintenance | Current | control-plane | - | Planned maintenance reason. |
+| reason | 2 | IncidentResponse | Current | control-plane | - | Incident response reason. |
+| reason | 3 | CustomerRequest | Current | control-plane | - | Customer request reason. |
+| reason | 4 | SecurityCompromise | Current | security | - | Security compromise reason. |
+| reason | 5 | Migration | Current | storage | - | Migration reason. |
+| reason | 6 | GovernanceRequirement | Current | governance | - | Governance requirement reason. |
+| reason | 7 | CapacityManagement | Current | operations | - | Capacity management reason. |
+| artifact-format | 1 | SnapshotV1 | Current | bootstrap | 1 | Streaming snapshot artifact format version one. |
+| artifact-format | 2 | IncidentBundleV1 | Current | diagnostics | 1 | Redacted reproducible incident bundle format version one. |
+| artifact-format | 3 | FeedArchiveV1 | Current | integrations | 1 | Multi-consumer change-feed archive format version one. |
+| artifact-format | 4 | ReplayBundleV1 | Current | replay | 1 | Deterministic replay bundle format version one. |
