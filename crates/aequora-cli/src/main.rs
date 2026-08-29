@@ -19,6 +19,10 @@ use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CURRENT_INTEGRITY_GENERATION, IntegrityError, IntegritySnapshot,
     PartitionScheme, RepairPlan,
 };
+use aequora_legacy::{
+    BridgeHealth, CutoverReadiness, CutoverVerification, LegacyMigrationManifest,
+    LegacyRetirementManifest, LegacySystemManifest, ShadowMatch, ShadowResult,
+};
 use aequora_migration::{
     CanonicalExport, CutoverBlocker, CutoverEvidence, ExportError, ExportLimits, ImportJob,
     verify_cutover,
@@ -104,6 +108,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("legacy") => legacy_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -111,7 +116,76 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+}
+
+fn legacy_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    let usage = "usage: aequora legacy <discover|map-verify|bridge-status|shadow-report|cutover-plan|verify|retire> <evidence.ron>";
+    let path = path.ok_or_else(|| CliError::Usage(usage.to_owned()))?;
+    match subject {
+        Some("discover") => {
+            let manifest: LegacySystemManifest = read_ron(path, 4 * 1024 * 1024)?;
+            Ok(format!(
+                "legacy discover: collections={} triggers={} procedures={} writers={} writes=0",
+                manifest.collections.len(),
+                manifest.triggers.len(),
+                manifest.procedures.len(),
+                manifest.scheduled_writers.len()
+            ))
+        }
+        Some("map-verify") => {
+            let manifest: LegacyMigrationManifest = read_ron(path, 4 * 1024 * 1024)?;
+            Ok(format!(
+                "legacy map verify: aggregates={} mapping_version={} decoder_version={} writes=0",
+                manifest.aggregate_types.len(),
+                manifest.mapping_version.get(),
+                manifest.decoder_version
+            ))
+        }
+        Some("bridge-status") => {
+            let health: BridgeHealth = read_ron(path, 1024 * 1024)?;
+            Ok(format!(
+                "legacy bridge status: state={:?} lag={} quarantine={} writes=0",
+                health.state, health.lag, health.quarantine_count
+            ))
+        }
+        Some("shadow-report") => {
+            let results: Vec<ShadowResult> = read_ron(path, 8 * 1024 * 1024)?;
+            let unexpected = results
+                .iter()
+                .filter(|result| result.match_state == ShadowMatch::UnexpectedDifference)
+                .count();
+            Ok(format!(
+                "legacy shadow report: samples={} unexpected={} writes=0",
+                results.len(),
+                unexpected
+            ))
+        }
+        Some("cutover-plan") => {
+            let readiness: CutoverReadiness = read_ron(path, 4 * 1024 * 1024)?;
+            let blockers = readiness.blockers();
+            Ok(format!(
+                "legacy cutover plan: ready={} blockers={} writes=0",
+                blockers.is_empty(),
+                blockers.len()
+            ))
+        }
+        Some("verify") => {
+            let verification: CutoverVerification = read_ron(path, 1024 * 1024)?;
+            Ok(format!(
+                "legacy verify: complete={} writes=0",
+                verification.complete()
+            ))
+        }
+        Some("retire") => {
+            let manifest: LegacyRetirementManifest = read_ron(path, 1024 * 1024)?;
+            Ok(format!(
+                "legacy retire: archive={} retain_id_map={} writes=0",
+                manifest.archive_reference, manifest.retain_id_map
+            ))
+        }
+        _ => Err(CliError::Usage(usage.to_owned())),
+    }
 }
 
 fn incident_command(
