@@ -1,0 +1,25 @@
+[package]
+name = "aequora-feed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Database-neutral multi-consumer authoritative change-feed contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+blake3.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+ron.workspace = true
+
+[lints]
+workspace = true
