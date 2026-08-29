@@ -412,11 +412,49 @@ pub enum InvariantId {
     LegacyGovernanceCoverage,
     /// Cutover completion requires fencing, final-boundary apply, and verification.
     LegacyVerifiedCutover,
+    /// Client claims are never accepted as authorization evidence without server validation.
+    SecurityServerValidatedClaims,
+    /// One operation identity cannot acquire different authoritative semantics.
+    SecurityPayloadImmutability,
+    /// Required security capabilities cannot be silently downgraded.
+    SecurityCapabilityFailClosed,
+    /// Every external input has explicit size and complexity bounds.
+    SecurityExternalInputBounds,
+    /// Known identifiers cannot bypass tenant isolation.
+    SecurityTenantIsolation,
+    /// Private keys and authentication secrets stay out of ordinary output.
+    SecuritySecretExclusion,
+    /// A stale authority epoch cannot silently resume trusted synchronization.
+    SecurityAuthorityRollback,
+    /// Irreversible side effects use idempotency and reconciliation.
+    SecuritySideEffectSafety,
+    /// Administrative overrides are more strongly authorized and audited.
+    SecurityAdminOverride,
+    /// Every integration boundary treats its inputs as untrusted.
+    SecurityIntegrationDistrust,
+    /// Every durable consumer owns an independent epoch-bound cursor.
+    FeedIndependentCursor,
+    /// Consumer cursors advance only after required effects are durable.
+    FeedDurableEffectBeforeCursor,
+    /// A stalled consumer cannot block authority, sync, or peers.
+    FeedConsumerIsolation,
+    /// Duplicate `EventId` delivery cannot duplicate an idempotent consumer effect.
+    FeedDuplicateIdempotency,
+    /// Consumers below the journal floor follow declared recovery policy.
+    FeedRetentionRecovery,
+    /// External feeds expose only authorized versioned projections.
+    FeedExternalProjectionSafety,
+    /// Partitioning preserves the declared ordering policy.
+    FeedOrderingSafety,
+    /// History-skipping resets require plan, authorization, and audit.
+    FeedResetSafety,
+    /// Governed consumer stores participate in governance and residency policy.
+    FeedGovernanceCoverage,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 201] = [
+    pub const ALL: [Self; 220] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -618,6 +656,25 @@ impl InvariantId {
         Self::LegacyShadowIsolation,
         Self::LegacyGovernanceCoverage,
         Self::LegacyVerifiedCutover,
+        Self::SecurityServerValidatedClaims,
+        Self::SecurityPayloadImmutability,
+        Self::SecurityCapabilityFailClosed,
+        Self::SecurityExternalInputBounds,
+        Self::SecurityTenantIsolation,
+        Self::SecuritySecretExclusion,
+        Self::SecurityAuthorityRollback,
+        Self::SecuritySideEffectSafety,
+        Self::SecurityAdminOverride,
+        Self::SecurityIntegrationDistrust,
+        Self::FeedIndependentCursor,
+        Self::FeedDurableEffectBeforeCursor,
+        Self::FeedConsumerIsolation,
+        Self::FeedDuplicateIdempotency,
+        Self::FeedRetentionRecovery,
+        Self::FeedExternalProjectionSafety,
+        Self::FeedOrderingSafety,
+        Self::FeedResetSafety,
+        Self::FeedGovernanceCoverage,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -826,6 +883,25 @@ impl InvariantId {
             Self::LegacyShadowIsolation => "AEQ-INV-LEG007",
             Self::LegacyGovernanceCoverage => "AEQ-INV-LEG008",
             Self::LegacyVerifiedCutover => "AEQ-INV-LEG009",
+            Self::SecurityServerValidatedClaims => "AEQ-INV-SEC001",
+            Self::SecurityPayloadImmutability => "AEQ-INV-SEC002",
+            Self::SecurityCapabilityFailClosed => "AEQ-INV-SEC003",
+            Self::SecurityExternalInputBounds => "AEQ-INV-SEC004",
+            Self::SecurityTenantIsolation => "AEQ-INV-SEC005",
+            Self::SecuritySecretExclusion => "AEQ-INV-SEC006",
+            Self::SecurityAuthorityRollback => "AEQ-INV-SEC007",
+            Self::SecuritySideEffectSafety => "AEQ-INV-SEC008",
+            Self::SecurityAdminOverride => "AEQ-INV-SEC009",
+            Self::SecurityIntegrationDistrust => "AEQ-INV-SEC010",
+            Self::FeedIndependentCursor => "AEQ-INV-FEED001",
+            Self::FeedDurableEffectBeforeCursor => "AEQ-INV-FEED002",
+            Self::FeedConsumerIsolation => "AEQ-INV-FEED003",
+            Self::FeedDuplicateIdempotency => "AEQ-INV-FEED004",
+            Self::FeedRetentionRecovery => "AEQ-INV-FEED005",
+            Self::FeedExternalProjectionSafety => "AEQ-INV-FEED006",
+            Self::FeedOrderingSafety => "AEQ-INV-FEED007",
+            Self::FeedResetSafety => "AEQ-INV-FEED008",
+            Self::FeedGovernanceCoverage => "AEQ-INV-FEED009",
         }
     }
 
@@ -1423,6 +1499,63 @@ impl InvariantId {
             Self::LegacyVerifiedCutover => {
                 "cutover completes only after writer fencing final-boundary apply and canonical verification"
             }
+            Self::SecurityServerValidatedClaims => {
+                "client tenant role scope priority and authority claims require server validation"
+            }
+            Self::SecurityPayloadImmutability => {
+                "one OperationId cannot produce different semantics through payload substitution"
+            }
+            Self::SecurityCapabilityFailClosed => {
+                "required security capabilities are never silently downgraded"
+            }
+            Self::SecurityExternalInputBounds => {
+                "every external collection payload archive graph and upload has explicit bounds"
+            }
+            Self::SecurityTenantIsolation => {
+                "known entity scope blob operation and snapshot identifiers do not bypass tenant isolation"
+            }
+            Self::SecuritySecretExclusion => {
+                "private keys and authentication secrets never enter logs diagnostics audit payloads or responses"
+            }
+            Self::SecurityAuthorityRollback => {
+                "a stale authority epoch cannot silently resume trusted synchronization"
+            }
+            Self::SecuritySideEffectSafety => {
+                "financial and irreversible side effects use explicit idempotency and reconciliation"
+            }
+            Self::SecurityAdminOverride => {
+                "admin override paths are more strongly authorized and audited than ordinary paths"
+            }
+            Self::SecurityIntegrationDistrust => {
+                "legacy import webhook diagnostic and provider inputs remain untrusted"
+            }
+            Self::FeedIndependentCursor => {
+                "every durable consumer has an independent cursor bound to authority identity and epoch"
+            }
+            Self::FeedDurableEffectBeforeCursor => {
+                "a consumer cursor advances only after its required effect is durably complete"
+            }
+            Self::FeedConsumerIsolation => {
+                "a stalled consumer cannot block authoritative commits synchronization or unrelated consumers"
+            }
+            Self::FeedDuplicateIdempotency => {
+                "duplicate EventId delivery cannot duplicate a declared idempotent consumer effect"
+            }
+            Self::FeedRetentionRecovery => {
+                "a consumer below the journal floor follows declared rebuild or recovery policy"
+            }
+            Self::FeedExternalProjectionSafety => {
+                "external feeds expose only explicitly versioned and authorized integration projections"
+            }
+            Self::FeedOrderingSafety => {
+                "parallel partitioning never silently weakens declared consumer ordering"
+            }
+            Self::FeedResetSafety => {
+                "history-skipping consumer reset requires an explicit authorized audited plan"
+            }
+            Self::FeedGovernanceCoverage => {
+                "governed consumer stores participate in governance and residency policy"
+            }
         }
     }
 
@@ -1636,6 +1769,25 @@ impl InvariantId {
             Self::LegacyShadowIsolation => 198,
             Self::LegacyGovernanceCoverage => 199,
             Self::LegacyVerifiedCutover => 200,
+            Self::SecurityServerValidatedClaims => 201,
+            Self::SecurityPayloadImmutability => 202,
+            Self::SecurityCapabilityFailClosed => 203,
+            Self::SecurityExternalInputBounds => 204,
+            Self::SecurityTenantIsolation => 205,
+            Self::SecuritySecretExclusion => 206,
+            Self::SecurityAuthorityRollback => 207,
+            Self::SecuritySideEffectSafety => 208,
+            Self::SecurityAdminOverride => 209,
+            Self::SecurityIntegrationDistrust => 210,
+            Self::FeedIndependentCursor => 211,
+            Self::FeedDurableEffectBeforeCursor => 212,
+            Self::FeedConsumerIsolation => 213,
+            Self::FeedDuplicateIdempotency => 214,
+            Self::FeedRetentionRecovery => 215,
+            Self::FeedExternalProjectionSafety => 216,
+            Self::FeedOrderingSafety => 217,
+            Self::FeedResetSafety => 218,
+            Self::FeedGovernanceCoverage => 219,
         }
     }
 }
@@ -1687,7 +1839,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 201] = [
+pub static REGISTRY: [InvariantEntry; 220] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -3094,6 +3246,139 @@ pub static REGISTRY: [InvariantEntry; 201] = [
         "cutover_race_matrix",
         "legacy_cutover_contract",
         "legacy_unverified_cutover_total",
+    ),
+    entry(
+        InvariantId::SecurityServerValidatedClaims,
+        "security_server_validated_claims",
+        "authentication_and_tenant_binding",
+        "security_authentication_contract",
+        "authz_denied_total",
+    ),
+    entry(
+        InvariantId::SecurityPayloadImmutability,
+        "security_payload_immutability",
+        "operation_payload_substitution",
+        "security_replay_contract",
+        "payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::SecurityCapabilityFailClosed,
+        "security_capability_fail_closed",
+        "required_security_capability_downgrade",
+        "compatibility_security_contract",
+        "protocol_downgrade_rejected_total",
+    ),
+    entry(
+        InvariantId::SecurityExternalInputBounds,
+        "security_external_input_bounds",
+        "boundary_plus_one_and_archive_bomb",
+        "security_input_contract",
+        "input_limit_rejected_total",
+    ),
+    entry(
+        InvariantId::SecurityTenantIsolation,
+        "security_tenant_isolation",
+        "cross_tenant_resource_matrix",
+        "security_tenant_contract",
+        "cross_tenant_denied_total",
+    ),
+    entry(
+        InvariantId::SecuritySecretExclusion,
+        "security_secret_exclusion",
+        "secret_redaction_and_serialization_exclusion",
+        "security_secret_contract",
+        "secret_exposure_total",
+    ),
+    entry(
+        InvariantId::SecurityAuthorityRollback,
+        "security_authority_rollback",
+        "authority_epoch_rollback",
+        "security_authority_contract",
+        "authority_rollback_total",
+    ),
+    entry(
+        InvariantId::SecuritySideEffectSafety,
+        "security_side_effect_safety",
+        "side_effect_safety",
+        "security_side_effect_contract",
+        "unsafe_side_effect_total",
+    ),
+    entry(
+        InvariantId::SecurityAdminOverride,
+        "security_admin_override",
+        "admin_override_policy",
+        "security_admin_contract",
+        "admin_override_total",
+    ),
+    entry(
+        InvariantId::SecurityIntegrationDistrust,
+        "security_integration_distrust",
+        "ssrf_archive_and_provider_input",
+        "security_integration_contract",
+        "untrusted_input_rejected_total",
+    ),
+    entry(
+        InvariantId::FeedIndependentCursor,
+        "feed_independent_cursor",
+        "independent_epoch_bound_cursor",
+        "feed_cursor_store_contract",
+        "consumer_cursor_invalid_total",
+    ),
+    entry(
+        InvariantId::FeedDurableEffectBeforeCursor,
+        "feed_durable_effect_before_cursor",
+        "durable_effect_before_ack",
+        "feed_checkpoint_contract",
+        "consumer_unsafe_ack_total",
+    ),
+    entry(
+        InvariantId::FeedConsumerIsolation,
+        "feed_consumer_isolation",
+        "lagging_consumer_isolation",
+        "feed_source_isolation_contract",
+        "consumer_isolation_violation_total",
+    ),
+    entry(
+        InvariantId::FeedDuplicateIdempotency,
+        "feed_duplicate_idempotency",
+        "duplicate_delivery_idempotency",
+        "feed_idempotency_contract",
+        "consumer_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::FeedRetentionRecovery,
+        "feed_retention_recovery",
+        "journal_floor_recovery_policy",
+        "feed_retention_contract",
+        "consumer_floor_miss_total",
+    ),
+    entry(
+        InvariantId::FeedExternalProjectionSafety,
+        "feed_external_projection_safety",
+        "external_projection_visibility",
+        "feed_integration_contract",
+        "feed_visibility_denied_total",
+    ),
+    entry(
+        InvariantId::FeedOrderingSafety,
+        "feed_ordering_safety",
+        "partition_ordering_stability",
+        "feed_partition_contract",
+        "consumer_ordering_violation_total",
+    ),
+    entry(
+        InvariantId::FeedResetSafety,
+        "feed_reset_safety",
+        "reset_plan_authorization_audit",
+        "feed_admin_contract",
+        "consumer_reset_denied_total",
+    ),
+    entry(
+        InvariantId::FeedGovernanceCoverage,
+        "feed_governance_coverage",
+        "governance_residency_coverage",
+        "feed_governance_contract",
+        "consumer_governance_gap_total",
     ),
 ];
 
