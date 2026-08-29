@@ -15,6 +15,7 @@ use aequora_diagnostics::{
     DiagnosticError, DiagnosticPolicy, IncidentBundleManifest, OperationExplanationInput,
     explain_operation,
 };
+use aequora_feed::{ConsumerRegistration, FEED_INVARIANTS, FeedError};
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CURRENT_INTEGRITY_GENERATION, IntegrityError, IntegritySnapshot,
     PartitionScheme, RepairPlan,
@@ -40,6 +41,10 @@ use aequora_region::{
     ReplicaObservation,
 };
 use aequora_schema::{SchemaError, SchemaRegistry};
+use aequora_security::{
+    ATTACKER_CLASSES, SECURITY_ASSETS, SECURITY_INVARIANTS, SecurityError, SecurityPolicy,
+    TRUST_BOUNDARIES,
+};
 use aequora_store::{
     AdapterCompatibilityError, AdapterManifest, AdapterRequirements, ProductionAdapterPair,
 };
@@ -108,6 +113,10 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("security") => {
+            security_command(arguments.next().as_deref(), arguments.next().as_deref())
+        }
+        Some("feed") => feed_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("legacy") => legacy_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
@@ -116,7 +125,70 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 }
 
 fn help() -> &'static str {
-    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+    "aequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+}
+
+fn security_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    match subject {
+        Some("show") if path.is_none() => Ok(format!(
+            "security: schema=1 assets={} attackers={} boundaries={} invariants={} writes=0",
+            SECURITY_ASSETS.len(),
+            ATTACKER_CLASSES.len(),
+            TRUST_BOUNDARIES.len(),
+            SECURITY_INVARIANTS.len()
+        )),
+        Some("validate") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora security validate <policy.ron>".to_owned())
+            })?;
+            let policy: SecurityPolicy = read_ron(path, 256 * 1024)?;
+            policy.validate()?;
+            Ok(format!(
+                "security policy: valid=true level={:?} frame_bytes={} operations={} redirects={} writes=0",
+                policy.level,
+                policy.protocol.max_frame_bytes,
+                policy.protocol.max_operations_per_batch,
+                policy.egress.max_redirects
+            ))
+        }
+        Some("explain") if path.is_none() => Ok(
+            "security: deny-by-default identity and tenant binding, bounded inputs, immutable operation semantics, rollback resistance, private admin, SSRF-safe egress, redacted secrets, and explicit side-effect reconciliation"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora security <show|validate|explain> [policy.ron]".to_owned(),
+        )),
+    }
+}
+
+fn feed_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    match subject {
+        Some("show") if path.is_none() => Ok(format!(
+            "feed: schema=1 invariants={} source=authoritative-journal delivery=at-least-once writes=0",
+            FEED_INVARIANTS.len()
+        )),
+        Some("validate") => {
+            let path = path.ok_or_else(|| {
+                CliError::Usage("usage: aequora feed validate <consumer.ron>".to_owned())
+            })?;
+            let registration: ConsumerRegistration = read_ron(path, 256 * 1024)?;
+            registration.validate()?;
+            Ok(format!(
+                "feed consumer: valid=true id={} status={:?} ordering={:?} retention={:?} writes=0",
+                registration.consumer_id.as_uuid(),
+                registration.status,
+                registration.ordering,
+                registration.retention
+            ))
+        }
+        Some("explain") if path.is_none() => Ok(
+            "feed: journal-derived consumers have independent epoch-bound cursors, durable-effect-before-ACK, fenced leases, explicit ordering/retention/failure policy, bounded replay, and no authority over domain state"
+                .to_owned(),
+        ),
+        _ => Err(CliError::Usage(
+            "usage: aequora feed <show|validate|explain> [consumer.ron]".to_owned(),
+        )),
+    }
 }
 
 fn legacy_command(subject: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
@@ -1086,6 +1158,10 @@ enum CliError {
     Admin(#[from] aequora_admin::AdminError),
     #[error(transparent)]
     Diagnostic(#[from] DiagnosticError),
+    #[error(transparent)]
+    Security(#[from] SecurityError),
+    #[error(transparent)]
+    Feed(#[from] FeedError),
     #[error(transparent)]
     Compatibility(#[from] AdapterCompatibilityError),
     #[error(transparent)]
