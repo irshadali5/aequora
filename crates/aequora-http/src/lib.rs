@@ -7,7 +7,7 @@ use aequora_transport::{SyncTransport, TransportError};
 use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode};
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue, header::ACCEPT, header::CONTENT_TYPE, header::RETRY_AFTER};
-use reqwest::{Client, Response, StatusCode, Url};
+use reqwest::{Client, ClientBuilder, Response, StatusCode, Url, redirect};
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
@@ -86,12 +86,24 @@ impl Default for HttpTransportConfig {
     }
 }
 
+impl HttpTransportConfig {
+    fn is_valid(self) -> bool {
+        self.max_response_bytes > 0 && self.max_decompressed_response_bytes > 0
+    }
+}
+
 /// Invalid HTTP transport construction.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum HttpTransportConfigError {
     /// The supplied base URL cannot be joined with fixed synchronization paths.
     #[error("invalid synchronization base URL")]
     BaseUrl,
+    /// Response or decompression limits are zero.
+    #[error("HTTP transport limits must be greater than zero")]
+    Limits,
+    /// The redirect-safe Reqwest client could not be built.
+    #[error("redirect-safe HTTP client construction failed")]
+    Client,
 }
 
 /// Cloneable HTTP transport with bounded response accumulation.
@@ -106,13 +118,16 @@ pub struct HttpTransport {
 }
 
 impl HttpTransport {
-    /// Creates a transport from an application-configured Reqwest client and base URL.
+    /// Creates a transport from an application-configured Reqwest builder and base URL.
+    /// Redirects are forcibly disabled after application customization so refreshed or custom
+    /// authorization headers cannot be replayed to a redirected origin.
     ///
     /// # Errors
     ///
-    /// Returns [`HttpTransportConfigError`] when fixed endpoint URLs cannot be constructed.
+    /// Returns [`HttpTransportConfigError`] when the client, limits, or fixed endpoint URLs are
+    /// invalid.
     pub fn new<H>(
-        client: Client,
+        client: ClientBuilder,
         base_url: &Url,
         headers: H,
         config: HttpTransportConfig,
@@ -120,12 +135,27 @@ impl HttpTransport {
     where
         H: RequestHeaders + 'static,
     {
+        if !matches!(base_url.scheme(), "http" | "https")
+            || base_url.host_str().is_none()
+            || !base_url.username().is_empty()
+            || base_url.password().is_some()
+            || base_url.cannot_be_a_base()
+        {
+            return Err(HttpTransportConfigError::BaseUrl);
+        }
+        if !config.is_valid() {
+            return Err(HttpTransportConfigError::Limits);
+        }
         let exchange_url = base_url
             .join("/sync/v1/exchange")
             .map_err(|_| HttpTransportConfigError::BaseUrl)?;
         let bootstrap_url = base_url
             .join("/sync/v1/bootstrap")
             .map_err(|_| HttpTransportConfigError::BaseUrl)?;
+        let client = client
+            .redirect(redirect::Policy::none())
+            .build()
+            .map_err(|_| HttpTransportConfigError::Client)?;
         Ok(Self {
             client,
             exchange_url,
@@ -422,6 +452,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn transport_rejects_credential_urls_and_zero_limits() {
+        let credential_url = Url::parse("https://user:secret@example.invalid/")
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(matches!(
+            HttpTransport::new(
+                Client::builder(),
+                &credential_url,
+                NoRequestHeaders,
+                HttpTransportConfig::default(),
+            ),
+            Err(HttpTransportConfigError::BaseUrl)
+        ));
+
+        let base_url =
+            Url::parse("https://example.invalid/").unwrap_or_else(|error| panic!("{error}"));
+        assert!(matches!(
+            HttpTransport::new(
+                Client::builder(),
+                &base_url,
+                NoRequestHeaders,
+                HttpTransportConfig {
+                    max_response_bytes: 0,
+                    ..HttpTransportConfig::default()
+                },
+            ),
+            Err(HttpTransportConfigError::Limits)
+        ));
+    }
+
     #[tokio::test]
     async fn reqwest_transport_round_trips_through_the_axum_boundary() {
         let tenant = TenantId::new();
@@ -444,7 +504,7 @@ mod tests {
         let base_url = Url::parse(&format!("http://{address}/application/base/"))
             .unwrap_or_else(|error| panic!("{error}"));
         let transport = HttpTransport::new(
-            Client::new(),
+            Client::builder(),
             &base_url,
             NoRequestHeaders,
             HttpTransportConfig {
@@ -478,7 +538,7 @@ mod tests {
         assert_eq!(response.next_cursor.scope, scope);
 
         let bounded = HttpTransport::new(
-            Client::new(),
+            Client::builder(),
             &base_url,
             NoRequestHeaders,
             HttpTransportConfig {
