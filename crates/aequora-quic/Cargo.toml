@@ -23,7 +23,3 @@ tokio.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-rcgen = "=0.13.2"
-time = "=0.3.45"

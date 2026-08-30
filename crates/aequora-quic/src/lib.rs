@@ -627,7 +627,10 @@ mod tests {
         ActorId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, HybridTimestamp,
         NodeId, RequestId, Sequence, SessionId, SyncScopeId, TenantId,
     };
-    use quinn::{ClientConfig, Endpoint, ServerConfig};
+    use quinn::{
+        ClientConfig, Endpoint, ServerConfig,
+        rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+    };
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     struct EchoService;
@@ -744,12 +747,12 @@ mod tests {
     }
 
     async fn loopback_connections() -> (Endpoint, Endpoint, Connection, Connection) {
-        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()])
-            .unwrap_or_else(|error| panic!("{error}"));
-        let certificate = certified.cert.der().clone();
-        let key =
-            quinn::rustls::pki_types::PrivatePkcs8KeyDer::from(certified.key_pair.serialize_der());
-        let server_config = ServerConfig::with_single_cert(vec![certificate.clone()], key.into())
+        let certificate =
+            CertificateDer::from_pem_slice(include_bytes!("../testdata/localhost-cert.pem"))
+                .unwrap_or_else(|error| panic!("invalid test certificate: {error}"));
+        let key = PrivateKeyDer::from_pem_slice(include_bytes!("../testdata/localhost-key.pem"))
+            .unwrap_or_else(|error| panic!("invalid test key: {error}"));
+        let server_config = ServerConfig::with_single_cert(vec![certificate.clone()], key)
             .unwrap_or_else(|error| panic!("{error}"));
         let server_endpoint = Endpoint::server(
             server_config,
