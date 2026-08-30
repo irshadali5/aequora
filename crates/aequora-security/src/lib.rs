@@ -530,10 +530,10 @@ impl ParsedTarget {
         {
             return Err(SecurityError::SsrfBlocked);
         }
-        if let Ok(literal) = self.host.parse::<IpAddr>()
-            && !addresses.contains(&literal)
-        {
-            return Err(SecurityError::SsrfBlocked);
+        if let Ok(literal) = self.host.parse::<IpAddr>() {
+            if !addresses.contains(&literal) {
+                return Err(SecurityError::SsrfBlocked);
+            }
         }
         Ok(())
     }
