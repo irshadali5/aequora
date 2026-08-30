@@ -4,7 +4,8 @@
 [![Rust 1.87+](https://img.shields.io/badge/MSRV-1.87.0-blue.svg)](https://www.rust-lang.org)
 [![Edition 2024](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
-[![Workspace](https://img.shields.io/badge/workspace-44%20libraries%20%2B%201%20dev%20tool-purple.svg)](crates/)
+[![Workspace](https://img.shields.io/badge/workspace-66%20crates-purple.svg)](crates/)
+[![Architecture Wiki](https://img.shields.io/badge/architecture-30%20part%20wiki-brightgreen.svg)](wiki/Home.md)
 
 Aequora is a database-neutral, server-authoritative, local-first synchronization engine written in
 Rust. It synchronizes typed domain operations and authoritative state transitions—not SQL,
@@ -14,6 +15,71 @@ Use it to build software that accepts writes offline, reconciles safely after re
 keeps application authorization and business rules at the authoritative server.
 
 > Current release line: `0.1.0` · MSRV: Rust `1.87` · Edition: `2024`
+
+---
+
+## About
+
+**Aequora** is built from first principles to solve the fundamental tensions of distributed,
+offline-capable systems: how to provide instant local mutations without sacrificing centralized
+authorization, formal data consistency, or database portability.
+
+### Key Architectural Tenets
+
+- **Local-First with Authoritative Server**: Clients execute local ACID transactions immediately with
+  zero network latency. When connectivity resumes, the server evaluates domain authorization,
+  executes business validation, resolves conflicts via deterministic policies, and produces an
+  authoritative linear event stream.
+- **Database Neutrality**: Zero coupling to vendor-specific database engines or WAL formats. Local
+  embedded persistence (Stoolap, SQLite, or custom) and authoritative cloud backends (PostgreSQL,
+  Neon, CockroachDB, or custom) interact strictly through strongly-typed capability contracts.
+- **Formal Invariants & Correctness**: Every state transition is bounded by an executable invariant
+  registry, verified via model checking, and validated under high-fault deterministic simulation.
+- **Industrial-Grade Resilience**: Built-in anti-entropy range Merkle tree exchange, local offline
+  operation log compaction, resumable snapshot bootstrap, and tamper-evident cryptographic provenance.
+
+### When to Use Aequora
+
+- **Offline-First Applications**: Mobile, desktop, and embedded applications where users must create
+  and modify data without an active network connection.
+- **Multi-Tenant SaaS & Enterprise ERP**: Collaborative systems where business rules, compliance,
+  and permissions must be enforced by a trusted central authority rather than client peer-to-peer code.
+- **Edge & Distributed Deployments**: Edge gateways and branch offices that operate autonomously
+  during WAN outages and reconcile deterministically upon link restoration.
+- **Audit-Critical & Regulated Workflows**: Financial, medical, and legal platforms requiring
+  tamper-evident audit chains, zero-knowledge payload encryption, and verifiable data governance.
+
+---
+
+## Topics & Key Concepts
+
+### Repository Topics & Tags
+
+`rust` · `distributed-systems` · `local-first` · `offline-first` · `sync-engine` ·
+`server-authoritative` · `crdt` · `event-sourcing` · `anti-entropy` · `merkle-tree` ·
+`database-agnostic` · `postgresql` · `neon` · `stoolap` · `quic` · `axum` · `formal-verification` ·
+`audit-logging` · `zero-knowledge-encryption` · `resumable-streaming` · `multi-region`
+
+### Core Subject Areas
+
+- **Formal Correctness & Causality**: Executable invariant registries, state machine model checking,
+  Lamport clocks, hybrid logical timestamps (HLC), dependency DAGs, and causal cut consistency.
+- **Anti-Entropy & Self-Repair**: Range-based Merkle tree exchange, state fingerprinting, divergence
+  detection, and automatic self-repair protocols.
+- **Local Coordination & Storage**: Multi-process lock election across browser tabs/processes,
+  offline operation queue compaction, timeline rebasing, and Stoolap embedded storage.
+- **Transport & Networking**: AEQ1 binary framed Postcard codec over HTTPS (Axum) and multiplexed
+  QUIC streams (Quinn), with adaptive rate limiting and pre-body admission control.
+- **Snapshot & Bulk Interoperability**: Resumable streaming snapshots, cold-replica bootstrap,
+  out-of-band artifact transfer, and canonical schema migration mappings.
+- **Audit, Governance & Security**: Tamper-evident cryptographic audit logs, envelope encryption,
+  asymmetric key rotation, GDPR/CCPA erasure cascades, and Byzantine abuse resistance.
+- **Scale, Performance & Embedded**: SIMD acceleration, memory-mapped ring buffers, zero-copy
+  protocol framing, multi-region single-writer topologies, and resource-constrained client profiles.
+- **Protocol Governance & Workflows**: Runtime protocol negotiation, schema registries, transactional
+  outbox patterns, and durable distributed sagas.
+
+---
 
 ## Why Aequora?
 
@@ -359,19 +425,22 @@ Database URLs, access tokens, and TLS keys do not belong in this object.
 
 ## Workspace map
 
-The workspace package count is reported by `aequora-dev summary`; the major ownership areas are:
+The workspace contains 66 crates managed via `aequora-dev`. The functional areas are:
 
-| Area | Crates |
+| Functional Area | Crates |
 |---|---|
-| Facade | `aequora` |
-| Core values and protocol | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-compat`, `aequora-scope`, `aequora-live`, `aequora-bootstrap` |
-| Client/server kernel | `aequora-client`, `aequora-server`, `aequora-executor`, `aequora-validator` |
-| Storage contracts/adapters | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
-| Network boundaries | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic` |
-| Domain policies | `aequora-crypto`, `aequora-profile`, `aequora-replay`, `aequora-audit`, `aequora-governance`, `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal`, `aequora-queue` |
-| Optional record interoperability | `aequora-schema`, `aequora-mapping`, `aequora-migration` |
-| Supporting capabilities | `aequora-blob`, `aequora-routing`, `aequora-compute`, `aequora-performance`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler` |
-| Verification/tooling | `aequora-invariants`, `aequora-model`, `aequora-testkit`, `aequora-macros`, `aequora-cli`, `aequora-dev` |
+| **Facade** | `aequora` |
+| **Core Values, Clocks & Protocol** | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-compat`, `aequora-scope`, `aequora-live`, `aequora-bootstrap`, `aequora-metadata` |
+| **Client & Server Kernel** | `aequora-client`, `aequora-server`, `aequora-authority`, `aequora-executor`, `aequora-validator`, `aequora-admission` |
+| **Storage Contracts & Adapters** | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
+| **Network Boundaries & Transport** | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic`, `aequora-feed` |
+| **Domain Policies & Consensus** | `aequora-crypto`, `aequora-security`, `aequora-profile`, `aequora-replay`, `aequora-audit`, `aequora-governance`, `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal`, `aequora-queue` |
+| **Workflows, Jobs & Side Effects** | `aequora-jobs`, `aequora-workflow`, `aequora-side-effects` |
+| **Record Interoperability & Schema** | `aequora-schema`, `aequora-mapping`, `aequora-migration`, `aequora-registry-types`, `aequora-registry-codegen`, `aequora-registry-generated`, `aequora-registry-cli` |
+| **Topology, Regions & Routing** | `aequora-region`, `aequora-routing`, `aequora-blob`, `aequora-admin` |
+| **Performance, Diagnostics & Control** | `aequora-compute`, `aequora-performance`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler`, `aequora-diagnostics` |
+| **Legacy Interoperability** | `aequora-legacy`, `aequora-legacy-api` |
+| **Verification, Conformance & Tooling** | `aequora-invariants`, `aequora-model`, `aequora-testkit`, `aequora-conformance`, `aequora-macros`, `aequora-cli`, `aequora-dev` |
 
 Run `cargo run -q -p aequora-dev -- summary` for the live workspace graph or
 `cargo run -q -p aequora-dev -- graph aequora-client` for one crate's dependency direction.
@@ -473,8 +542,9 @@ See [Local AI context](docs/local-ai-context.md), [AGENTS.md](AGENTS.md), and [R
 The local RAG index and Octocode cache are ignored; only their portable scripts/configuration are
 versioned.
 
-## Documentation
+## Documentation & Architecture Specifications
 
+- [Architecture Wiki (30-Part System Specification)](wiki/Home.md)
 - [Complete developer tutorial](TUTORIAL.md)
 - [Governing implementation plan](plan.md)
 - [Architecture specification index](next.md) ([authoritative `sys-arch/` specifications](sys-arch/))
@@ -483,24 +553,43 @@ versioned.
 - [Enterprise implementation evidence](docs/enterprise-completion.md)
 - [Database interoperability implementation evidence](docs/database-interoperability-completion.md)
 - [Plug-and-play implementation evidence](docs/plug-and-play-completion.md)
-- [Part 03 anti-entropy and self-repair evidence](docs/anti-entropy-self-repair-completion.md)
-- [Part 04 offline compaction and rebase evidence](docs/offline-compaction-rebase-completion.md)
-- [Part 05 local multi-process coordination evidence](docs/local-multiprocess-coordination-completion.md)
-- [Part 06 adaptive scheduler and QoS evidence](docs/adaptive-sync-scheduler-qos-completion.md)
-- [Part 07 subscription, scope, and dynamic dataset evidence](docs/subscription-scope-dynamic-dataset-completion.md)
-- [Part 08 live sync, push hints, and presence evidence](docs/live-sync-push-presence-completion.md)
-- [Part 09 bulk import, export, seed, and migration evidence](docs/bulk-import-export-seed-migration-completion.md)
-- [Part 10 large snapshot and resumable bootstrap evidence](docs/large-snapshot-streaming-bootstrap-completion.md)
-- [Part 11 operation semantics and consistency-profile evidence](docs/operation-semantics-consistency-profiles-completion.md)
-- [Part 12 deterministic execution and replay evidence](docs/deterministic-execution-replay-completion.md)
-- [Part 13 data provenance, auditability, and explainability evidence](docs/data-provenance-auditability-explainability-completion.md)
-- [Part 14 data governance, retention, hold, and erasure evidence](docs/data-governance-retention-erasure-completion.md)
-- [Part 15 cryptographic integrity, key management, and protected payload evidence](docs/cryptographic-integrity-key-management-e2e-completion.md)
-- [Part 19 performance engineering and memory architecture evidence](docs/performance-engineering-memory-architecture-completion.md)
-- [Part 20 resource-constrained client architecture evidence](docs/resource-constrained-client-architecture-completion.md)
-- [Part 21 protocol negotiation and compatibility governance evidence](docs/protocol-negotiation-compatibility-governance-completion.md)
-- [Architecture implementation matrix](docs/next-completion.md)
-- [Plan completion evidence](docs/plan-completion.md)
+- [System Architecture Specifications (Parts 01–36)](sys-arch/):
+  - [Part 01: Formal Correctness, Invariants & Simulation](wiki/01-formal-correctness.md)
+  - [Part 02: Causality, Dependency & Event Lineage](wiki/02-causality-provenance-lineage.md)
+  - [Part 03: Anti-Entropy, Divergence Detection & Self-Repair](wiki/03-anti-entropy-self-repair.md)
+  - [Part 04: Offline Operation Compaction & Rebase](wiki/04-offline-compaction-rebase.md)
+  - [Part 05: Local Multi-Process & Coordinator Election](wiki/05-local-multiprocess-coordination.md)
+  - [Part 06: Adaptive Sync Scheduler & QoS](wiki/06-adaptive-sync-scheduler-qos.md)
+  - [Part 07: Subscription, Scope & Dynamic Datasets](wiki/07-subscription-scope-dynamic-dataset.md)
+  - [Part 08: Live Sync, Push Hints & Presence](wiki/08-live-sync-push-presence.md)
+  - [Part 09: Bulk Import, Export & Seed Migration](wiki/09-bulk-import-export-seed-migration.md)
+  - [Part 10: Large Snapshot & Streaming Bootstrap](wiki/10-large-snapshot-streaming-bootstrap.md)
+  - [Part 11: Operation Semantics & Consistency Profiles](wiki/11-operation-semantics-consistency-profiles.md)
+  - [Part 12: Deterministic Domain Execution & Replay](wiki/12-deterministic-execution-replay.md)
+  - [Part 13: Data Provenance, Auditability & Explainability](wiki/13-data-provenance-auditability-explainability.md)
+  - [Part 14: Data Governance, Retention, Legal Hold & Erasure](wiki/14-data-governance-retention-erasure.md)
+  - [Part 15: Cryptographic Integrity, Key Management & E2E](wiki/15-cryptographic-integrity-key-management-e2e.md)
+  - [Part 16: Authority Failover, Timeline Epochs & Fork Detection](wiki/16-authority-failover-timeline-epochs-fork-detection.md)
+  - [Part 17: Multi-Region Read & Single-Writer Global Deployment](wiki/17-multi-region-read-single-writer-global.md)
+  - [Part 18: Backpressure, Admission Control & Fairness](wiki/18-backpressure-admission-fairness-overload.md)
+  - [Part 19: Performance Engineering & Memory Architecture](wiki/19-performance-engineering-memory-architecture.md)
+  - [Part 20: Resource-Constrained Client Architecture](wiki/20-resource-constrained-client-architecture.md)
+  - [Part 21: Protocol Negotiation & Compatibility Governance](wiki/21-protocol-negotiation-compatibility-governance.md)
+  - [Part 22: Sync Metadata Schema & Internal Persistence](wiki/22-sync-metadata-schema-internal-persistence.md)
+  - [Part 23: Background Jobs, Durable Workflows & Side Effects](wiki/23-background-jobs-durable-workflows-side-effects.md)
+  - [Part 24: Operational Control Plane & Admin API](wiki/24-operational-control-plane-admin-api.md)
+  - [Part 25: Diagnostics, Forensics & Incident Bundles](wiki/25-diagnostics-forensics-reproducible-incident-bundles.md)
+  - [Part 26: Legacy Application Compatibility & Migration](wiki/26-legacy-application-compatibility-incremental-adoption.md)
+  - [Part 27: Security Threat Model & Abuse Resistance](wiki/27-security-threat-model-abuse-resistance.md)
+  - [Part 28: Multi-Consumer Change Feed Architecture](wiki/28-multi-consumer-change-feed-architecture.md)
+  - [Part 29: Schema & Operation Registry Governance](wiki/29-schema-operation-registry-developer-governance.md)
+  - [Part 30: Certification, Conformance & Ecosystem Architecture](wiki/30-certification-conformance-ecosystem-architecture.md)
+  - [Part 31: Android & iOS Mobile Runtime Platform Architecture](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md)
+  - [Part 32: Linux, Windows & macOS Desktop Runtime Architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md)
+  - [Part 33: Cross-Platform Local Storage for Mobile & Desktop](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md)
+  - [Part 34: Reference Implementation & Workspace Crate Boundary Architecture](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md)
+  - [Part 35: Public Rust API & SDK Stability Architecture](sys-arch/35-public-rust-api-sdk-stability-architecture.md)
+  - [Part 36: Storage Adapter SDK & Official Adapter Architecture](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md)
 - [Custom database adapter guide](docs/custom-database-adapters.md)
 - [Local retrieval and tooling guide](docs/local-ai-context.md)
 
@@ -518,3 +607,4 @@ and graceful rollout/drain against the actual infrastructure.
 ## License
 
 Licensed under the [MIT License](LICENSE-MIT).
+
