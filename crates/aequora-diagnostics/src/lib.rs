@@ -169,10 +169,10 @@ impl DiagnosticValue {
     }
 
     fn validate(&self) -> Result<(), DiagnosticError> {
-        if let Self::Text(value) = self
-            && value.len() > MAX_DETAIL_TEXT_BYTES
-        {
-            return Err(DiagnosticError::LimitExceeded("detail text"));
+        if let Self::Text(value) = self {
+            if value.len() > MAX_DETAIL_TEXT_BYTES {
+                return Err(DiagnosticError::LimitExceeded("detail text"));
+            }
         }
         Ok(())
     }
