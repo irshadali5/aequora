@@ -1,0 +1,7 @@
+# `sqlx` records its optional MySQL driver in Cargo.lock even though Aequora
+# enables only the PostgreSQL driver. `cargo tree --workspace --all-features
+# --target all -i rsa` confirms that `rsa` is not in any selected dependency
+# graph. RUSTSEC-2023-0071 has no fixed release, so keep this narrow exception
+# until sqlx no longer records the unused driver dependency.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

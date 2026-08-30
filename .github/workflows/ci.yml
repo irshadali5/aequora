@@ -19,16 +19,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  security-audit:
+    name: RustSec dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Install pinned cargo-audit
+        run: cargo +stable install cargo-audit --version 0.22.2 --locked
+      - name: Audit workspace dependencies
+        run: cargo +stable audit --file Cargo.lock
+      - name: Audit fuzz dependencies
+        run: cargo +stable audit --file fuzz/Cargo.lock
+
   quality:
     name: Stable quality gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
       - name: Formatting
         run: cargo +stable fmt --all -- --check
+      - name: Enforce repository-wide hardening controls
+        run: bash scripts/check-high-assurance-hardening.sh
       - name: Check every target and feature
         run: cargo +stable check --workspace --all-targets --all-features --locked
       - name: Enforce independent database feature profiles
@@ -141,7 +158,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install MSRV
         run: rustup toolchain install 1.87.0 --profile minimal
       - name: Check every target and feature at MSRV
@@ -170,7 +187,7 @@ jobs:
       AEQUORA_TEST_NEON_DIRECT_URL: ${{ secrets.AEQUORA_TEST_NEON_DIRECT_URL }}
       AEQUORA_TEST_NEON_POOLED_URL: ${{ secrets.AEQUORA_TEST_NEON_POOLED_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
       - name: Exercise PostgreSQL and configured Neon transaction boundaries
@@ -183,7 +200,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
       - name: Build every fuzz target
@@ -203,7 +220,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
       - name: Run formal model, properties, Loom, and fault matrices
