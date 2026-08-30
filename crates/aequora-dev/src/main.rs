@@ -1,6 +1,15 @@
 //! Bounded, machine-readable workspace context built on Guppy's Cargo graph.
 
-use std::{collections::BTreeSet, env, error::Error, fmt::Write as _, fs, io, process::ExitCode};
+use std::{
+    collections::BTreeSet,
+    env,
+    error::Error,
+    fmt::Write as _,
+    fs::File,
+    io::{self, Read},
+    path::Path,
+    process::ExitCode,
+};
 
 use aequora_audit::{ChainedAuditRecord, verify_chain};
 use aequora_coordination::CoordinationSnapshot;
@@ -19,6 +28,8 @@ use guppy::{
     MetadataCommand,
     graph::{DependencyDirection, PackageGraph, PackageMetadata},
 };
+
+const MAX_DEV_INPUT_BYTES: usize = 16 * 1_024 * 1_024;
 
 const BOUNDARY_RULES: &[(&str, &[&str])] = &[
     (
@@ -484,7 +495,7 @@ fn print_performance(
             let path = first.ok_or_else(|| {
                 io::Error::other("performance workload-verify requires a manifest path")
             })?;
-            let workload: WorkloadManifest = ron::from_str(&fs::read_to_string(path)?)?;
+            let workload: WorkloadManifest = ron::from_str(&read_bounded_text(path)?)?;
             let digest = workload.digest()?;
             println!(
                 "performance-workload verified name={} kind={:?} operations={} digest={}",
@@ -499,7 +510,7 @@ fn print_performance(
             let path = first.ok_or_else(|| {
                 io::Error::other("performance report-verify requires a report path")
             })?;
-            let report: PerformanceReport = ron::from_str(&fs::read_to_string(path)?)?;
+            let report: PerformanceReport = ron::from_str(&read_bounded_text(path)?)?;
             report.validate()?;
             println!(
                 "performance-report verified phases={} commit={} database={} durability={}",
@@ -517,10 +528,9 @@ fn print_performance(
             let candidate_path = second.ok_or_else(|| {
                 io::Error::other("performance compare requires a candidate report")
             })?;
-            let baseline: PerformanceReport =
-                ron::from_str(&fs::read_to_string(baseline_path)?)?;
+            let baseline: PerformanceReport = ron::from_str(&read_bounded_text(baseline_path)?)?;
             let candidate: PerformanceReport =
-                ron::from_str(&fs::read_to_string(candidate_path)?)?;
+                ron::from_str(&read_bounded_text(candidate_path)?)?;
             let regressions = compare_reports(&baseline, &candidate, RegressionPolicy::default())?;
             if regressions.is_empty() {
                 println!("performance-regression: ok ({} compared phases)", candidate.phases.len());
@@ -566,7 +576,7 @@ fn print_crypto(action: Option<&str>, argument: Option<String>) -> Result<(), Bo
             let path = argument
                 .ok_or_else(|| io::Error::other("crypto registry-verify requires a bundle path"))?;
             let (root, manifest): (PublicKeyBytes, KeyRegistryManifest) =
-                ron::from_str(&fs::read_to_string(path)?)?;
+                ron::from_str(&read_bounded_text(path)?)?;
             let mut registry = TrustedKeyRegistry::new(manifest.signature.key_id, root);
             let accepted = registry.accept(&manifest)?;
             println!(
@@ -592,7 +602,7 @@ fn print_governance(action: Option<&str>, argument: Option<String>) -> Result<()
         Some("verify") => {
             let path = argument
                 .ok_or_else(|| io::Error::other("governance verify requires a plan path"))?;
-            let plan: ErasurePlan = ron::from_str(&fs::read_to_string(path)?)?;
+            let plan: ErasurePlan = ron::from_str(&read_bounded_text(path)?)?;
             plan.verify()?;
             println!(
                 "erasure-plan verified actions={} blockers={} executable={}",
@@ -619,7 +629,7 @@ fn print_audit(action: Option<&str>, argument: Option<String>) -> Result<(), Box
         Some("verify" | "inspect") => {
             let path =
                 argument.ok_or_else(|| io::Error::other("audit command requires a chain path"))?;
-            let records: Vec<ChainedAuditRecord> = ron::from_str(&fs::read_to_string(path)?)?;
+            let records: Vec<ChainedAuditRecord> = ron::from_str(&read_bounded_text(path)?)?;
             let root = verify_chain(&records)?;
             let (tenant, partition, sequence) = records.last().map_or_else(
                 || ("empty".to_owned(), "none".to_owned(), 0),
@@ -655,6 +665,34 @@ fn hex_prefix(bytes: [u8; 32]) -> String {
     output
 }
 
+fn read_bounded_text(path: impl AsRef<Path>) -> io::Result<String> {
+    let path = path.as_ref();
+    let mut bytes = Vec::with_capacity(MAX_DEV_INPUT_BYTES.min(64 * 1_024));
+    File::open(path)?
+        .take(
+            u64::try_from(MAX_DEV_INPUT_BYTES)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1),
+        )
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_DEV_INPUT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "input {} exceeds the {}-byte safety limit",
+                path.display(),
+                MAX_DEV_INPUT_BYTES
+            ),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("input {} is not UTF-8", path.display()),
+        )
+    })
+}
+
 fn print_replay(action: Option<&str>, argument: Option<String>) -> Result<(), Box<dyn Error>> {
     match action {
         Some("explain") => {
@@ -672,7 +710,7 @@ fn print_replay(action: Option<&str>, argument: Option<String>) -> Result<(), Bo
         Some("verify" | "inspect") => {
             let path = argument
                 .ok_or_else(|| io::Error::other("replay command requires a bundle path"))?;
-            let bundle: ReplayBundle = ron::from_str(&fs::read_to_string(path)?)?;
+            let bundle: ReplayBundle = ron::from_str(&read_bounded_text(path)?)?;
             bundle.verify()?;
             let state_kind = match bundle.pre_state {
                 ReplayStateRef::Embedded { .. } => "embedded",
@@ -717,7 +755,7 @@ fn print_profile(
         Some("verify") => {
             let path =
                 first.ok_or_else(|| io::Error::other("profile verify requires a manifest path"))?;
-            let manifest: ProfileManifest = ron::from_str(&fs::read_to_string(path)?)?;
+            let manifest: ProfileManifest = ron::from_str(&read_bounded_text(path)?)?;
             manifest.verify()?;
             println!(
                 "profile-manifest verified aggregates={} operations={}",
@@ -731,8 +769,8 @@ fn print_profile(
                 .ok_or_else(|| io::Error::other("profile compare requires an old manifest"))?;
             let new_path = second
                 .ok_or_else(|| io::Error::other("profile compare requires a new manifest"))?;
-            let old: ProfileManifest = ron::from_str(&fs::read_to_string(old_path)?)?;
-            let new: ProfileManifest = ron::from_str(&fs::read_to_string(new_path)?)?;
+            let old: ProfileManifest = ron::from_str(&read_bounded_text(old_path)?)?;
+            let new: ProfileManifest = ron::from_str(&read_bounded_text(new_path)?)?;
             old.verify_compatible_successor(&new)?;
             println!("profile-manifest successor is compatible");
             Ok(())
@@ -794,7 +832,7 @@ fn print_scope(action: Option<&str>, argument: Option<String>) -> Result<(), Box
             let path = argument.ok_or_else(|| {
                 io::Error::other("scope status requires a RON LocalScopeState path")
             })?;
-            let input = fs::read_to_string(path)?;
+            let input = read_bounded_text(path)?;
             let state: LocalScopeState = ron::from_str(&input)?;
             println!(
                 "active_subscriptions={} pending_transitions={} membership_references={} quarantined_operations={}",
@@ -826,7 +864,7 @@ fn print_scheduler(action: Option<&str>, argument: Option<String>) -> Result<(),
             let path = argument.ok_or_else(|| {
                 io::Error::other("scheduler status requires a RON SchedulerState path")
             })?;
-            let input = fs::read_to_string(path)?;
+            let input = read_bounded_text(path)?;
             let state: SchedulerState = ron::from_str(&input)?;
             println!(
                 "policy_version={} target_ops={} target_bytes={} success_streak={} circuit={:?} server_backoff_until_unix_ms={:?} background_bytes_today={}",
@@ -859,7 +897,7 @@ fn print_coordination(
             let path = argument.ok_or_else(|| {
                 io::Error::other("coordination status requires a RON snapshot path")
             })?;
-            let input = fs::read_to_string(path)?;
+            let input = read_bounded_text(path)?;
             let snapshot: CoordinationSnapshot = ron::from_str(&input)?;
             let now = env::args()
                 .nth(4)
