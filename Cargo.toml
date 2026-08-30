@@ -74,8 +74,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 license = "MIT"
-repository = "https://github.com/irshad/aequora"
+repository = "https://github.com/irshadali5/aequora"
+homepage = "https://github.com/irshadali5/aequora"
+documentation = "https://docs.rs/aequora"
 description = "Server-authoritative, database-agnostic local-first synchronization for Rust"
+readme = "README.md"
 
 [workspace.dependencies]
 async-trait = "0.1.89"

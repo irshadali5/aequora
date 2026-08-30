@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Developer governance CLI for Aequora durable registries"
 
 [[bin]]
@@ -11,8 +12,8 @@ name = "aequora-registry"
 path = "src/main.rs"
 
 [dependencies]
-aequora-registry-codegen = { path = "../aequora-registry-codegen" }
-aequora-registry-types = { path = "../aequora-registry-types" }
+aequora-registry-codegen = { version = "0.1.0", path = "../aequora-registry-codegen" }
+aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
 ron.workspace = true
 
 [lints]

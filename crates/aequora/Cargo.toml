@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 description.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords = ["crdt", "local-first", "sync", "distributed", "database"]
+categories = ["database", "network-programming", "data-structures"]
 
 [features]
 default = ["postcard"]

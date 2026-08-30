@@ -4,10 +4,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Build-time validation and generation for Aequora durable registries"
 
 [dependencies]
-aequora-registry-types = { path = "../aequora-registry-types" }
+aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
 blake3.workspace = true
 ron.workspace = true
 serde.workspace = true

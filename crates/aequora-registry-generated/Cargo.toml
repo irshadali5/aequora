@@ -4,14 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Build-generated immutable Aequora durable registry"
 build = "build.rs"
 
 [dependencies]
-aequora-registry-types = { path = "../aequora-registry-types" }
+aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
 
 [build-dependencies]
-aequora-registry-codegen = { path = "../aequora-registry-codegen" }
+aequora-registry-codegen = { version = "0.1.0", path = "../aequora-registry-codegen" }
 
 [lints]
 workspace = true
