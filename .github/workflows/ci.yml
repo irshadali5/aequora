@@ -54,6 +54,8 @@ jobs:
         run: bash scripts/check-database-neutrality.sh
       - name: Enforce Guppy dependency boundaries
         run: cargo +stable run -p aequora-dev --locked -- check
+      - name: Validate crates.io publish dependency order
+        run: python3 scripts/publish-workspace.py --plan
       - name: Enforce consistency-profile contracts and manifest compatibility rules
         run: |
           cargo +stable test -p aequora-profile --locked

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Aequora Workspace Publish Orchestrator for Crates.io
-Publishes workspace crates in topological dependency order across 8 layers.
+Publishes workspace crates in topological dependency order.
 Handles crates.io rate limiting, index verification, and resumption.
 """
 
@@ -19,71 +19,36 @@ from collections import defaultdict, deque
 WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def load_workspace_manifest():
-    cargo_path = os.path.join(WORKSPACE_ROOT, "Cargo.toml")
-    with open(cargo_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    # Simple TOML parser for members list
-    members = []
-    in_members = False
-    for line in content.splitlines():
-        line = line.strip()
-        if line.startswith("members = ["):
-            in_members = True
+def load_workspace_crates():
+    """Load Cargo's complete workspace graph, including dev and target dependencies."""
+    result = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=WORKSPACE_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    metadata = json.loads(result.stdout)
+    workspace_members = set(metadata["workspace_members"])
+    crates_info = {}
+    for package in metadata["packages"]:
+        if package["id"] not in workspace_members:
             continue
-        if in_members:
-            if line.startswith("]"):
-                break
-            member = line.strip('", ')
-            if member:
-                members.append(member)
-    return members
-
-
-def load_crate_manifest(rel_path):
-    cargo_path = os.path.join(WORKSPACE_ROOT, rel_path, "Cargo.toml")
-    if not os.path.exists(cargo_path):
-        return None
-
-    with open(cargo_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    name = None
-    publish = True
-    deps = set()
-    current_section = None
-
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current_section = line.strip("[]")
-            continue
-
-        if current_section == "package":
-            if line.startswith("name ="):
-                name = line.split("=")[1].strip(' "')
-            elif line.startswith("publish = false"):
-                publish = False
-
-        elif current_section in ("dependencies", "build-dependencies"):
-            if "=" in line:
-                dep_name = line.split("=")[0].strip()
-                val = line.split("=", 1)[1].strip()
-                if "path =" in val or "path=" in val:
-                    # check if renamed
-                    pkg_match = re.search(r'package\s*=\s*"([^"]+)"', val)
-                    target = pkg_match.group(1) if pkg_match else dep_name
-                    deps.add(target)
-
-    return {
-        "name": name or os.path.basename(rel_path),
-        "path": rel_path,
-        "publish": publish,
-        "deps": deps,
-    }
+        manifest_dir = os.path.dirname(package["manifest_path"])
+        crates_info[package["name"]] = {
+            "name": package["name"],
+            "version": package["version"],
+            "path": os.path.relpath(manifest_dir, WORKSPACE_ROOT),
+            "publish": package["publish"] != [],
+            # Cargo metadata reports canonical package names even for renamed dependencies.
+            # Path dependencies are the local workspace edges relevant to publish ordering.
+            "deps": {
+                dependency["name"]
+                for dependency in package["dependencies"]
+                if dependency.get("path") is not None
+            },
+        }
+    return crates_info
 
 
 def compute_topological_layers(crates_info):
@@ -168,9 +133,10 @@ def missing_internal_dependency(stderr, crates_info):
 def main():
     parser = argparse.ArgumentParser(description="Publish Aequora workspace crates to crates.io")
     parser.add_argument("--dry-run", action="store_true", help="Perform a dry-run without uploading")
+    parser.add_argument("--plan", action="store_true", help="Print dependency layers and exit")
     parser.add_argument("--allow-dirty", action="store_true", help="Allow uncommitted local changes")
     parser.add_argument("--no-verify", action="store_true", help="Pass --no-verify to cargo publish")
-    parser.add_argument("--layer", type=int, help="Publish only the specified layer number (1-8)")
+    parser.add_argument("--layer", type=int, help="Publish only the specified layer number")
     parser.add_argument("--crate", type=str, help="Publish only the specified crate")
     parser.add_argument("--delay", type=int, default=15, help="Delay in seconds between crates (default: 15s)")
     parser.add_argument(
@@ -182,12 +148,11 @@ def main():
     parser.add_argument("--skip-api-check", action="store_true", help="Skip crates.io API check")
     args = parser.parse_args()
 
-    members = load_workspace_manifest()
-    crates_info = {}
-    for m in members:
-        info = load_crate_manifest(m)
-        if info:
-            crates_info[info["name"]] = info
+    try:
+        crates_info = load_workspace_crates()
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        print(f"Error: failed to load Cargo workspace metadata: {error}")
+        sys.exit(1)
 
     layers = compute_topological_layers(crates_info)
     total_publishable = sum(len(l) for l in layers)
@@ -195,7 +160,7 @@ def main():
     print("=" * 70)
     print("Aequora Workspace Crates.io Publisher")
     print("=" * 70)
-    print(f"Total workspace crates:   {len(members)}")
+    print(f"Total workspace crates:   {len(crates_info)}")
     print(f"Publishable crates:       {total_publishable}")
     print(f"Topological layers:       {len(layers)}")
     print("=" * 70)
@@ -210,10 +175,11 @@ def main():
             sys.exit(1)
 
         print(f"\nProcessing single crate: {target}")
+        version = crates_info[target]["version"]
         if not args.skip_api_check:
-            is_pub = check_crates_io_version(target)
+            is_pub = check_crates_io_version(target, version)
             if is_pub:
-                print(f"✅ {target} v0.1.0 is already published on crates.io.")
+                print(f"✅ {target} v{version} is already published on crates.io.")
                 return
 
         success, out, err = publish_crate(target, allow_dirty=args.allow_dirty, dry_run=args.dry_run, no_verify=args.no_verify)
@@ -231,6 +197,9 @@ def main():
         print(f"\n--- Layer {i}/{len(layers)} ({len(layer)} crates) ---")
         print(", ".join(layer))
 
+    if args.plan:
+        return
+
     if args.dry_run:
         print("\n[DRY RUN MODE] Checking crates.io status for all crates...")
 
@@ -243,11 +212,12 @@ def main():
         print(f"{'='*70}")
 
         for crate_name in layer:
+            version = crates_info[crate_name]["version"]
             print(f"\n📦 Checking {crate_name}...")
             if not args.skip_api_check:
-                is_pub = check_crates_io_version(crate_name)
+                is_pub = check_crates_io_version(crate_name, version)
                 if is_pub:
-                    print(f"  ⏩ {crate_name} v0.1.0 is already published on crates.io. Skipping.")
+                    print(f"  ⏩ {crate_name} v{version} is already published on crates.io. Skipping.")
                     continue
                 elif is_pub is False:
                     print(f"  🔍 {crate_name} not yet found on crates.io.")
@@ -266,13 +236,13 @@ def main():
             while True:
                 success, out, err = publish_crate(crate_name, allow_dirty=args.allow_dirty, dry_run=False, no_verify=args.no_verify)
                 if success:
-                    print(f"  ✅ Published {crate_name} v0.1.0")
+                    print(f"  ✅ Published {crate_name} v{version}")
                     if out:
                         print(f"     {out.strip()}")
                     break
                 else:
                     if "already exists" in err:
-                        print(f"  ✅ {crate_name} v0.1.0 is already published on crates.io.")
+                        print(f"  ✅ {crate_name} v{version} is already published on crates.io.")
                         break
                     elif "429" in err or "rate limit" in err.lower() or "too many requests" in err.lower():
                         rate_limit_attempt += 1
