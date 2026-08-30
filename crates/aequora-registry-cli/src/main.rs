@@ -1,5 +1,6 @@
 use aequora_registry_codegen::{
-    artifact, diff, generated_markdown, load_lock, load_registry, make_lock, verify_lock,
+    artifact, diff, generated_markdown, generated_rust, load_lock, load_registry, make_lock,
+    verify_lock,
 };
 use aequora_registry_types::{AllocationClass, RegistryDomain};
 use std::{
@@ -26,6 +27,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             )?;
             println!(
                 "registry docs {}",
+                if check { "verified" } else { "generated" }
+            );
+        }
+        "rust" => {
+            let root = PathBuf::from(args.next().unwrap_or_else(|| ".".into()));
+            let check = args.next().as_deref() == Some("--check");
+            let set = load_registry(&root)?;
+            artifact(
+                &root.join("crates/aequora-registry-generated/src/registry.rs"),
+                &generated_rust(&set),
+                check,
+            )?;
+            println!(
+                "registry Rust snapshot {}",
                 if check { "verified" } else { "generated" }
             );
         }
@@ -173,7 +188,7 @@ fn next_id(used: &[u32], allocation: AllocationClass) -> Option<u32> {
 
 fn usage() {
     println!(
-        "aequora-registry verify|lint [root]\n  docs [root] [--check]\n  lock [root]\n  diff|compatibility <old-root> <new-root>\n  explain [root] <domain> <id>\n  reserve [root] <domain> [core|extension|private|experimental]"
+        "aequora-registry verify|lint [root]\n  docs [root] [--check]\n  rust [root] [--check]\n  lock [root]\n  diff|compatibility <old-root> <new-root>\n  explain [root] <domain> <id>\n  reserve [root] <domain> [core|extension|private|experimental]"
     );
 }
 

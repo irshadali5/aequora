@@ -8,6 +8,7 @@ for path in \
     crates/aequora-registry-types/Cargo.toml \
     crates/aequora-registry-codegen/Cargo.toml \
     crates/aequora-registry-generated/Cargo.toml \
+    crates/aequora-registry-generated/src/registry.rs \
     crates/aequora-registry-cli/Cargo.toml \
     registry/manifest.ron registry/registry.lock \
     docs/registry/generated-registry.md; do
@@ -39,5 +40,6 @@ rg -q 'durable_registry_provenance' crates/aequora-diagnostics/src/lib.rs
 rg -q 'cargo .*aequora-registry-cli.*verify' .github/workflows/ci.yml
 
 CARGO_BUILD_JOBS=1 cargo run -q -p aequora-registry-cli --locked --bin aequora-registry -- verify . >/dev/null
+CARGO_BUILD_JOBS=1 cargo run -q -p aequora-registry-cli --locked --bin aequora-registry -- rust . --check >/dev/null
 
 echo "registry architecture: canonical RON, immutable lock, code generation, namespace/range checks, compatibility tooling, historical resolution, diagnostics provenance, and nine invariants verified"

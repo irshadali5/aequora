@@ -157,6 +157,14 @@ def publish_crate(crate_name, allow_dirty=False, dry_run=False, no_verify=False)
     return res.returncode == 0, res.stdout, res.stderr
 
 
+def missing_internal_dependency(stderr, crates_info):
+    """Return the missing workspace crate named by Cargo, if index propagation is pending."""
+    match = re.search(r"no matching package named [`']([^`']+)[`'] found", stderr)
+    if match and match.group(1) in crates_info:
+        return match.group(1)
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Publish Aequora workspace crates to crates.io")
     parser.add_argument("--dry-run", action="store_true", help="Perform a dry-run without uploading")
@@ -165,6 +173,12 @@ def main():
     parser.add_argument("--layer", type=int, help="Publish only the specified layer number (1-8)")
     parser.add_argument("--crate", type=str, help="Publish only the specified crate")
     parser.add_argument("--delay", type=int, default=15, help="Delay in seconds between crates (default: 15s)")
+    parser.add_argument(
+        "--propagation-retries",
+        type=int,
+        default=8,
+        help="Retries while a newly published dependency propagates (default: 8)",
+    )
     parser.add_argument("--skip-api-check", action="store_true", help="Skip crates.io API check")
     args = parser.parse_args()
 
@@ -246,9 +260,10 @@ def main():
                     print(f"  [DRY RUN FAILED] {crate_name}:\n{err}")
                 continue
 
-            # Live publishing with rate-limit retry
-            max_retries = 3
-            for attempt in range(1, max_retries + 1):
+            # Live publishing with independent rate-limit and index-propagation retries.
+            rate_limit_attempt = 0
+            propagation_attempt = 0
+            while True:
                 success, out, err = publish_crate(crate_name, allow_dirty=args.allow_dirty, dry_run=False, no_verify=args.no_verify)
                 if success:
                     print(f"  ✅ Published {crate_name} v0.1.0")
@@ -260,11 +275,29 @@ def main():
                         print(f"  ✅ {crate_name} v0.1.0 is already published on crates.io.")
                         break
                     elif "429" in err or "rate limit" in err.lower() or "too many requests" in err.lower():
-                        print(f"  ⏳ Hit crates.io rate limit on {crate_name} (attempt {attempt}/{max_retries}).")
+                        rate_limit_attempt += 1
+                        if rate_limit_attempt >= 3:
+                            print(f"  ❌ Publish failed for {crate_name} after 3 rate-limit attempts:\n{err}")
+                            sys.exit(1)
+                        print(f"  ⏳ Hit crates.io rate limit on {crate_name} (attempt {rate_limit_attempt}/3).")
                         print("  Waiting 10 minutes (600s) for rate limit bucket replenishment...")
                         for sec_left in range(600, 0, -60):
                             print(f"    {sec_left} seconds remaining...")
                             time.sleep(60)
+                    elif dependency := missing_internal_dependency(err, crates_info):
+                        propagation_attempt += 1
+                        if propagation_attempt > args.propagation_retries:
+                            print(
+                                f"  ❌ Publish failed for {crate_name}: dependency {dependency} "
+                                f"did not appear after {args.propagation_retries} retries:\n{err}"
+                            )
+                            sys.exit(1)
+                        wait = max(args.delay, 15)
+                        print(
+                            f"  ⏳ Waiting {wait}s for {dependency} to propagate in the crates.io "
+                            f"index (attempt {propagation_attempt}/{args.propagation_retries})..."
+                        )
+                        time.sleep(wait)
                     else:
                         print(f"  ❌ Publish failed for {crate_name}:\n{err}")
                         sys.exit(1)
