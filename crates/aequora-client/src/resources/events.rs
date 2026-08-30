@@ -124,12 +124,13 @@ impl DurableWorkCheckpoint {
         if unit != self.completed_units.saturating_add(1) {
             return Err(CheckpointError::NonContiguousUnit);
         }
-        if let (Some(previous), Some(next)) = (self.committed_cursor, cursor)
-            && (previous.authority_id != next.authority_id
+        if let (Some(previous), Some(next)) = (self.committed_cursor, cursor) {
+            if previous.authority_id != next.authority_id
                 || previous.authority_epoch != next.authority_epoch
-                || next.sequence < previous.sequence)
-        {
-            return Err(CheckpointError::CursorRegression);
+                || next.sequence < previous.sequence
+            {
+                return Err(CheckpointError::CursorRegression);
+            }
         }
         self.completed_units = unit;
         if cursor.is_some() {
