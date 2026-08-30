@@ -14,6 +14,16 @@ use thiserror::Error;
 
 pub const ARTIFACT_FORMAT_VERSION: u32 = 1;
 pub const CURRENT_SUITE_VERSION: u32 = 1;
+pub const MAX_IDENTITY_TEXT_BYTES: usize = 512;
+pub const MAX_EVIDENCE_REFERENCE_BYTES: usize = 1_024;
+pub const MAX_OBSERVATION_MESSAGE_BYTES: usize = 2_048;
+pub const MAX_METADATA_ENTRIES: usize = 256;
+pub const MAX_EVIDENCE_REFERENCES_PER_TEST: usize = 64;
+pub const MAX_LIMITATIONS: usize = 128;
+pub const MAX_PERFORMANCE_CHARACTERIZATIONS: usize = 128;
+pub const MAX_EVIDENCE_FILES: usize = 4_096;
+pub const MAX_SIGNATURE_BYTES: usize = 16 * 1_024;
+pub const MAX_CATALOG_RECORDS: usize = 65_536;
 
 /// A surface with independently testable Aequora semantics.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -263,10 +273,18 @@ impl CertificationArtifact {
     pub fn validate(&self) -> Result<(), ConformanceError> {
         validate_identity(&self.subject)?;
         validate_environment(&self.environment)?;
-        if self.artifact_format_version != ARTIFACT_FORMAT_VERSION || self.suite_version == 0 {
+        validate_observations(&self.observations)?;
+        validate_capability_manifest(&self.capability_manifest)?;
+        validate_bounded_texts(&self.limitations, MAX_LIMITATIONS, "limitations")?;
+        validate_performance(&self.performance)?;
+        if self.artifact_format_version != ARTIFACT_FORMAT_VERSION
+            || self.suite_version != CURRENT_SUITE_VERSION
+        {
             return Err(ConformanceError::UnsupportedFormat);
         }
-        if self.profile.id().0 == 0
+        if (!self.certification_id.is_empty() && !is_digest(&self.certification_id))
+            || !is_digest(&self.evidence_digest)
+            || self.profile.id().0 == 0
             || self.tier.id().0 == 0
             || (self.tier != CertificationTier::Experimental
                 && self.tier < self.profile.minimum_tier())
@@ -321,13 +339,7 @@ impl CertificationArtifact {
             }
         }
         let expected_coverage = coverage_from_observations(&self.observations);
-        if expected_coverage.iter().any(|expected| {
-            self.coverage.iter().all(|actual| {
-                actual.invariant_id != expected.invariant_id
-                    || !expected.test_ids.is_subset(&actual.test_ids)
-                    || !actual.methods.contains(&VerificationMethod::Automated)
-            })
-        }) {
+        if self.coverage != expected_coverage {
             return Err(ConformanceError::InvalidBinding);
         }
         let expected = if required_unsupported {
@@ -363,6 +375,8 @@ impl CertificationArtifact {
     ///
     /// Returns an encoding failure.
     pub fn seal(mut self) -> Result<Self, ConformanceError> {
+        self.certification_id.clear();
+        self.validate()?;
         self.certification_id = self.canonical_digest()?;
         Ok(self)
     }
@@ -382,10 +396,12 @@ impl CertificationArtifact {
 }
 
 fn validate_identity(subject: &SubjectIdentity) -> Result<(), ConformanceError> {
-    if subject.name.trim().is_empty()
-        || subject.version.trim().is_empty()
-        || subject.source_commit.trim().is_empty()
-        || subject.binary_digest.len() != 64
+    if !is_bounded_text(&subject.name, MAX_IDENTITY_TEXT_BYTES, false)
+        || !is_bounded_text(&subject.version, MAX_IDENTITY_TEXT_BYTES, false)
+        || !is_bounded_text(&subject.source_commit, MAX_IDENTITY_TEXT_BYTES, false)
+        || !is_digest(&subject.binary_digest)
+        || !valid_set(&subject.enabled_features)
+        || !valid_map(&subject.build_configuration)
     {
         return Err(ConformanceError::InvalidSubject);
     }
@@ -393,19 +409,121 @@ fn validate_identity(subject: &SubjectIdentity) -> Result<(), ConformanceError> 
 }
 
 fn validate_environment(environment: &ExecutionEnvironment) -> Result<(), ConformanceError> {
-    if environment.target.trim().is_empty()
-        || environment.operating_system.trim().is_empty()
-        || environment.architecture.trim().is_empty()
-        || environment.rust_version.trim().is_empty()
+    if !is_bounded_text(&environment.target, MAX_IDENTITY_TEXT_BYTES, false)
+        || !is_bounded_text(
+            &environment.operating_system,
+            MAX_IDENTITY_TEXT_BYTES,
+            false,
+        )
+        || !is_bounded_text(&environment.architecture, MAX_IDENTITY_TEXT_BYTES, false)
+        || !is_bounded_text(&environment.rust_version, MAX_IDENTITY_TEXT_BYTES, false)
         || (environment.database_version.is_some() && environment.database_engine.is_none())
         || environment
-            .provider_versions
-            .iter()
-            .any(|(name, version)| name.trim().is_empty() || version.trim().is_empty())
+            .database_engine
+            .as_deref()
+            .is_some_and(|value| !is_bounded_text(value, MAX_IDENTITY_TEXT_BYTES, false))
+        || environment
+            .database_version
+            .as_deref()
+            .is_some_and(|value| !is_bounded_text(value, MAX_IDENTITY_TEXT_BYTES, false))
+        || !valid_map(&environment.provider_versions)
     {
         return Err(ConformanceError::InvalidBinding);
     }
     Ok(())
+}
+
+fn validate_observations(observations: &[TestObservation]) -> Result<(), ConformanceError> {
+    if observations.len() > REFERENCE_TESTS.len() {
+        return Err(ConformanceError::LimitExceeded("observations"));
+    }
+    for observation in observations {
+        if !REFERENCE_TESTS
+            .iter()
+            .any(|definition| definition.id == observation.test_id)
+        {
+            return Err(ConformanceError::UnknownTest(observation.test_id));
+        }
+        if observation.evidence.len() > MAX_EVIDENCE_REFERENCES_PER_TEST {
+            return Err(ConformanceError::LimitExceeded("test evidence"));
+        }
+        if !is_bounded_text(&observation.message, MAX_OBSERVATION_MESSAGE_BYTES, false)
+            || observation
+                .evidence
+                .iter()
+                .any(|value| !is_bounded_text(value, MAX_EVIDENCE_REFERENCE_BYTES, false))
+        {
+            return Err(ConformanceError::InvalidBinding);
+        }
+    }
+    Ok(())
+}
+
+fn validate_capability_manifest(manifest: &CapabilityManifest) -> Result<(), ConformanceError> {
+    if !valid_set(&manifest.claimed) || !valid_set(&manifest.verified) {
+        return Err(ConformanceError::InvalidBinding);
+    }
+    Ok(())
+}
+
+fn validate_performance(
+    performance: &[PerformanceCharacterization],
+) -> Result<(), ConformanceError> {
+    if performance.len() > MAX_PERFORMANCE_CHARACTERIZATIONS {
+        return Err(ConformanceError::LimitExceeded(
+            "performance characterizations",
+        ));
+    }
+    if performance.iter().any(|value| {
+        !is_bounded_text(&value.workload, MAX_IDENTITY_TEXT_BYTES, false)
+            || !is_bounded_text(&value.measurement, MAX_IDENTITY_TEXT_BYTES, false)
+            || !is_bounded_text(&value.environment_note, MAX_IDENTITY_TEXT_BYTES, false)
+    }) {
+        return Err(ConformanceError::InvalidBinding);
+    }
+    Ok(())
+}
+
+fn validate_bounded_texts(
+    values: &[String],
+    maximum_entries: usize,
+    field: &'static str,
+) -> Result<(), ConformanceError> {
+    if values.len() > maximum_entries {
+        return Err(ConformanceError::LimitExceeded(field));
+    }
+    if values
+        .iter()
+        .any(|value| !is_bounded_text(value, MAX_EVIDENCE_REFERENCE_BYTES, false))
+    {
+        return Err(ConformanceError::InvalidBinding);
+    }
+    Ok(())
+}
+
+fn valid_set(values: &BTreeSet<String>) -> bool {
+    values.len() <= MAX_METADATA_ENTRIES
+        && values
+            .iter()
+            .all(|value| is_bounded_text(value, MAX_IDENTITY_TEXT_BYTES, false))
+}
+
+fn valid_map(values: &BTreeMap<String, String>) -> bool {
+    values.len() <= MAX_METADATA_ENTRIES
+        && values.iter().all(|(key, value)| {
+            is_bounded_text(key, MAX_IDENTITY_TEXT_BYTES, false)
+                && is_bounded_text(value, MAX_IDENTITY_TEXT_BYTES, false)
+        })
+}
+
+fn is_bounded_text(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    value.len() <= maximum
+        && (allow_empty || !value.trim().is_empty())
+        && value.chars().all(|character| !character.is_control())
+}
+
+fn is_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn observation_map(
@@ -803,6 +921,10 @@ impl EvidenceFile {
         self.bytes == u64::try_from(bytes.len()).unwrap_or(u64::MAX)
             && self.digest == blake3::hash(bytes).to_hex().to_string()
     }
+
+    fn is_valid(&self) -> bool {
+        is_safe_evidence_path(&self.path) && is_digest(&self.digest)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -823,6 +945,8 @@ impl CertificationBundle {
         artifact: CertificationArtifact,
         evidence_files: Vec<EvidenceFile>,
     ) -> Result<Self, ConformanceError> {
+        artifact.verify_identity()?;
+        validate_evidence_files(&evidence_files)?;
         let bundle_digest = bundle_digest(&artifact, &evidence_files)?;
         Ok(Self {
             artifact,
@@ -839,12 +963,16 @@ impl CertificationBundle {
     /// Returns tamper, identity, or signature failures.
     pub fn verify(&self, verifier: Option<&dyn SignatureVerifier>) -> Result<(), ConformanceError> {
         self.artifact.verify_identity()?;
-        if self.bundle_digest != bundle_digest(&self.artifact, &self.evidence_files)? {
+        validate_evidence_files(&self.evidence_files)?;
+        if !is_digest(&self.bundle_digest)
+            || self.bundle_digest != bundle_digest(&self.artifact, &self.evidence_files)?
+        {
             return Err(ConformanceError::BundleTampered);
         }
         match (&self.signature, verifier) {
             (Some(signature), Some(verifier)) => {
-                if signature.signed_digest != self.bundle_digest
+                if !signature.is_valid()
+                    || signature.signed_digest != self.bundle_digest
                     || !verifier.verify(signature, self.bundle_digest.as_bytes())
                 {
                     return Err(ConformanceError::InvalidSignature);
@@ -855,6 +983,29 @@ impl CertificationBundle {
         }
         Ok(())
     }
+}
+
+fn validate_evidence_files(evidence_files: &[EvidenceFile]) -> Result<(), ConformanceError> {
+    if evidence_files.len() > MAX_EVIDENCE_FILES {
+        return Err(ConformanceError::LimitExceeded("evidence files"));
+    }
+    let mut paths = BTreeSet::new();
+    if evidence_files
+        .iter()
+        .any(|file| !file.is_valid() || !paths.insert(file.path.as_str()))
+    {
+        return Err(ConformanceError::InvalidEvidenceManifest);
+    }
+    Ok(())
+}
+
+fn is_safe_evidence_path(path: &str) -> bool {
+    is_bounded_text(path, MAX_EVIDENCE_REFERENCE_BYTES, false)
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .all(|component| !component.is_empty() && !matches!(component, "." | ".."))
 }
 
 fn bundle_digest(
@@ -873,6 +1024,17 @@ pub struct ArtifactSignature {
     pub algorithm: String,
     pub signed_digest: String,
     pub bytes: Vec<u8>,
+}
+
+impl ArtifactSignature {
+    fn is_valid(&self) -> bool {
+        is_bounded_text(&self.issuer, MAX_IDENTITY_TEXT_BYTES, false)
+            && is_bounded_text(&self.key_id, MAX_IDENTITY_TEXT_BYTES, false)
+            && is_bounded_text(&self.algorithm, MAX_IDENTITY_TEXT_BYTES, false)
+            && is_digest(&self.signed_digest)
+            && !self.bytes.is_empty()
+            && self.bytes.len() <= MAX_SIGNATURE_BYTES
+    }
 }
 
 pub trait SignatureVerifier {
@@ -896,6 +1058,33 @@ pub struct CatalogRecord {
 }
 
 impl CatalogRecord {
+    /// Validates catalog identity, digest, ownership, and bounded metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-catalog error for malformed or unbounded metadata.
+    pub fn validate(&self) -> Result<(), ConformanceError> {
+        validate_identity(&self.subject)?;
+        if !is_digest(&self.certification_id)
+            || !is_digest(&self.artifact_digest)
+            || self.suite_version == 0
+            || !is_bounded_text(&self.status_reason, MAX_EVIDENCE_REFERENCE_BYTES, false)
+            || self
+                .sbom_digest
+                .as_deref()
+                .is_some_and(|value| !is_digest(value))
+            || self
+                .provenance_digest
+                .as_deref()
+                .is_some_and(|value| !is_digest(value))
+            || !is_bounded_text(&self.license, MAX_IDENTITY_TEXT_BYTES, false)
+            || !is_bounded_text(&self.security_contact, MAX_IDENTITY_TEXT_BYTES, false)
+        {
+            return Err(ConformanceError::InvalidCatalog);
+        }
+        Ok(())
+    }
+
     /// Applies an allowed monotonic lifecycle transition without changing identity.
     ///
     /// # Errors
@@ -906,6 +1095,7 @@ impl CatalogRecord {
         status: CertificationStatus,
         reason: impl Into<String>,
     ) -> Result<Self, ConformanceError> {
+        self.validate()?;
         let allowed = matches!(
             (self.status, status),
             (
@@ -919,7 +1109,7 @@ impl CatalogRecord {
             )
         );
         let reason = reason.into();
-        if !allowed || reason.trim().is_empty() {
+        if !allowed || !is_bounded_text(&reason, MAX_EVIDENCE_REFERENCE_BYTES, false) {
             return Err(ConformanceError::InvalidLifecycleTransition);
         }
         let mut next = self.clone();
@@ -941,6 +1131,10 @@ impl CertificationCatalog {
     ///
     /// Returns an error if the identity was already used.
     pub fn insert(&mut self, record: CatalogRecord) -> Result<(), ConformanceError> {
+        record.validate()?;
+        if self.records.len() >= MAX_CATALOG_RECORDS {
+            return Err(ConformanceError::LimitExceeded("catalog records"));
+        }
         if self
             .records
             .iter()
@@ -999,14 +1193,13 @@ impl DeploymentCertificationPolicy {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.minimum_suite_version > 0
+            && valid_set(&self.allowed_subjects)
+            && valid_set(&self.required_features)
+            && valid_map(&self.exact_build_configuration)
             && self
-                .allowed_subjects
-                .iter()
-                .all(|subject| !subject.trim().is_empty())
-            && self
-                .required_features
-                .iter()
-                .all(|feature| !feature.trim().is_empty())
+                .required_database_engine
+                .as_deref()
+                .is_none_or(|value| is_bounded_text(value, MAX_IDENTITY_TEXT_BYTES, false))
     }
 }
 
@@ -1027,10 +1220,15 @@ pub fn evaluate_deployment(
     policy: &DeploymentCertificationPolicy,
 ) -> Result<DeploymentDecision, ConformanceError> {
     artifact.verify_identity()?;
+    record.validate()?;
+    if !policy.is_valid() {
+        return Err(ConformanceError::InvalidPolicy);
+    }
     let mut reasons = Vec::new();
     if artifact.certification_id != record.certification_id
         || artifact.subject != record.subject
         || artifact.suite_version != record.suite_version
+        || artifact.tier != record.tier
         || artifact.canonical_digest()? != record.artifact_digest
     {
         reasons.push("artifact and catalog identity differ".to_owned());
@@ -1081,7 +1279,10 @@ pub fn verify_differential(
     reference_digest: &str,
     subject_digest: &str,
 ) -> Result<(), ConformanceError> {
-    if reference_digest.len() != 64 || reference_digest != subject_digest {
+    if !is_digest(reference_digest)
+        || !is_digest(subject_digest)
+        || reference_digest != subject_digest
+    {
         return Err(ConformanceError::DifferentialMismatch);
     }
     Ok(())
@@ -1092,21 +1293,41 @@ pub fn verify_differential(
 pub fn markdown_report(artifact: &CertificationArtifact) -> String {
     let mut output = format!(
         "# Aequora certification report\n\n- Certification: `{}`\n- Subject: `{}` `{}`\n- Suite: `{}`\n- Profile: `{:?}`\n- Tier: `{:?}`\n- Result: `{:?}`\n- Evidence digest: `{}`\n\n## Tests\n\n",
-        artifact.certification_id,
-        artifact.subject.name,
-        artifact.subject.version,
+        markdown_inline(&artifact.certification_id),
+        markdown_inline(&artifact.subject.name),
+        markdown_inline(&artifact.subject.version),
         artifact.suite_version,
         artifact.profile,
         artifact.tier,
         artifact.result,
-        artifact.evidence_digest
+        markdown_inline(&artifact.evidence_digest)
     );
     for observation in &artifact.observations {
+        let name = REFERENCE_TESTS
+            .iter()
+            .find(|definition| definition.id == observation.test_id)
+            .map_or("unknown-test", |definition| definition.name);
         let _ = writeln!(
             output,
-            "- `{}`: `{:?}` — {}",
-            observation.test_id.0, observation.status, observation.message
+            "- `{}` `{}`: `{:?}`",
+            observation.test_id.0, name, observation.status
         );
+    }
+    output
+}
+
+fn markdown_inline(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '`' => output.push_str("&#96;"),
+            '\n' | '\r' | '\t' => output.push(' '),
+            value if value.is_control() => output.push('\u{fffd}'),
+            value => output.push(value),
+        }
     }
     output
 }
@@ -1123,6 +1344,8 @@ pub enum ConformanceError {
     MissingRequiredTest(ConformanceTestId),
     #[error("duplicate conformance test {0:?}")]
     DuplicateTest(ConformanceTestId),
+    #[error("unknown conformance test {0:?}")]
+    UnknownTest(ConformanceTestId),
     #[error("claimed capability {0:?} has not passed all required tests")]
     UnverifiedCapability(String),
     #[error("declared result does not match required test outcomes")]
@@ -1133,6 +1356,8 @@ pub enum ConformanceError {
     ArtifactTampered,
     #[error("evidence bundle digest does not match its manifest")]
     BundleTampered,
+    #[error("evidence manifest contains an invalid, duplicate, or unsafe path")]
+    InvalidEvidenceManifest,
     #[error("a signature exists but no verifier was provided")]
     SignatureVerifierRequired,
     #[error("certification signature is invalid")]
@@ -1141,6 +1366,12 @@ pub enum ConformanceError {
     InvalidLifecycleTransition,
     #[error("certification identity was already used")]
     CertificationIdentityReused,
+    #[error("certification catalog metadata is invalid")]
+    InvalidCatalog,
+    #[error("deployment certification policy is invalid")]
+    InvalidPolicy,
+    #[error("certification input exceeds the bounded {0} limit")]
+    LimitExceeded(&'static str),
     #[error("deployment rejected certification: {0:?}")]
     DeploymentRejected(Vec<String>),
     #[error("differential conformance output mismatch")]
@@ -1473,5 +1704,158 @@ mod tests {
             verify_differential(&"a".repeat(64), &"b".repeat(64)),
             Err(ConformanceError::DifferentialMismatch)
         );
+        assert_eq!(
+            verify_differential(&"z".repeat(64), &"z".repeat(64)),
+            Err(ConformanceError::DifferentialMismatch)
+        );
+    }
+
+    #[test]
+    fn digest_shapes_and_unknown_tests_fail_closed() {
+        let mut invalid_subject = subject();
+        invalid_subject.binary_digest = "z".repeat(64);
+        assert_eq!(
+            certify(
+                invalid_subject,
+                environment(),
+                ConformanceProfile::StorageCore,
+                CertificationTier::CoreTransactional,
+                BTreeSet::new(),
+                observations(
+                    ConformanceProfile::StorageCore,
+                    CertificationTier::CoreTransactional,
+                ),
+                Vec::new(),
+                1,
+            ),
+            Err(ConformanceError::InvalidSubject)
+        );
+
+        let mut values = observations(
+            ConformanceProfile::StorageCore,
+            CertificationTier::CoreTransactional,
+        );
+        values.push(TestObservation {
+            test_id: ConformanceTestId(9_999),
+            status: TestStatus::Passed,
+            seed: Some(1),
+            evidence: vec!["digest-only".into()],
+            message: "unknown".into(),
+        });
+        assert_eq!(
+            certify(
+                subject(),
+                environment(),
+                ConformanceProfile::StorageCore,
+                CertificationTier::CoreTransactional,
+                BTreeSet::new(),
+                values,
+                Vec::new(),
+                1,
+            ),
+            Err(ConformanceError::UnknownTest(ConformanceTestId(9_999)))
+        );
+    }
+
+    #[test]
+    fn coverage_and_future_suite_claims_cannot_be_resealed() -> Result<(), ConformanceError> {
+        let artifact = certify(
+            subject(),
+            environment(),
+            ConformanceProfile::StorageCore,
+            CertificationTier::CoreTransactional,
+            BTreeSet::new(),
+            observations(
+                ConformanceProfile::StorageCore,
+                CertificationTier::CoreTransactional,
+            ),
+            Vec::new(),
+            1,
+        )?;
+        let mut forged_coverage = artifact.clone();
+        forged_coverage.coverage[0]
+            .methods
+            .insert(VerificationMethod::ManualReview);
+        assert_eq!(
+            forged_coverage.seal(),
+            Err(ConformanceError::InvalidBinding)
+        );
+
+        let mut future_suite = artifact;
+        future_suite.suite_version = CURRENT_SUITE_VERSION + 1;
+        assert_eq!(
+            future_suite.seal(),
+            Err(ConformanceError::UnsupportedFormat)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn report_uses_stable_names_and_omits_untrusted_messages() -> Result<(), ConformanceError> {
+        let mut value = subject();
+        value.name = "<script>alert(1)</script>".into();
+        let mut values = observations(
+            ConformanceProfile::StorageCore,
+            CertificationTier::CoreTransactional,
+        );
+        values[0].message = "token=do-not-render".into();
+        let artifact = certify(
+            value,
+            environment(),
+            ConformanceProfile::StorageCore,
+            CertificationTier::CoreTransactional,
+            BTreeSet::new(),
+            values,
+            Vec::new(),
+            1,
+        )?;
+        let report = markdown_report(&artifact);
+        assert!(report.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(report.contains("local_intent_atomicity"));
+        assert!(!report.contains("do-not-render"));
+        Ok(())
+    }
+
+    #[test]
+    fn evidence_paths_and_policy_metadata_are_bounded() -> Result<(), ConformanceError> {
+        let artifact = certify(
+            subject(),
+            environment(),
+            ConformanceProfile::StorageCore,
+            CertificationTier::CoreTransactional,
+            BTreeSet::new(),
+            observations(
+                ConformanceProfile::StorageCore,
+                CertificationTier::CoreTransactional,
+            ),
+            Vec::new(),
+            1,
+        )?;
+        assert_eq!(
+            CertificationBundle::unsigned(
+                artifact.clone(),
+                vec![EvidenceFile::from_bytes("../secret", b"payload")],
+            ),
+            Err(ConformanceError::InvalidEvidenceManifest)
+        );
+        assert_eq!(
+            CertificationBundle::unsigned(
+                artifact.clone(),
+                vec![
+                    EvidenceFile::from_bytes("report.ron", b"one"),
+                    EvidenceFile::from_bytes("report.ron", b"two"),
+                ],
+            ),
+            Err(ConformanceError::InvalidEvidenceManifest)
+        );
+
+        let record = catalog_record(&artifact, CertificationStatus::Active)?;
+        let mut policy = production_policy(1);
+        policy.required_features.insert(String::new());
+        assert_eq!(
+            evaluate_deployment(&artifact, &record, &policy),
+            Err(ConformanceError::InvalidPolicy)
+        );
+        Ok(())
     }
 }
