@@ -256,7 +256,10 @@ def main():
                         print(f"     {out.strip()}")
                     break
                 else:
-                    if "429" in err or "rate limit" in err.lower() or "too many requests" in err.lower():
+                    if "already exists" in err:
+                        print(f"  ✅ {crate_name} v0.1.0 is already published on crates.io.")
+                        break
+                    elif "429" in err or "rate limit" in err.lower() or "too many requests" in err.lower():
                         print(f"  ⏳ Hit crates.io rate limit on {crate_name} (attempt {attempt}/{max_retries}).")
                         print("  Waiting 10 minutes (600s) for rate limit bucket replenishment...")
                         for sec_left in range(600, 0, -60):
