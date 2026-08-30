@@ -864,7 +864,7 @@ headers.insert(
 
 let base_url = Url::parse("https://api.example.com/")?;
 let transport = HttpTransport::new(
-    reqwest::Client::new(),
+    reqwest::Client::builder(),
     &base_url,
     StaticRequestHeaders::new(headers),
     config.http_transport_config()?,
@@ -873,7 +873,8 @@ let transport = HttpTransport::new(
 
 `StaticRequestHeaders` is convenient for short-lived tokens. For refreshable credentials,
 implement `RequestHeaders`; its `headers` method runs before each request and can load the newest
-credential from the application's secure session store.
+credential from the application's secure session store. The transport applies a no-redirect policy
+after all builder customization so credentials cannot be replayed to a redirected origin.
 
 ### 11.2 Build the client engine
 
