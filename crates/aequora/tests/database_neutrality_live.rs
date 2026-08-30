@@ -110,7 +110,7 @@ async fn exercise_database_independent_stack(
 
     let base_url = Url::parse(&format!("http://{address}/"))?;
     let transport = HttpTransport::new(
-        reqwest::Client::new(),
+        reqwest::Client::builder(),
         &base_url,
         NoRequestHeaders,
         HttpTransportConfig::default(),
