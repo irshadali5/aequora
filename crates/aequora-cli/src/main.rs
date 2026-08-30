@@ -54,7 +54,13 @@ use aequora_store::{
 };
 use aequora_store_postgres::POSTGRES_ADAPTER_MANIFEST;
 use aequora_store_stoolap::STOOLAP_ADAPTER_MANIFEST;
-use std::{env, fs, io, path::Path, process::ExitCode};
+use std::{
+    env,
+    fs::{self, File},
+    io::{self, Read},
+    path::Path,
+    process::ExitCode,
+};
 use thiserror::Error;
 
 fn main() -> ExitCode {
@@ -208,7 +214,9 @@ fn conform_command(subject: Option<&str>, path: Option<&str>) -> Result<String, 
                 Some("protocol") => ConformanceDomain::ProtocolImplementation,
                 Some("client") => ConformanceDomain::ClientRuntime,
                 Some("server") => ConformanceDomain::ServerRuntime,
-                _ => unreachable!(),
+                _ => {
+                    return Err(CliError::Usage("unknown conformance domain".to_owned()));
+                }
             };
             let tests = REFERENCE_TESTS
                 .iter()
@@ -1115,14 +1123,14 @@ fn inspect_export(artifact: &str, schema: &str) -> Result<(u64, [u8; 32], usize)
 }
 
 fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>, CliError> {
-    let metadata = fs::metadata(path)?;
-    if metadata.len() > u64::try_from(maximum).unwrap_or(u64::MAX) {
-        return Err(CliError::InputLimit {
-            path: path.display().to_string(),
-            maximum,
-        });
-    }
-    let bytes = fs::read(path)?;
+    let read_limit = maximum.checked_add(1).ok_or_else(|| CliError::InputLimit {
+        path: path.display().to_string(),
+        maximum,
+    })?;
+    let mut bytes = Vec::with_capacity(maximum.min(64 * 1_024));
+    File::open(path)?
+        .take(u64::try_from(read_limit).unwrap_or(u64::MAX))
+        .read_to_end(&mut bytes)?;
     if bytes.len() > maximum {
         return Err(CliError::InputLimit {
             path: path.display().to_string(),
@@ -1490,5 +1498,18 @@ mod tests {
         .unwrap_or_else(|error| panic!("import planning failed: {error}"));
         assert!(plan.contains("dry_run=true records=1 chunks=1"));
         assert!(plan.contains("writes=0"));
+    }
+
+    #[test]
+    fn bounded_reader_stops_after_the_limit() {
+        let root = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("temporary directory failed: {error}"));
+        let path = root.path().join("oversized.ron");
+        fs::write(&path, vec![b'x'; 1_025])
+            .unwrap_or_else(|error| panic!("fixture write failed: {error}"));
+        assert!(matches!(
+            read_bounded(&path, 1_024),
+            Err(CliError::InputLimit { maximum: 1_024, .. })
+        ));
     }
 }
