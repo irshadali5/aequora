@@ -339,6 +339,10 @@ pub struct ExtensionManifest {
 pub enum RegistryError {
     #[error("registry generation must be non-zero")]
     ZeroGeneration,
+    #[error("registry manifest metadata is invalid")]
+    InvalidManifest,
+    #[error("registry exceeds its bounded entry limit")]
+    RegistryLimit,
     #[error("duplicate registry key {domain}:{id}")]
     DuplicateId { domain: RegistryDomain, id: u32 },
     #[error("duplicate canonical name {domain}:{name}")]

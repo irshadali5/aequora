@@ -7,10 +7,20 @@ use aequora_registry_types::{
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
-    fs, io,
+    fs::{self, File},
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+
+const MAX_REGISTRY_FILE_BYTES: usize = 1_024 * 1_024;
+const MAX_REGISTRY_PATHS: usize = 8_192;
+const MAX_REGISTRY_DEPTH: usize = 16;
+const MAX_REGISTRY_ENTRIES: usize = 65_536;
+const MAX_ENTRIES_PER_FRAGMENT: usize = 4_096;
+const MAX_ENTRY_TEXT_BYTES: usize = 4_096;
+const MAX_ENTRY_NAME_BYTES: usize = 128;
+const MAX_ENTRY_COLLECTION_ITEMS: usize = 256;
 
 const REQUIRED_OPERATION_ATTRIBUTES: &[&str] = &[
     "entity",
@@ -41,13 +51,48 @@ pub enum CodegenError {
     Registry(#[from] RegistryError),
     #[error("generated artifact drift at {0}")]
     Drift(PathBuf),
+    #[error("registry input exceeds its safety limit at {path}: {limit}")]
+    Limit { path: PathBuf, limit: &'static str },
+    #[error("registry input is not a regular UTF-8 file at {0}")]
+    InvalidFile(PathBuf),
+    #[error("registry traversal rejected a symbolic link at {0}")]
+    Symlink(PathBuf),
 }
 
 fn read(path: &Path) -> Result<String, CodegenError> {
-    fs::read_to_string(path).map_err(|source| CodegenError::Io {
+    let metadata = fs::symlink_metadata(path).map_err(|source| CodegenError::Io {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(CodegenError::Symlink(path.to_path_buf()));
+    }
+    if !metadata.is_file() {
+        return Err(CodegenError::InvalidFile(path.to_path_buf()));
+    }
+    let mut bytes = Vec::with_capacity(MAX_REGISTRY_FILE_BYTES.min(64 * 1_024));
+    File::open(path)
+        .map_err(|source| CodegenError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .take(
+            u64::try_from(MAX_REGISTRY_FILE_BYTES)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1),
+        )
+        .read_to_end(&mut bytes)
+        .map_err(|source| CodegenError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() > MAX_REGISTRY_FILE_BYTES {
+        return Err(CodegenError::Limit {
+            path: path.to_path_buf(),
+            limit: "file bytes",
+        });
+    }
+    String::from_utf8(bytes).map_err(|_| CodegenError::InvalidFile(path.to_path_buf()))
 }
 
 /// Loads and merges all canonical fragments under `registry/core`, `registry/app`, and
@@ -66,18 +111,32 @@ pub fn load_registry(root: &Path) -> Result<RegistrySet, CodegenError> {
         }
     })?;
     let mut paths = Vec::new();
+    let mut visited_paths = 0;
     for directory in ["core", "app", "extensions"] {
-        collect_ron(&registry_root.join(directory), &mut paths)?;
+        collect_ron(
+            &registry_root.join(directory),
+            &mut paths,
+            0,
+            &mut visited_paths,
+        )?;
     }
     paths.sort();
     let mut entries = Vec::new();
     for path in paths {
         let fragment = ron::from_str::<RegistryFragment>(&read(&path)?).map_err(|error| {
             CodegenError::Ron {
-                path,
+                path: path.clone(),
                 message: error.to_string(),
             }
         })?;
+        if fragment.entries.len() > MAX_ENTRIES_PER_FRAGMENT
+            || entries.len().saturating_add(fragment.entries.len()) > MAX_REGISTRY_ENTRIES
+        {
+            return Err(CodegenError::Limit {
+                path,
+                limit: "registry entries",
+            });
+        }
         entries.extend(fragment.entries);
     }
     entries.sort_by_key(|entry| (entry.domain, entry.id));
@@ -86,23 +145,63 @@ pub fn load_registry(root: &Path) -> Result<RegistrySet, CodegenError> {
     Ok(set)
 }
 
-fn collect_ron(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), CodegenError> {
-    if !directory.exists() {
-        return Ok(());
+fn collect_ron(
+    directory: &Path,
+    output: &mut Vec<PathBuf>,
+    depth: usize,
+    visited_paths: &mut usize,
+) -> Result<(), CodegenError> {
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(CodegenError::Io {
+                path: directory.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(CodegenError::Symlink(directory.to_path_buf()));
+    }
+    if !metadata.is_dir() {
+        return Err(CodegenError::InvalidFile(directory.to_path_buf()));
+    }
+    if depth > MAX_REGISTRY_DEPTH {
+        return Err(CodegenError::Limit {
+            path: directory.to_path_buf(),
+            limit: "directory depth",
+        });
     }
     let entries = fs::read_dir(directory).map_err(|source| CodegenError::Io {
         path: directory.to_path_buf(),
         source,
     })?;
     for entry in entries {
+        *visited_paths = visited_paths.saturating_add(1);
+        if *visited_paths > MAX_REGISTRY_PATHS {
+            return Err(CodegenError::Limit {
+                path: directory.to_path_buf(),
+                limit: "traversed paths",
+            });
+        }
         let entry = entry.map_err(|source| CodegenError::Io {
             path: directory.to_path_buf(),
             source,
         })?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_ron(&path, output)?;
-        } else if path.extension().is_some_and(|extension| extension == "ron") {
+        let file_type = entry.file_type().map_err(|source| CodegenError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_symlink() {
+            return Err(CodegenError::Symlink(path));
+        }
+        if file_type.is_dir() {
+            collect_ron(&path, output, depth.saturating_add(1), visited_paths)?;
+        } else if file_type.is_file()
+            && path.extension().is_some_and(|extension| extension == "ron")
+        {
             output.push(path);
         }
     }
@@ -118,6 +217,14 @@ fn collect_ron(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), Codege
 pub fn validate(set: &RegistrySet) -> Result<(), RegistryError> {
     if set.manifest.generation == 0 {
         return Err(RegistryError::ZeroGeneration);
+    }
+    if !valid_text(&set.manifest.release, MAX_ENTRY_NAME_BYTES)
+        || !valid_text(&set.manifest.namespace, MAX_ENTRY_NAME_BYTES)
+    {
+        return Err(RegistryError::InvalidManifest);
+    }
+    if set.entries.len() > MAX_REGISTRY_ENTRIES {
+        return Err(RegistryError::RegistryLimit);
     }
     let mut keys = BTreeSet::new();
     let mut names = BTreeSet::new();
@@ -159,17 +266,31 @@ fn invalid(entry: &RegistryEntry, reason: impl Into<String>) -> RegistryError {
 
 #[allow(clippy::too_many_lines)]
 fn validate_entry(entry: &RegistryEntry) -> Result<(), RegistryError> {
-    if entry.id == 0 || entry.name.is_empty() || !is_canonical_name(&entry.name) {
+    if entry.id == 0 || entry.name.len() > MAX_ENTRY_NAME_BYTES || !is_canonical_name(&entry.name) {
         return Err(invalid(
             entry,
             "ID must be non-zero and name must be UpperCamelCase",
         ));
     }
-    if entry.owner.team.is_empty()
-        || entry.owner.crate_name.is_empty()
-        || entry.owner.module.is_empty()
-        || entry.description.trim().is_empty()
-        || entry.introduced_in.trim().is_empty()
+    if !valid_text(&entry.owner.team, MAX_ENTRY_NAME_BYTES)
+        || !valid_text(&entry.owner.crate_name, MAX_ENTRY_NAME_BYTES)
+        || !valid_text(&entry.owner.module, MAX_ENTRY_NAME_BYTES)
+        || !valid_text(&entry.description, MAX_ENTRY_TEXT_BYTES)
+        || !valid_text(&entry.introduced_in, MAX_ENTRY_NAME_BYTES)
+        || entry.supported_schema_versions.len() > MAX_ENTRY_COLLECTION_ITEMS
+        || entry.attributes.len() > MAX_ENTRY_COLLECTION_ITEMS
+        || entry.references.len() > MAX_ENTRY_COLLECTION_ITEMS
+        || entry.attributes.iter().any(|(key, value)| {
+            !valid_text(key, MAX_ENTRY_NAME_BYTES) || !valid_text(value, MAX_ENTRY_TEXT_BYTES)
+        })
+        || entry
+            .change_proposal_ref
+            .as_deref()
+            .is_some_and(|value| !valid_text(value, MAX_ENTRY_TEXT_BYTES))
+        || entry
+            .migration_ref
+            .as_deref()
+            .is_some_and(|value| !valid_text(value, MAX_ENTRY_TEXT_BYTES))
     {
         return Err(invalid(
             entry,
@@ -214,11 +335,19 @@ fn validate_entry(entry: &RegistryEntry) -> Result<(), RegistryError> {
             "deprecated entries require replacement or migration metadata",
         ));
     }
+    if entry.supported_schema_versions.contains(&0)
+        || entry
+            .supported_schema_versions
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != entry.supported_schema_versions.len()
+        || entry.schema_version.is_none() && !entry.supported_schema_versions.is_empty()
+    {
+        return Err(invalid(entry, "schema version history is invalid"));
+    }
     if let Some(version) = entry.schema_version {
-        if version == 0
-            || !entry.supported_schema_versions.contains(&version)
-            || entry.supported_schema_versions.contains(&0)
-        {
+        if version == 0 || !entry.supported_schema_versions.contains(&version) {
             return Err(invalid(
                 entry,
                 "current schema must be non-zero and included in supported versions",
@@ -269,6 +398,12 @@ fn is_canonical_name(name: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric())
 }
 
+fn valid_text(value: &str, maximum: usize) -> bool {
+    !value.trim().is_empty()
+        && value.len() <= maximum
+        && value.chars().all(|character| !character.is_control())
+}
+
 /// Computes the stable digest of semantic fields; prose and ownership changes are intentionally
 /// excluded.
 #[must_use]
@@ -283,12 +418,31 @@ pub fn semantic_digest(entry: &RegistryEntry) -> String {
         entry.security_sensitive
     );
     for (key, value) in &entry.attributes {
-        let _ = write!(bytes, "{key}={value}|");
+        let _ = write!(
+            bytes,
+            "{}={}|",
+            escape_semantic(key),
+            escape_semantic(value)
+        );
     }
     for reference in &entry.references {
         let _ = write!(bytes, "{}:{}|", reference.domain, reference.id);
     }
+    if let Some(replacement) = entry.replacement {
+        let _ = write!(
+            bytes,
+            "replacement={}:{}|",
+            replacement.domain, replacement.id
+        );
+    }
     blake3::hash(bytes.as_bytes()).to_hex().to_string()
+}
+
+fn escape_semantic(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('|', "%7C")
+        .replace('=', "%3D")
 }
 
 #[must_use]
@@ -549,14 +703,22 @@ pub fn generated_markdown(set: &RegistrySet) -> String {
             "| {} | {} | {} | {:?} | {} | {} | {} |",
             entry.domain,
             entry.id,
-            entry.name,
+            markdown_cell(&entry.name),
             entry.status,
-            entry.owner.team,
+            markdown_cell(&entry.owner.team),
             schema,
-            entry.description.replace('|', "\\|")
+            markdown_cell(&entry.description)
         );
     }
     output
+}
+
+fn markdown_cell(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "\\|")
 }
 
 /// Writes or checks a deterministic artifact.
@@ -699,6 +861,33 @@ mod tests {
     fn missing_owner_is_rejected() {
         let mut value = entry(RegistryDomain::AuditAction, 1, "FirstAction");
         value.owner.team.clear();
+        assert!(matches!(
+            validate(&set(vec![value])),
+            Err(RegistryError::InvalidEntry { .. })
+        ));
+    }
+
+    #[test]
+    fn semantic_digest_frames_attribute_delimiters_and_replacement() {
+        let mut combined = entry(RegistryDomain::AuditAction, 1, "FirstAction");
+        combined.attributes.insert("a".into(), "b|c=d".into());
+        let mut split = entry(RegistryDomain::AuditAction, 1, "FirstAction");
+        split.attributes.insert("a".into(), "b".into());
+        split.attributes.insert("c".into(), "d".into());
+        assert_ne!(semantic_digest(&combined), semantic_digest(&split));
+
+        let before = semantic_digest(&combined);
+        combined.replacement = Some(RegistryRef {
+            domain: RegistryDomain::AuditAction,
+            id: 2,
+        });
+        assert_ne!(semantic_digest(&combined), before);
+    }
+
+    #[test]
+    fn control_characters_and_unbounded_metadata_are_rejected() {
+        let mut value = entry(RegistryDomain::AuditAction, 1, "FirstAction");
+        value.description = "unsafe\nmarkdown".into();
         assert!(matches!(
             validate(&set(vec![value])),
             Err(RegistryError::InvalidEntry { .. })
