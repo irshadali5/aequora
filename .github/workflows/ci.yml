@@ -137,6 +137,8 @@ jobs:
         run: bash scripts/check-local-storage-architecture.sh
       - name: Enforce reference workspace layers and crate dependency direction
         run: bash scripts/check-reference-implementation-architecture.sh
+      - name: Enforce stable public Rust SDK and extension boundaries
+        run: bash scripts/check-public-sdk-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
@@ -173,6 +175,22 @@ jobs:
         run: rustup toolchain install 1.87.0 --profile minimal
       - name: Check every target and feature at MSRV
         run: cargo +1.87.0 check --workspace --all-targets --all-features --locked
+
+  public-api-semver:
+    name: Public Rust API semver
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Install pinned cargo-semver-checks
+        run: cargo +stable install cargo-semver-checks --version 0.49.0 --locked
+      - name: Reject accidental stable API breakage
+        run: cargo semver-checks check-release -p aequora -p aequora-client -p aequora-server -p aequora-types --baseline-rev "${{ github.event.pull_request.base.sha }}"
 
   postgres:
     name: PostgreSQL transaction integration
