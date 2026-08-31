@@ -67,6 +67,17 @@ members = [
     "crates/aequora-mapping",
     "crates/aequora-migration",
     "crates/aequora-metadata",
+    "crates/aequora-mobile-bindings",
+    "crates/aequora-mobile-runtime",
+    "crates/aequora-platform-android",
+    "crates/aequora-platform-ios",
+    "crates/aequora-desktop-runtime",
+    "crates/aequora-ipc-protocol",
+    "crates/aequora-agent",
+    "crates/aequora-platform-linux",
+    "crates/aequora-platform-windows",
+    "crates/aequora-platform-macos",
+    "crates/aequora-update",
 ]
 
 [workspace.package]
