@@ -1060,6 +1060,7 @@ dependencies = [
 name = "aequora-testkit"
 version = "0.1.0"
 dependencies = [
+ "aequora-adapter-sdk",
  "aequora-admin",
  "aequora-agent",
  "aequora-audit",
