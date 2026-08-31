@@ -4,6 +4,12 @@ Aequora synchronizes typed operations and authoritative state transitions. It do
 SQL, table layouts, database pages, or write-ahead logs. Client and authority persistence are
 separate choices and may be replaced independently.
 
+New adapters should use the stable Part 36 contracts and conformance flow documented in
+[`storage-adapter-sdk.md`](storage-adapter-sdk.md). The older `aequora-store` traits below remain the
+current engine integration surface; Part 36 adds the public role transaction, capability manifest,
+environment binding, migration, error normalization, and certification contracts without changing
+the database-neutral core direction.
+
 ## Client-side contract
 
 A local adapter implements the capabilities combined by `aequora_store::LocalStore`:
