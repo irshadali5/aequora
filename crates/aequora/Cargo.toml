@@ -13,96 +13,32 @@ keywords = ["crdt", "local-first", "sync", "distributed", "database"]
 categories = ["database", "network-programming", "data-structures"]
 
 [features]
-default = ["postcard"]
-postcard = []
-ron = ["aequora-codec/ron"]
-json = ["aequora-codec/json"]
-axum = ["dep:aequora-axum", "aequora-config/axum"]
-http-client = ["dep:aequora-http", "aequora-config/http-client"]
+default = []
+macros = ["dep:aequora-executor", "dep:aequora-macros", "dep:aequora-profile"]
+# Compatibility feature names for repository integration examples. Application code should add
+# the owning adapter/integration crate directly.
+axum = ["dep:aequora-axum"]
+http-client = ["dep:aequora-http"]
 postgres = ["dep:aequora-store-postgres"]
 stoolap = ["dep:aequora-store-stoolap"]
-testkit = ["dep:aequora-testkit", "dep:tokio"]
-tracing = ["aequora-observability/tracing"]
-quic = ["dep:aequora-quic", "aequora-config/quic"]
-record-sync = ["dep:aequora-mapping", "dep:aequora-migration", "dep:aequora-schema"]
+testkit = ["dep:aequora-testkit"]
 
 [dependencies]
-aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
-aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
-aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
-aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
-aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
-aequora-blob = { version = "0.1.0", path = "../aequora-blob" }
-aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
+aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
-aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
-aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
-aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
-aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
-aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
-aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
-aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
-aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
-aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
-aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
-aequora-config = { version = "0.1.0", path = "../aequora-config" }
-aequora-crdt = { version = "0.1.0", path = "../aequora-crdt" }
-aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
-aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
-aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
-aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
-aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
-aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
-aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
-aequora-ipc-protocol = { version = "0.1.0", path = "../aequora-ipc-protocol" }
-aequora-legacy = { version = "0.1.0", path = "../aequora-legacy" }
-aequora-legacy-api = { version = "0.1.0", path = "../aequora-legacy-api" }
-aequora-live = { version = "0.1.0", path = "../aequora-live" }
-aequora-macros = { version = "0.1.0", path = "../aequora-macros" }
-aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
-aequora-mobile-bindings = { version = "0.1.0", path = "../aequora-mobile-bindings" }
-aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime" }
-aequora-agent = { version = "0.1.0", path = "../aequora-agent" }
-aequora-platform-linux = { version = "0.1.0", path = "../aequora-platform-linux" }
-aequora-platform-windows = { version = "0.1.0", path = "../aequora-platform-windows" }
-aequora-platform-macos = { version = "0.1.0", path = "../aequora-platform-macos" }
-aequora-mapping = { version = "0.1.0", path = "../aequora-mapping", optional = true }
-aequora-migration = { version = "0.1.0", path = "../aequora-migration", optional = true }
-aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
-aequora-partition = { version = "0.1.0", path = "../aequora-partition" }
-aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
-aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
-aequora-region = { version = "0.1.0", path = "../aequora-region" }
-aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
-aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
-aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
-aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
-aequora-routing = { version = "0.1.0", path = "../aequora-routing" }
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-security = { version = "0.1.0", path = "../aequora-security" }
-aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
-aequora-schema = { version = "0.1.0", path = "../aequora-schema", optional = true }
+aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
-aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
-aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+
+aequora-executor = { version = "0.1.0", path = "../aequora-executor", optional = true }
+aequora-macros = { version = "0.1.0", path = "../aequora-macros", optional = true }
+aequora-profile = { version = "0.1.0", path = "../aequora-profile", optional = true }
+
+aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
+aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
 aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
-aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
-aequora-update = { version = "0.1.0", path = "../aequora-update" }
-aequora-storage-core = { version = "0.1.0", path = "../aequora-storage-core" }
-aequora-storage-profile = { version = "0.1.0", path = "../aequora-storage-profile" }
-aequora-storage-maintenance = { version = "0.1.0", path = "../aequora-storage-maintenance" }
-aequora-storage-backup = { version = "0.1.0", path = "../aequora-storage-backup" }
-aequora-storage-encryption = { version = "0.1.0", path = "../aequora-storage-encryption" }
-aequora-storage-conformance = { version = "0.1.0", path = "../aequora-storage-conformance" }
-aequora-blob-store = { version = "0.1.0", path = "../aequora-blob-store" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
-aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
-aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
-tokio = { workspace = true, optional = true }
 
 [[example]]
 name = "in_process"
@@ -116,7 +52,16 @@ required-features = ["stoolap", "testkit"]
 name = "adapter_manifests"
 required-features = ["postgres", "stoolap"]
 
+[[test]]
+name = "derive_operation"
+required-features = ["macros"]
+
 [dev-dependencies]
+aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
+aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
+aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-store = { version = "0.1.0", path = "../aequora-store" }
 async-trait.workspace = true
 axum.workspace = true
 hex.workspace = true
@@ -124,6 +69,7 @@ postcard.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

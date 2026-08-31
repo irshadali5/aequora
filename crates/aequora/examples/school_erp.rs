@@ -1,19 +1,20 @@
-use aequora::{
-    client::{ClientConfig, ClientSyncEngine},
-    clock::TestClock,
-    conflict::RejectConflicts,
-    executor::{
-        AuthContext, AuthoritativeMutation, CurrentEntity, DomainOperation, ExecutionError,
-        OperationHandler, OperationRegistry, ScopeAuthorizer,
-    },
-    protocol::{ChangeKind, OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata},
-    server::{ExchangeService, SyncServer},
-    stoolap::{StoolapDatabase, StoolapStore},
-    testkit::{InMemoryAuthoritativeStore, InProcessTransport},
-    types::{
-        ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
-        ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
-    },
+use aequora_client::{ClientConfig, ClientSyncEngine};
+use aequora_clock::TestClock;
+use aequora_conflict::RejectConflicts;
+use aequora_executor::{
+    AuthContext, AuthoritativeMutation, CurrentEntity, DomainOperation, ExecutionError,
+    OperationHandler, OperationRegistry, ScopeAuthorizer,
+};
+use aequora_protocol::{
+    ChangeKind, OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata,
+};
+use aequora_server::{ExchangeService, SyncServer};
+use aequora_store::StoreError;
+use aequora_store_stoolap::{StoolapDatabase, StoolapStore};
+use aequora_testkit::{InMemoryAuthoritativeStore, InProcessTransport};
+use aequora_types::{
+    ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
+    ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -156,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     hex::encode(&payload),
                 ),
             )
-            .map_err(|error| aequora::store::StoreError::transient(error.to_string()))?;
+            .map_err(|error| StoreError::transient(error.to_string()))?;
         Ok(())
     })?;
     let (offline_value, provisional) = read_attendance(&local_backend, scope, entity)?;

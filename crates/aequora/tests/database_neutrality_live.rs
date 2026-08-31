@@ -6,22 +6,21 @@
     feature = "testkit"
 ))]
 
-use aequora::{
-    client::{ClientConfig, ClientSyncEngine},
-    clock::TestClock,
-    conflict::RejectConflicts,
-    executor::AuthContext,
-    http_client::{HttpTransport, HttpTransportConfig, NoRequestHeaders},
-    postgres::{PostgresPoolConfig, PostgresStore, SqlxPostgresBackend},
-    protocol::{OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata},
-    server::{ExchangeService, SyncServer},
-    stoolap::{StoolapDatabase, StoolapStore},
-    store::{EntityReader, OutboxState, OutboxStateStore},
-    testkit::AllowAllExecutor,
-    types::{
-        ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
-        ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
-    },
+use aequora_axum::router;
+use aequora_client::{ClientConfig, ClientSyncEngine};
+use aequora_clock::TestClock;
+use aequora_conflict::RejectConflicts;
+use aequora_executor::AuthContext;
+use aequora_http::{HttpTransport, HttpTransportConfig, NoRequestHeaders};
+use aequora_protocol::{OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata};
+use aequora_server::{ExchangeService, SyncServer};
+use aequora_store::{EntityReader, OutboxState, OutboxStateStore, StoreError};
+use aequora_store_postgres::{PostgresPoolConfig, PostgresStore, SqlxPostgresBackend};
+use aequora_store_stoolap::{StoolapDatabase, StoolapStore};
+use aequora_testkit::AllowAllExecutor;
+use aequora_types::{
+    ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
+    ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
 };
 use axum::Extension;
 use reqwest::Url;
@@ -103,7 +102,7 @@ async fn exercise_database_independent_stack(
         Arc::new(RejectConflicts),
         Arc::new(TestClock::new(NodeId::new(), 2_000)),
     ));
-    let app = aequora::axum::router(service, 1024 * 1024).layer(Extension(auth));
+    let app = router(service, 1024 * 1024).layer(Extension(auth));
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let address = listener.local_addr()?;
     let server_task = tokio::spawn(async move { axum::serve(listener, app).await });
@@ -157,7 +156,7 @@ fn prepare_local_database(
                     hex::encode(payload),
                 ),
             )
-            .map_err(|error| aequora::store::StoreError::transient(error.to_string()))?;
+            .map_err(|error| StoreError::transient(error.to_string()))?;
         Ok(())
     })?;
     Ok((directory, backend))

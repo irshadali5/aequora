@@ -1,18 +1,16 @@
-use aequora::{
-    client::{ClientConfig, ClientSyncEngine},
-    clock::TestClock,
-    conflict::RejectConflicts,
-    executor::AuthContext,
-    protocol::{OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata},
-    server::{ExchangeService, SyncServer},
-    store::OutboxStore,
-    testkit::{
-        AllowAllExecutor, InMemoryAuthoritativeStore, InMemoryLocalStore, InProcessTransport,
-    },
-    types::{
-        ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
-        ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
-    },
+use aequora_client::{ClientConfig, ClientSyncEngine};
+use aequora_clock::TestClock;
+use aequora_conflict::RejectConflicts;
+use aequora_executor::AuthContext;
+use aequora_protocol::{OperationEnvelope, OperationKind, OperationMetadata, SessionMetadata};
+use aequora_server::{ExchangeService, SyncServer};
+use aequora_store::OutboxStore;
+use aequora_testkit::{
+    AllowAllExecutor, InMemoryAuthoritativeStore, InMemoryLocalStore, InProcessTransport,
+};
+use aequora_types::{
+    ActorId, DeviceId, EntityId, EntityRef, EntityType, HybridTimestamp, NodeId, OperationId,
+    ProtocolVersion, SchemaVersion, SessionId, SyncScopeId, TenantId,
 };
 use std::sync::Arc;
 
