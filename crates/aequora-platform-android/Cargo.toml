@@ -1,0 +1,16 @@
+[package]
+name = "aequora-platform-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Thin Android host normalization contracts for the Aequora mobile runtime"
+repository.workspace = true
+
+[dependencies]
+aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime" }
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
