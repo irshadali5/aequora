@@ -2,18 +2,14 @@
 
 pub mod diagnostics;
 pub mod resources;
+mod sdk;
 
-/// Stable plug-and-play entry point for constructing a client engine.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AequoraClient;
-
-impl AequoraClient {
-    /// Starts the type-state client builder.
-    #[must_use]
-    pub fn builder() -> ClientSyncEngineBuilder {
-        ClientSyncEngineBuilder::new()
-    }
-}
+pub use sdk::{
+    AequoraClient, AequoraClientBuilder, AequoraError, AequoraErrorCode, BlobHandle,
+    BootstrapProgress, ClientSdkConfig, ConflictHandle, DataChange, DiagnosticsHandle, EventStream,
+    OperationHandle, OperationRef, RetryClass, ScopeHandle, ScopeSubscriptionState, SyncEvent,
+    SyncNextAction, SyncReason, SyncResult,
+};
 
 /// Focused imports for application client integrations.
 pub mod prelude {
@@ -26,16 +22,26 @@ pub mod prelude {
         ScopeCachePolicy, SnapshotCachePolicy, StorageState, ThermalState,
     };
     pub use crate::{
-        AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, BootstrapOutcome, ClientBuildError,
-        ClientConfig, ClientError, ClientReadSession, ClientSyncEngine, ClientSyncEngineBuilder,
-        CoordinatorClosed, CoordinatorStatus, MultiProcessCoordinatorConfig, RetryConfig,
-        SyncCoordinator, SyncCoordinatorConfig, SyncCoordinatorHandle, SyncHealth, SyncOutcome,
-        SyncStatus, SyncSummary, SyncTrigger,
+        AdaptiveBatchConfig, AdaptiveBatcher, AequoraClient, AequoraClientBuilder, AequoraError,
+        AequoraErrorCode, BlobHandle, BootstrapOutcome, BootstrapProgress, ClientBuildError,
+        ClientConfig, ClientError, ClientReadSession, ClientSdkConfig, ClientSyncEngine,
+        ClientSyncEngineBuilder, ConflictHandle, CoordinatorClosed, CoordinatorStatus, DataChange,
+        DiagnosticsHandle, EventStream, MultiProcessCoordinatorConfig, OperationHandle,
+        OperationRef, RetryClass, RetryConfig, ScopeHandle, ScopeSubscriptionState,
+        SyncCoordinator, SyncCoordinatorConfig, SyncCoordinatorHandle, SyncEvent, SyncHealth,
+        SyncNextAction, SyncOutcome, SyncReason, SyncResult, SyncStatus, SyncSummary, SyncTrigger,
+    };
+    pub use aequora_adapter_sdk::{
+        ClientIdentity, ClientStore, Credential, CredentialProvider, DomainId, SyncTransport,
     };
     pub use aequora_coordination::{
         FencingToken, LocalProcessMode, LocalStoreGeneration, LocalStoreId, ProcessInstanceId,
     };
     pub use aequora_live::{HintWakeOutcome, HintWakeTracker, SyncHint};
+    pub use aequora_operation::{
+        LocalCommitStatus, MutationReceipt, Operation, OperationKind, OperationSchemaVersion,
+        OperationState,
+    };
     pub use aequora_protocol::{ClientLimits, SessionMetadata, SnapshotLimits};
     pub use aequora_scheduler::{
         AppActivity, NetworkContext, PowerContext, SchedulerPolicy, SchedulerState,
@@ -48,7 +54,7 @@ pub mod prelude {
         AdapterCapabilities, AdapterManifest, AdapterManifestProvider, AdapterRequirements,
         AdapterRole, AdapterTier, LocalStore, ProductionAdapterPair, ScopeStateStore,
     };
-    pub use aequora_transport::{StreamingSyncTransport, SyncTransport};
+    pub use aequora_transport::{StreamingSyncTransport, SyncTransport as EngineSyncTransport};
     pub use aequora_types::{DeviceId, SyncScopeId, TenantId};
 }
 
