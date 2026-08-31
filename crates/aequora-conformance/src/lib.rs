@@ -78,6 +78,8 @@ pub enum ConformanceProfile {
     MobileClientFull,
     DesktopClientFull,
     DesktopAgentFull,
+    MobileLocalStoreFull,
+    DesktopLocalStoreFull,
 }
 
 impl ConformanceProfile {
@@ -96,6 +98,8 @@ impl ConformanceProfile {
             Self::MobileClientFull => 60,
             Self::DesktopClientFull => 61,
             Self::DesktopAgentFull => 62,
+            Self::MobileLocalStoreFull => 63,
+            Self::DesktopLocalStoreFull => 64,
         })
     }
 
@@ -112,7 +116,9 @@ impl ConformanceProfile {
             | Self::Provider
             | Self::MobileClientFull
             | Self::DesktopClientFull
-            | Self::DesktopAgentFull => CertificationTier::FullSync,
+            | Self::DesktopAgentFull
+            | Self::MobileLocalStoreFull
+            | Self::DesktopLocalStoreFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -746,6 +752,9 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
                 ConformanceDomain::DesktopRuntime | ConformanceDomain::ProtocolImplementation
             )
         }
+        ConformanceProfile::MobileLocalStoreFull | ConformanceProfile::DesktopLocalStoreFull => {
+            matches!(domain, ConformanceDomain::StorageAdapter)
+        }
     }
 }
 
@@ -1067,6 +1076,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-DESKTOP009",
         FullSync,
         Some("desktop-derived-state")
+    ),
+    test_definition!(
+        39,
+        "storage_atomic_local_intent",
+        StorageAdapter,
+        "AEQ-INV-STORAGE001",
+        FullSync,
+        Some("storage-atomicity")
+    ),
+    test_definition!(
+        40,
+        "storage_critical_intent_retention",
+        StorageAdapter,
+        "AEQ-INV-STORAGE002",
+        FullSync,
+        Some("storage-pressure")
+    ),
+    test_definition!(
+        41,
+        "storage_cache_purge_isolation",
+        StorageAdapter,
+        "AEQ-INV-STORAGE003",
+        FullSync,
+        Some("storage-cache")
+    ),
+    test_definition!(
+        42,
+        "storage_clone_binding",
+        StorageAdapter,
+        "AEQ-INV-STORAGE004",
+        FullSync,
+        Some("storage-restore")
+    ),
+    test_definition!(
+        43,
+        "storage_format_downgrade",
+        StorageAdapter,
+        "AEQ-INV-STORAGE005",
+        FullSync,
+        Some("storage-migration")
+    ),
+    test_definition!(
+        44,
+        "storage_platform_certification",
+        StorageAdapter,
+        "AEQ-INV-STORAGE006",
+        FullSync,
+        Some("storage-platform")
+    ),
+    test_definition!(
+        45,
+        "storage_verified_publication",
+        StorageAdapter,
+        "AEQ-INV-STORAGE007",
+        FullSync,
+        Some("storage-publication")
+    ),
+    test_definition!(
+        46,
+        "storage_low_disk_truthfulness",
+        StorageAdapter,
+        "AEQ-INV-STORAGE008",
+        FullSync,
+        Some("storage-admission")
+    ),
+    test_definition!(
+        47,
+        "storage_secret_isolation",
+        StorageAdapter,
+        "AEQ-INV-STORAGE009",
+        FullSync,
+        Some("storage-encryption")
+    ),
+    test_definition!(
+        48,
+        "storage_filesystem_placement",
+        StorageAdapter,
+        "AEQ-INV-STORAGE010",
+        FullSync,
+        Some("storage-layout")
     ),
 ];
 
