@@ -709,19 +709,15 @@ pub fn definitions_for(
         .collect()
 }
 
-const fn definition_in_profile(
-    definition: &TestDefinition,
-    profile: ConformanceProfile,
-) -> bool {
+const fn definition_in_profile(definition: &TestDefinition, profile: ConformanceProfile) -> bool {
     match profile {
         ConformanceProfile::LocalAdapter => matches!(
             definition.id.0,
             1 | 4 | 39..=50 | 52..=58
         ),
-        ConformanceProfile::AuthoritativeAdapter => matches!(
-            definition.id.0,
-            2 | 3 | 5 | 7 | 49 | 51..=58
-        ),
+        ConformanceProfile::AuthoritativeAdapter => {
+            matches!(definition.id.0, 2 | 3 | 5 | 7 | 49 | 51..=58)
+        }
         ConformanceProfile::SnapshotAdapter => {
             matches!(definition.id.0, 6 | 49 | 52 | 55 | 56 | 58)
         }
@@ -2238,5 +2234,30 @@ mod tests {
             Err(ConformanceError::InvalidPolicy)
         );
         Ok(())
+    }
+
+    #[test]
+    fn adapter_profiles_select_role_specific_part_36_tests() {
+        let local = definitions_for(
+            ConformanceProfile::LocalAdapter,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+        let authority = definitions_for(
+            ConformanceProfile::AuthoritativeAdapter,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+
+        assert!(local.contains(&ConformanceTestId(50)));
+        assert!(!local.contains(&ConformanceTestId(51)));
+        assert!(authority.contains(&ConformanceTestId(51)));
+        assert!(!authority.contains(&ConformanceTestId(50)));
+        assert!(local.contains(&ConformanceTestId(56)));
+        assert!(authority.contains(&ConformanceTestId(56)));
     }
 }
