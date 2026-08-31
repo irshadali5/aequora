@@ -542,11 +542,31 @@ pub enum InvariantId {
     StorageSecretIsolation,
     /// Live embedded stores avoid unverified network or cloud filesystems.
     StorageFilesystemSafety,
+    /// Foundation and protocol crates never reach physical or framework integrations.
+    ImplementationFoundationIsolation,
+    /// Physical database types never leak into storage-neutral public contracts.
+    ImplementationStorageTypeIsolation,
+    /// Client synchronization correctness remains independent of UI frameworks.
+    ImplementationClientUiIsolation,
+    /// Server synchronization correctness remains independent of HTTP routing frameworks.
+    ImplementationServerHttpIsolation,
+    /// Physical adapters depend inward on storage contracts, never the reverse.
+    ImplementationAdapterDirection,
+    /// Platform-specific dependencies remain isolated to their integration crates.
+    ImplementationPlatformIsolation,
+    /// Cargo features do not replace physical adapter crate boundaries.
+    ImplementationFeatureIsolation,
+    /// Application binaries remain composition roots rather than semantic owners.
+    ImplementationCompositionRoot,
+    /// Generated registry artifacts deterministically match canonical sources.
+    ImplementationRegistryDeterminism,
+    /// Every dependency edge conforms to the declared machine-readable layer graph.
+    ImplementationDependencyGraph,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 266] = [
+    pub const ALL: [Self; 276] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -813,6 +833,16 @@ impl InvariantId {
         Self::StorageAdmissionTruthfulness,
         Self::StorageSecretIsolation,
         Self::StorageFilesystemSafety,
+        Self::ImplementationFoundationIsolation,
+        Self::ImplementationStorageTypeIsolation,
+        Self::ImplementationClientUiIsolation,
+        Self::ImplementationServerHttpIsolation,
+        Self::ImplementationAdapterDirection,
+        Self::ImplementationPlatformIsolation,
+        Self::ImplementationFeatureIsolation,
+        Self::ImplementationCompositionRoot,
+        Self::ImplementationRegistryDeterminism,
+        Self::ImplementationDependencyGraph,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1086,6 +1116,16 @@ impl InvariantId {
             Self::StorageAdmissionTruthfulness => "AEQ-INV-STORAGE008",
             Self::StorageSecretIsolation => "AEQ-INV-STORAGE009",
             Self::StorageFilesystemSafety => "AEQ-INV-STORAGE010",
+            Self::ImplementationFoundationIsolation => "AEQ-INV-IMPL001",
+            Self::ImplementationStorageTypeIsolation => "AEQ-INV-IMPL002",
+            Self::ImplementationClientUiIsolation => "AEQ-INV-IMPL003",
+            Self::ImplementationServerHttpIsolation => "AEQ-INV-IMPL004",
+            Self::ImplementationAdapterDirection => "AEQ-INV-IMPL005",
+            Self::ImplementationPlatformIsolation => "AEQ-INV-IMPL006",
+            Self::ImplementationFeatureIsolation => "AEQ-INV-IMPL007",
+            Self::ImplementationCompositionRoot => "AEQ-INV-IMPL008",
+            Self::ImplementationRegistryDeterminism => "AEQ-INV-IMPL009",
+            Self::ImplementationDependencyGraph => "AEQ-INV-IMPL010",
         }
     }
 
@@ -1878,6 +1918,36 @@ impl InvariantId {
             Self::StorageFilesystemSafety => {
                 "live embedded stores are excluded from unverified network and cloud-synchronized filesystems"
             }
+            Self::ImplementationFoundationIsolation => {
+                "foundation and protocol crates never depend on frameworks, databases, UI, or platform integrations"
+            }
+            Self::ImplementationStorageTypeIsolation => {
+                "physical database types never appear in storage-neutral public contracts"
+            }
+            Self::ImplementationClientUiIsolation => {
+                "client synchronization correctness does not depend on a UI framework"
+            }
+            Self::ImplementationServerHttpIsolation => {
+                "server synchronization correctness does not depend on HTTP routing behavior"
+            }
+            Self::ImplementationAdapterDirection => {
+                "physical adapters implement inward storage contracts and are never imported by storage core"
+            }
+            Self::ImplementationPlatformIsolation => {
+                "platform-specific dependencies are isolated to platform and integration crates"
+            }
+            Self::ImplementationFeatureIsolation => {
+                "Cargo features do not substitute for architectural adapter boundaries"
+            }
+            Self::ImplementationCompositionRoot => {
+                "application binaries compose libraries without owning reusable synchronization semantics"
+            }
+            Self::ImplementationRegistryDeterminism => {
+                "generated registry artifacts deterministically correspond to canonical registry sources"
+            }
+            Self::ImplementationDependencyGraph => {
+                "every production dependency edge conforms to the declared workspace layer graph"
+            }
         }
     }
 
@@ -2156,6 +2226,16 @@ impl InvariantId {
             Self::StorageAdmissionTruthfulness => 263,
             Self::StorageSecretIsolation => 264,
             Self::StorageFilesystemSafety => 265,
+            Self::ImplementationFoundationIsolation => 266,
+            Self::ImplementationStorageTypeIsolation => 267,
+            Self::ImplementationClientUiIsolation => 268,
+            Self::ImplementationServerHttpIsolation => 269,
+            Self::ImplementationAdapterDirection => 270,
+            Self::ImplementationPlatformIsolation => 271,
+            Self::ImplementationFeatureIsolation => 272,
+            Self::ImplementationCompositionRoot => 273,
+            Self::ImplementationRegistryDeterminism => 274,
+            Self::ImplementationDependencyGraph => 275,
         }
     }
 }
@@ -2207,7 +2287,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 266] = [
+pub static REGISTRY: [InvariantEntry; 276] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4069,6 +4149,76 @@ pub static REGISTRY: [InvariantEntry; 266] = [
         "storage_path_policy_matrix",
         "storage_layout_contract",
         "storage_unsafe_path_total",
+    ),
+    entry(
+        InvariantId::ImplementationFoundationIsolation,
+        "foundation_dependency_isolation",
+        "workspace_layer_graph_matrix",
+        "guppy_foundation_boundary",
+        "architecture_foundation_edge_total",
+    ),
+    entry(
+        InvariantId::ImplementationStorageTypeIsolation,
+        "storage_contract_type_isolation",
+        "public_contract_source_scan",
+        "database_neutrality_gate",
+        "architecture_storage_type_leak_total",
+    ),
+    entry(
+        InvariantId::ImplementationClientUiIsolation,
+        "client_ui_independence",
+        "client_dependency_policy_matrix",
+        "client_boundary_gate",
+        "architecture_client_ui_edge_total",
+    ),
+    entry(
+        InvariantId::ImplementationServerHttpIsolation,
+        "server_http_independence",
+        "server_dependency_policy_matrix",
+        "server_boundary_gate",
+        "architecture_server_http_edge_total",
+    ),
+    entry(
+        InvariantId::ImplementationAdapterDirection,
+        "adapter_dependency_direction",
+        "adapter_reverse_edge_matrix",
+        "storage_adapter_boundary_gate",
+        "architecture_adapter_reverse_edge_total",
+    ),
+    entry(
+        InvariantId::ImplementationPlatformIsolation,
+        "platform_dependency_isolation",
+        "exclusive_dependency_owner_matrix",
+        "platform_boundary_gate",
+        "architecture_platform_leak_total",
+    ),
+    entry(
+        InvariantId::ImplementationFeatureIsolation,
+        "feature_adapter_isolation",
+        "core_feature_policy_matrix",
+        "feature_boundary_gate",
+        "architecture_adapter_feature_total",
+    ),
+    entry(
+        InvariantId::ImplementationCompositionRoot,
+        "application_composition_root",
+        "application_surface_matrix",
+        "composition_root_gate",
+        "architecture_application_semantic_owner_total",
+    ),
+    entry(
+        InvariantId::ImplementationRegistryDeterminism,
+        "registry_source_generated_parity",
+        "registry_regeneration_matrix",
+        "registry_verify_gate",
+        "architecture_registry_drift_total",
+    ),
+    entry(
+        InvariantId::ImplementationDependencyGraph,
+        "declared_dependency_graph",
+        "new_dependency_edge_matrix",
+        "workspace_architecture_gate",
+        "architecture_forbidden_edge_total",
     ),
 ];
 
