@@ -1,0 +1,14 @@
+[package]
+name = "aequora-storage-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform local storage certification matrix for Aequora"
+[dependencies]
+aequora-storage-core = { version = "0.1.0", path = "../aequora-storage-core" }
+serde.workspace = true
+thiserror.workspace = true
+[lints]
+workspace = true
