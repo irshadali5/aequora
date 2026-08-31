@@ -92,6 +92,13 @@ aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", 
 aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-update = { version = "0.1.0", path = "../aequora-update" }
+aequora-storage-core = { version = "0.1.0", path = "../aequora-storage-core" }
+aequora-storage-profile = { version = "0.1.0", path = "../aequora-storage-profile" }
+aequora-storage-maintenance = { version = "0.1.0", path = "../aequora-storage-maintenance" }
+aequora-storage-backup = { version = "0.1.0", path = "../aequora-storage-backup" }
+aequora-storage-encryption = { version = "0.1.0", path = "../aequora-storage-encryption" }
+aequora-storage-conformance = { version = "0.1.0", path = "../aequora-storage-conformance" }
+aequora-blob-store = { version = "0.1.0", path = "../aequora-blob-store" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
 aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
