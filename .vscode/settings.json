@@ -1,0 +1,24 @@
+{
+  "rust-analyzer.checkOnSave": false,
+  "rust-analyzer.numThreads": 1,
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cachePriming.numThreads": 1,
+  "rust-analyzer.cfg.setTest": false,
+  "rust-analyzer.cargo.allFeatures": false,
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.cargo.buildScripts.rebuildOnSave": false,
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.check.extraArgs": [
+    "-j",
+    "1"
+  ],
+  "rust-analyzer.lru.capacity": 64,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.procMacro.attributes.enable": false,
+  "rust-analyzer.procMacro.processes": 1
+}
