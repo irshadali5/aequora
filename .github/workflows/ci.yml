@@ -139,6 +139,8 @@ jobs:
         run: bash scripts/check-reference-implementation-architecture.sh
       - name: Enforce stable public Rust SDK and extension boundaries
         run: bash scripts/check-public-sdk-architecture.sh
+      - name: Enforce storage adapter SDK and official adapter contracts
+        run: bash scripts/check-storage-adapter-sdk-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
