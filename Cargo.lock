@@ -437,6 +437,7 @@ dependencies = [
  "aequora-security",
  "guppy",
  "ron",
+ "serde",
 ]
 
 [[package]]

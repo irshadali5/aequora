@@ -29,6 +29,8 @@ use guppy::{
     graph::{DependencyDirection, PackageGraph, PackageMetadata},
 };
 
+mod workspace_architecture;
+
 const MAX_DEV_INPUT_BYTES: usize = 16 * 1_024 * 1_024;
 
 const BOUNDARY_RULES: &[(&str, &[&str])] = &[
@@ -390,7 +392,15 @@ fn run() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         Some("graph") => print_graph(&graph, arguments.next().as_deref()),
-        Some("check") => check_boundaries(&graph),
+        Some("check") => {
+            check_boundaries(&graph)?;
+            workspace_architecture::check(&graph)
+        }
+        Some("architecture") => match arguments.next().as_deref() {
+            Some("check") => workspace_architecture::check(&graph),
+            Some("map") => workspace_architecture::print_map(&graph),
+            _ => Err(io::Error::other("architecture command must be `check` or `map`").into()),
+        },
         Some("coordination") => print_coordination(arguments.next().as_deref(), arguments.next()),
         Some("scheduler") => print_scheduler(arguments.next().as_deref(), arguments.next()),
         Some("scope") => print_scope(arguments.next().as_deref(), arguments.next()),
@@ -423,6 +433,8 @@ fn run() -> Result<(), Box<dyn Error>> {
 fn print_help() {
     println!("aequora-dev summary             workspace and edge counts");
     println!("aequora-dev graph [crate]       compact direct workspace dependencies");
+    println!("aequora-dev architecture check  validate Part 34 layer and dependency policy");
+    println!("aequora-dev architecture map    print the declared production dependency map");
     println!("aequora-dev check               enforce database and layer boundaries");
     println!("aequora-dev coordination explain");
     println!("aequora-dev coordination status <snapshot.ron> [now_unix_ms]");
