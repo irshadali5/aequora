@@ -562,11 +562,31 @@ pub enum InvariantId {
     ImplementationRegistryDeterminism,
     /// Every dependency edge conforms to the declared machine-readable layer graph.
     ImplementationDependencyGraph,
+    /// Public client APIs cannot directly advance authoritative synchronization cursors.
+    SdkCursorIsolation,
+    /// Local mutation success is distinct from authoritative server confirmation.
+    SdkLocalCommitDistinction,
+    /// Stable public APIs remain storage and platform neutral.
+    SdkStorageNeutrality,
+    /// Cancelling an SDK future cannot invalidate already-durable intent.
+    SdkCancellationSafety,
+    /// Advisory event loss cannot make durable state unrecoverable.
+    SdkEventLossSafety,
+    /// Stable error categories and codes remain interpretable across releases.
+    SdkErrorCompatibility,
+    /// Extensions cannot redefine core cursor, authority, idempotency, or identity semantics.
+    SdkClosedCoreSemantics,
+    /// Crate, protocol, store, and operation schema versions remain independent.
+    SdkVersionIndependence,
+    /// Dangerous operations are absent from ordinary convenience APIs.
+    SdkDangerousOperationIsolation,
+    /// Public API changes receive an automated semver compatibility check.
+    SdkSemverAutomation,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 276] = [
+    pub const ALL: [Self; 286] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -843,6 +863,16 @@ impl InvariantId {
         Self::ImplementationCompositionRoot,
         Self::ImplementationRegistryDeterminism,
         Self::ImplementationDependencyGraph,
+        Self::SdkCursorIsolation,
+        Self::SdkLocalCommitDistinction,
+        Self::SdkStorageNeutrality,
+        Self::SdkCancellationSafety,
+        Self::SdkEventLossSafety,
+        Self::SdkErrorCompatibility,
+        Self::SdkClosedCoreSemantics,
+        Self::SdkVersionIndependence,
+        Self::SdkDangerousOperationIsolation,
+        Self::SdkSemverAutomation,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1126,6 +1156,16 @@ impl InvariantId {
             Self::ImplementationCompositionRoot => "AEQ-INV-IMPL008",
             Self::ImplementationRegistryDeterminism => "AEQ-INV-IMPL009",
             Self::ImplementationDependencyGraph => "AEQ-INV-IMPL010",
+            Self::SdkCursorIsolation => "AEQ-INV-SDK001",
+            Self::SdkLocalCommitDistinction => "AEQ-INV-SDK002",
+            Self::SdkStorageNeutrality => "AEQ-INV-SDK003",
+            Self::SdkCancellationSafety => "AEQ-INV-SDK004",
+            Self::SdkEventLossSafety => "AEQ-INV-SDK005",
+            Self::SdkErrorCompatibility => "AEQ-INV-SDK006",
+            Self::SdkClosedCoreSemantics => "AEQ-INV-SDK007",
+            Self::SdkVersionIndependence => "AEQ-INV-SDK008",
+            Self::SdkDangerousOperationIsolation => "AEQ-INV-SDK009",
+            Self::SdkSemverAutomation => "AEQ-INV-SDK010",
         }
     }
 
@@ -1948,6 +1988,36 @@ impl InvariantId {
             Self::ImplementationDependencyGraph => {
                 "every production dependency edge conforms to the declared workspace layer graph"
             }
+            Self::SdkCursorIsolation => {
+                "public client APIs cannot directly advance authoritative synchronization cursors"
+            }
+            Self::SdkLocalCommitDistinction => {
+                "public mutation success distinguishes durable local commit from authority confirmation"
+            }
+            Self::SdkStorageNeutrality => {
+                "stable public APIs expose no physical database or platform transaction types"
+            }
+            Self::SdkCancellationSafety => {
+                "cancelling an SDK future cannot invalidate already-durable local intent"
+            }
+            Self::SdkEventLossSafety => {
+                "advisory event loss cannot make durable synchronization state unrecoverable"
+            }
+            Self::SdkErrorCompatibility => {
+                "stable public error categories and codes remain interpretable across releases"
+            }
+            Self::SdkClosedCoreSemantics => {
+                "extensions cannot redefine cursor authority idempotency or identity semantics"
+            }
+            Self::SdkVersionIndependence => {
+                "crate protocol store and operation schema versions evolve independently"
+            }
+            Self::SdkDangerousOperationIsolation => {
+                "dangerous operations are explicit and absent from ordinary convenience APIs"
+            }
+            Self::SdkSemverAutomation => {
+                "public API changes are automatically checked for accidental semver breakage"
+            }
         }
     }
 
@@ -2236,6 +2306,16 @@ impl InvariantId {
             Self::ImplementationCompositionRoot => 273,
             Self::ImplementationRegistryDeterminism => 274,
             Self::ImplementationDependencyGraph => 275,
+            Self::SdkCursorIsolation => 276,
+            Self::SdkLocalCommitDistinction => 277,
+            Self::SdkStorageNeutrality => 278,
+            Self::SdkCancellationSafety => 279,
+            Self::SdkEventLossSafety => 280,
+            Self::SdkErrorCompatibility => 281,
+            Self::SdkClosedCoreSemantics => 282,
+            Self::SdkVersionIndependence => 283,
+            Self::SdkDangerousOperationIsolation => 284,
+            Self::SdkSemverAutomation => 285,
         }
     }
 }
@@ -2287,7 +2367,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 276] = [
+pub static REGISTRY: [InvariantEntry; 286] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4219,6 +4299,76 @@ pub static REGISTRY: [InvariantEntry; 276] = [
         "new_dependency_edge_matrix",
         "workspace_architecture_gate",
         "architecture_forbidden_edge_total",
+    ),
+    entry(
+        InvariantId::SdkCursorIsolation,
+        "sdk_cursor_isolation",
+        "public_surface_cursor_scan",
+        "sdk_architecture_gate",
+        "sdk_cursor_bypass_total",
+    ),
+    entry(
+        InvariantId::SdkLocalCommitDistinction,
+        "sdk_local_commit_distinction",
+        "mutation_receipt_contract",
+        "client_store_commit_contract",
+        "sdk_false_confirmation_total",
+    ),
+    entry(
+        InvariantId::SdkStorageNeutrality,
+        "sdk_storage_neutrality",
+        "public_surface_dependency_scan",
+        "database_neutrality_gate",
+        "sdk_storage_type_leak_total",
+    ),
+    entry(
+        InvariantId::SdkCancellationSafety,
+        "sdk_cancellation_safety",
+        "cancel_after_durable_commit",
+        "client_store_cancellation_contract",
+        "sdk_cancelled_intent_loss_total",
+    ),
+    entry(
+        InvariantId::SdkEventLossSafety,
+        "sdk_event_loss_safety",
+        "bounded_event_lag_status_query",
+        "client_store_status_contract",
+        "sdk_event_state_loss_total",
+    ),
+    entry(
+        InvariantId::SdkErrorCompatibility,
+        "sdk_error_compatibility",
+        "error_code_compatibility_matrix",
+        "sdk_public_api_gate",
+        "sdk_unknown_error_code_total",
+    ),
+    entry(
+        InvariantId::SdkClosedCoreSemantics,
+        "sdk_closed_core_semantics",
+        "extension_surface_source_scan",
+        "sdk_architecture_gate",
+        "sdk_core_semantic_override_total",
+    ),
+    entry(
+        InvariantId::SdkVersionIndependence,
+        "sdk_version_independence",
+        "compatibility_matrix_contract",
+        "sdk_release_gate",
+        "sdk_version_conflation_total",
+    ),
+    entry(
+        InvariantId::SdkDangerousOperationIsolation,
+        "sdk_dangerous_operation_isolation",
+        "convenience_surface_misuse_scan",
+        "sdk_architecture_gate",
+        "sdk_dangerous_path_total",
+    ),
+    entry(
+        InvariantId::SdkSemverAutomation,
+        "sdk_semver_automation",
+        "public_api_snapshot_review",
+        "cargo_semver_checks",
+        "sdk_unreviewed_break_total",
     ),
 ];
 
