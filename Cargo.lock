@@ -23,6 +23,7 @@ dependencies = [
  "aequora-authority",
  "aequora-axum",
  "aequora-blob",
+ "aequora-blob-store",
  "aequora-bootstrap",
  "aequora-client",
  "aequora-clock",
@@ -75,6 +76,12 @@ dependencies = [
  "aequora-security",
  "aequora-server",
  "aequora-side-effects",
+ "aequora-storage-backup",
+ "aequora-storage-conformance",
+ "aequora-storage-core",
+ "aequora-storage-encryption",
+ "aequora-storage-maintenance",
+ "aequora-storage-profile",
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
@@ -185,6 +192,15 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "aequora-blob-store"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "blake3",
+ "serde",
 ]
 
 [[package]]
@@ -959,6 +975,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-storage-backup"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "serde",
+]
+
+[[package]]
+name = "aequora-storage-conformance"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-storage-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-storage-encryption"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "serde",
+]
+
+[[package]]
+name = "aequora-storage-maintenance"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-storage-profile"
+version = "0.1.0"
+dependencies = [
+ "aequora-storage-core",
+ "serde",
+]
+
+[[package]]
 name = "aequora-store"
 version = "0.1.0"
 dependencies = [
@@ -1026,6 +1092,7 @@ dependencies = [
  "aequora-agent",
  "aequora-audit",
  "aequora-authority",
+ "aequora-blob-store",
  "aequora-bootstrap",
  "aequora-client",
  "aequora-clock",
@@ -1070,6 +1137,10 @@ dependencies = [
  "aequora-security",
  "aequora-server",
  "aequora-side-effects",
+ "aequora-storage-backup",
+ "aequora-storage-conformance",
+ "aequora-storage-core",
+ "aequora-storage-profile",
  "aequora-store",
  "aequora-transport",
  "aequora-types",

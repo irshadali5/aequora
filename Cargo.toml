@@ -78,6 +78,13 @@ members = [
     "crates/aequora-platform-windows",
     "crates/aequora-platform-macos",
     "crates/aequora-update",
+    "crates/aequora-storage-core",
+    "crates/aequora-storage-profile",
+    "crates/aequora-storage-maintenance",
+    "crates/aequora-storage-backup",
+    "crates/aequora-storage-encryption",
+    "crates/aequora-storage-conformance",
+    "crates/aequora-blob-store",
 ]
 
 [workspace.package]
