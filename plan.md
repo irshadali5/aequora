@@ -51,6 +51,7 @@ outside the reusable core.
 | 31 | [Android and iOS mobile runtime platform architecture](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md) |
 | 32 | [Linux, Windows, and macOS desktop runtime architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md) |
 | 33 | [Cross-platform local storage architecture](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md) |
+| 34 | [Reference implementation and workspace crate boundaries](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md) |
 
 ## Implementation status
 
@@ -78,6 +79,7 @@ implicitly claim completion of an earlier part.
 | Part 31: Android and iOS mobile runtime platform architecture | Implemented | [Part 31 report](docs/android-ios-mobile-runtime-platform-completion.md) |
 | Part 32: Linux, Windows, and macOS desktop runtime architecture | Implemented | [Part 32 report](docs/linux-windows-macos-desktop-runtime-completion.md) |
 | Part 33: Cross-platform local storage architecture | Implemented | [Part 33 report](docs/cross-platform-local-storage-completion.md) |
+| Part 34: Reference implementation and workspace crate boundaries | Implemented | [Part 34 report](docs/reference-implementation-workspace-boundaries-completion.md) |
 
 ## Implementation workflow
 
@@ -109,6 +111,7 @@ bash scripts/check-legacy-architecture.sh
 bash scripts/check-mobile-architecture.sh
 bash scripts/check-desktop-architecture.sh
 bash scripts/check-local-storage-architecture.sh
+bash scripts/check-reference-implementation-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
