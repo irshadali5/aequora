@@ -53,6 +53,7 @@ outside the reusable core.
 | 33 | [Cross-platform local storage architecture](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md) |
 | 34 | [Reference implementation and workspace crate boundaries](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md) |
 | 35 | [Public Rust API and SDK stability](sys-arch/35-public-rust-api-sdk-stability-architecture.md) |
+| 36 | [Storage adapter SDK and official adapter architecture](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md) |
 
 ## Implementation status
 
@@ -82,6 +83,7 @@ implicitly claim completion of an earlier part.
 | Part 33: Cross-platform local storage architecture | Implemented | [Part 33 report](docs/cross-platform-local-storage-completion.md) |
 | Part 34: Reference implementation and workspace crate boundaries | Implemented | [Part 34 report](docs/reference-implementation-workspace-boundaries-completion.md) |
 | Part 35: Public Rust API and SDK stability | Implemented | [Part 35 report](docs/public-rust-sdk-completion.md) |
+| Part 36: Storage adapter SDK and official adapter architecture | Implemented | [Part 36 report](docs/storage-adapter-sdk-completion.md) |
 
 ## Implementation workflow
 
