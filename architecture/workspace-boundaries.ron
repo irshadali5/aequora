@@ -32,6 +32,7 @@
                 "aequora-integrity",
                 "aequora-legacy",
                 "aequora-observability",
+                "aequora-operation",
                 "aequora-protocol",
                 "aequora-region",
                 "aequora-registry-codegen",
@@ -72,6 +73,7 @@
         (
             name: "storage-contracts",
             crates: [
+                "aequora-adapter-sdk",
                 "aequora-blob-store",
                 "aequora-profile",
                 "aequora-store",
@@ -139,8 +141,8 @@
         (crate_name: "aequora-types", max_workspace: 0, max_external: 3),
         (crate_name: "aequora-protocol", max_workspace: 1, max_external: 2),
         (crate_name: "aequora-storage-core", max_workspace: 0, max_external: 2),
-        (crate_name: "aequora-client", max_workspace: 16, max_external: 3),
-        (crate_name: "aequora-server", max_workspace: 24, max_external: 4),
+        (crate_name: "aequora-client", max_workspace: 18, max_external: 3),
+        (crate_name: "aequora-server", max_workspace: 26, max_external: 4),
         (crate_name: "aequora-axum", max_workspace: 10, max_external: 6),
     ],
     exclusive_dependencies: [
