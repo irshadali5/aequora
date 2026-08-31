@@ -32,6 +32,7 @@ use aequora_types::{
     OperationId, Sequence, SnapshotId, SyncScopeId,
 };
 use async_trait::async_trait;
+use aequora_adapter_sdk as adapter_sdk;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     str::FromStr,
@@ -222,6 +223,57 @@ pub const STOOLAP_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
     capabilities: AdapterCapabilities::FULL_LOCAL,
     limitations: &[],
 };
+
+const STOOLAP_SDK_ROLES: &[adapter_sdk::AdapterRole] = &[
+    adapter_sdk::AdapterRole::LocalReplicaStore,
+    adapter_sdk::AdapterRole::SnapshotStore,
+    adapter_sdk::AdapterRole::IntegrityStore,
+    adapter_sdk::AdapterRole::FencingStore,
+];
+
+const STOOLAP_SDK_CAPABILITIES: &[adapter_sdk::AdapterCapability] = &[
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::ATOMIC_LOCAL_OUTBOX),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::COMPARE_AND_SWAP),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::OUTBOX),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::CURSOR),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::MIGRATIONS),
+    adapter_sdk::AdapterCapability {
+        id: adapter_sdk::CapabilityId::SNAPSHOT,
+        version: adapter_sdk::CapabilityVersion::V1,
+        level: adapter_sdk::CapabilityLevel::Snapshot(
+            adapter_sdk::SnapshotLevel::AtomicGenerationSwap,
+        ),
+    },
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::FENCING),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::INTEGRITY),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::BACKUP),
+];
+
+/// Part 36 machine-readable manifest for the official Stoolap local adapter.
+///
+/// Mobile and desktop certification remains target-bound; this declaration cannot substitute for
+/// a passing [`adapter_sdk::CertifiedEnvironment`] on the selected OS and architecture.
+pub const STOOLAP_STORAGE_ADAPTER_MANIFEST: adapter_sdk::AdapterManifest =
+    adapter_sdk::AdapterManifest {
+        descriptor: adapter_sdk::AdapterDescriptor {
+            adapter_id: adapter_sdk::AdapterId(0xae02),
+            name: "aequora-stoolap-local",
+            version: adapter_sdk::AdapterVersion::new(0, 1, 0),
+            store_kind: adapter_sdk::StoreKind::Embedded,
+        },
+        roles: STOOLAP_SDK_ROLES,
+        capabilities: STOOLAP_SDK_CAPABILITIES,
+        support: adapter_sdk::AdapterSupport::Official,
+        supported_engine_versions: &["Stoolap 0.4.0"],
+        supported_targets: &["x86_64-unknown-linux-gnu"],
+        known_limitations: &[
+            "mobile and non-Linux desktop targets require their own certification artifacts",
+            "single-writer scheduling is required",
+        ],
+        concurrency: adapter_sdk::ConcurrencyModel::SingleWriterMultiProcess,
+        maintainer_owned: true,
+        release_evidence_complete: true,
+    };
 
 #[derive(Clone, Copy)]
 struct StoolapMigration {
@@ -2991,6 +3043,17 @@ mod tests {
         HybridTimestamp, LineageRef, NodeId, ProtocolVersion, SchemaVersion, TenantId,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn part_36_manifest_is_structurally_valid_and_explicit() {
+        STOOLAP_STORAGE_ADAPTER_MANIFEST
+            .validate()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(STOOLAP_STORAGE_ADAPTER_MANIFEST.supports_role(
+            adapter_sdk::AdapterRole::LocalReplicaStore
+        ));
+        assert!(!STOOLAP_STORAGE_ADAPTER_MANIFEST.known_limitations.is_empty());
+    }
 
     fn persistent_dsn(name: &str) -> (tempfile::TempDir, String) {
         let directory = tempdir().unwrap_or_else(|error| panic!("{error}"));
