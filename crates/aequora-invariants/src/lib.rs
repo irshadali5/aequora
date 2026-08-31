@@ -582,11 +582,31 @@ pub enum InvariantId {
     SdkDangerousOperationIsolation,
     /// Public API changes receive an automated semver compatibility check.
     SdkSemverAutomation,
+    /// Capability claims require matching environment-bound conformance evidence.
+    AdapterCapabilityTruthfulness,
+    /// Local domain mutation and outbox insertion remain atomic.
+    AdapterLocalAtomicity,
+    /// Authoritative business, version, journal, ledger, and audit state commit atomically.
+    AdapterAuthorityAtomicity,
+    /// Physical transaction and driver error types never leak into neutral APIs.
+    AdapterTypeIsolation,
+    /// Reusing an operation identity with a different payload digest is rejected.
+    AdapterPayloadBinding,
+    /// Physical migrations preserve durable synchronization identity and progress.
+    AdapterMigrationSafety,
+    /// Missing required storage capabilities fail startup.
+    AdapterStartupSafety,
+    /// Certification binds adapter, engine, platform, and relevant feature configuration.
+    AdapterEnvironmentBinding,
+    /// Performance tuning cannot weaken critical durable intent.
+    AdapterCriticalDurability,
+    /// Official adapters publish stable manifests and explicit limitations.
+    AdapterManifestTruthfulness,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 286] = [
+    pub const ALL: [Self; 296] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -873,6 +893,16 @@ impl InvariantId {
         Self::SdkVersionIndependence,
         Self::SdkDangerousOperationIsolation,
         Self::SdkSemverAutomation,
+        Self::AdapterCapabilityTruthfulness,
+        Self::AdapterLocalAtomicity,
+        Self::AdapterAuthorityAtomicity,
+        Self::AdapterTypeIsolation,
+        Self::AdapterPayloadBinding,
+        Self::AdapterMigrationSafety,
+        Self::AdapterStartupSafety,
+        Self::AdapterEnvironmentBinding,
+        Self::AdapterCriticalDurability,
+        Self::AdapterManifestTruthfulness,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1166,6 +1196,16 @@ impl InvariantId {
             Self::SdkVersionIndependence => "AEQ-INV-SDK008",
             Self::SdkDangerousOperationIsolation => "AEQ-INV-SDK009",
             Self::SdkSemverAutomation => "AEQ-INV-SDK010",
+            Self::AdapterCapabilityTruthfulness => "AEQ-INV-ADAPTER001",
+            Self::AdapterLocalAtomicity => "AEQ-INV-ADAPTER002",
+            Self::AdapterAuthorityAtomicity => "AEQ-INV-ADAPTER003",
+            Self::AdapterTypeIsolation => "AEQ-INV-ADAPTER004",
+            Self::AdapterPayloadBinding => "AEQ-INV-ADAPTER005",
+            Self::AdapterMigrationSafety => "AEQ-INV-ADAPTER006",
+            Self::AdapterStartupSafety => "AEQ-INV-ADAPTER007",
+            Self::AdapterEnvironmentBinding => "AEQ-INV-ADAPTER008",
+            Self::AdapterCriticalDurability => "AEQ-INV-ADAPTER009",
+            Self::AdapterManifestTruthfulness => "AEQ-INV-ADAPTER010",
         }
     }
 
@@ -2018,6 +2058,36 @@ impl InvariantId {
             Self::SdkSemverAutomation => {
                 "public API changes are automatically checked for accidental semver breakage"
             }
+            Self::AdapterCapabilityTruthfulness => {
+                "an adapter capability claim is valid only with matching conformance evidence"
+            }
+            Self::AdapterLocalAtomicity => {
+                "local application mutation and durable outbox intent commit atomically"
+            }
+            Self::AdapterAuthorityAtomicity => {
+                "authoritative business version journal ledger and required audit state commit atomically"
+            }
+            Self::AdapterTypeIsolation => {
+                "database transaction and driver error types never leak into storage-neutral APIs"
+            }
+            Self::AdapterPayloadBinding => {
+                "an operation identifier cannot be reused with a different canonical payload digest"
+            }
+            Self::AdapterMigrationSafety => {
+                "physical migrations preserve durable identity cursor outbox ledger and authority semantics"
+            }
+            Self::AdapterStartupSafety => {
+                "missing required adapter capabilities reject startup instead of weakening correctness"
+            }
+            Self::AdapterEnvironmentBinding => {
+                "adapter certification binds exact adapter engine platform and relevant configuration"
+            }
+            Self::AdapterCriticalDurability => {
+                "performance tuning cannot weaken the durability class of critical intent"
+            }
+            Self::AdapterManifestTruthfulness => {
+                "official adapters publish stable capability manifests and explicit known limitations"
+            }
         }
     }
 
@@ -2316,6 +2386,16 @@ impl InvariantId {
             Self::SdkVersionIndependence => 283,
             Self::SdkDangerousOperationIsolation => 284,
             Self::SdkSemverAutomation => 285,
+            Self::AdapterCapabilityTruthfulness => 286,
+            Self::AdapterLocalAtomicity => 287,
+            Self::AdapterAuthorityAtomicity => 288,
+            Self::AdapterTypeIsolation => 289,
+            Self::AdapterPayloadBinding => 290,
+            Self::AdapterMigrationSafety => 291,
+            Self::AdapterStartupSafety => 292,
+            Self::AdapterEnvironmentBinding => 293,
+            Self::AdapterCriticalDurability => 294,
+            Self::AdapterManifestTruthfulness => 295,
         }
     }
 }
@@ -2367,7 +2447,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 286] = [
+pub static REGISTRY: [InvariantEntry; 296] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4369,6 +4449,76 @@ pub static REGISTRY: [InvariantEntry; 286] = [
         "public_api_snapshot_review",
         "cargo_semver_checks",
         "sdk_unreviewed_break_total",
+    ),
+    entry(
+        InvariantId::AdapterCapabilityTruthfulness,
+        "adapter_capability_truthful",
+        "adapter_claim_evidence_matrix",
+        "adapter_capability_conformance",
+        "adapter_unverified_claim_total",
+    ),
+    entry(
+        InvariantId::AdapterLocalAtomicity,
+        "adapter_local_atomicity",
+        "adapter_local_failpoint_matrix",
+        "adapter_atomic_local_outbox",
+        "adapter_local_atomicity_failure_total",
+    ),
+    entry(
+        InvariantId::AdapterAuthorityAtomicity,
+        "adapter_authority_atomicity",
+        "adapter_authority_failpoint_matrix",
+        "adapter_atomic_authority_commit",
+        "adapter_authority_atomicity_failure_total",
+    ),
+    entry(
+        InvariantId::AdapterTypeIsolation,
+        "adapter_type_isolation",
+        "adapter_public_type_scan",
+        "adapter_neutral_error_boundary",
+        "adapter_physical_type_leak_total",
+    ),
+    entry(
+        InvariantId::AdapterPayloadBinding,
+        "adapter_payload_binding",
+        "adapter_operation_reuse_matrix",
+        "adapter_payload_reuse_rejection",
+        "adapter_payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::AdapterMigrationSafety,
+        "adapter_migration_safety",
+        "adapter_migration_crash_matrix",
+        "adapter_migration_preservation",
+        "adapter_migration_loss_total",
+    ),
+    entry(
+        InvariantId::AdapterStartupSafety,
+        "adapter_startup_fail_closed",
+        "adapter_requirement_matrix",
+        "adapter_startup_fail_closed",
+        "adapter_unsafe_downgrade_total",
+    ),
+    entry(
+        InvariantId::AdapterEnvironmentBinding,
+        "adapter_environment_binding",
+        "adapter_environment_drift_matrix",
+        "adapter_environment_binding",
+        "adapter_uncertified_environment_total",
+    ),
+    entry(
+        InvariantId::AdapterCriticalDurability,
+        "adapter_critical_durability",
+        "adapter_durability_configuration_matrix",
+        "adapter_critical_durability",
+        "adapter_weak_critical_write_total",
+    ),
+    entry(
+        InvariantId::AdapterManifestTruthfulness,
+        "adapter_manifest_truthfulness",
+        "adapter_support_matrix_review",
+        "adapter_manifest_and_limitations",
+        "adapter_manifest_drift_total",
     ),
 ];
 
