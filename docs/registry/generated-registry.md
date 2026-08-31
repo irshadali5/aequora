@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `d4256a2a6c35f0da37075dce61a76328c8427b9f3812309863a95c8e76516569`
+Digest: `357a7648dbce214df45dfd736514a9554d605baf18f4e25f7ab7004dc1fc8f08`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -151,6 +151,10 @@ Digest: `d4256a2a6c35f0da37075dce61a76328c8427b9f3812309863a95c8e76516569`
 | conformance-profile | 62 | DesktopAgentFull | Current | desktop | - | Full desktop agent and local IPC behavior. |
 | conformance-profile | 63 | MobileLocalStoreFull | Current | storage | - | Full target-bound Android or iOS local storage behavior. |
 | conformance-profile | 64 | DesktopLocalStoreFull | Current | storage | - | Full target-bound Linux, Windows, or macOS local storage behavior. |
+| conformance-profile | 65 | LocalAdapter | Current | storage | - | Local transaction, outbox, cursor, reopen, migration, and durability semantics. |
+| conformance-profile | 66 | AuthoritativeAdapter | Current | storage | - | Authoritative transaction, journal, ledger, idempotency, and fencing semantics. |
+| conformance-profile | 67 | SnapshotAdapter | Current | storage | - | Immutable snapshot publication, resume, verification, and atomic activation semantics. |
+| conformance-profile | 68 | FencingAdapter | Current | storage | - | Lease takeover, stale-writer rejection, and monotonic fencing semantics. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -199,6 +203,16 @@ Digest: `d4256a2a6c35f0da37075dce61a76328c8427b9f3812309863a95c8e76516569`
 | conformance-test | 46 | StorageLowDiskTruthfulness | Current | storage | - | Low disk cannot produce false commit success. |
 | conformance-test | 47 | StorageSecretIsolation | Current | storage | - | Secrets remain outside ordinary sync metadata. |
 | conformance-test | 48 | StorageFilesystemPlacement | Current | storage | - | Live stores avoid unverified network and cloud paths. |
+| conformance-test | 49 | AdapterCapabilityConformance | Current | storage | - | Every advertised capability is backed by passing environment-bound evidence. |
+| conformance-test | 50 | AdapterAtomicLocalOutbox | Current | storage | - | Local domain mutation and outbox insertion commit atomically. |
+| conformance-test | 51 | AdapterAtomicAuthorityCommit | Current | storage | - | Authority business, version, journal, ledger, and audit state commit atomically. |
+| conformance-test | 52 | AdapterNeutralErrorBoundary | Current | storage | - | Physical transaction and driver error types stay behind the adapter boundary. |
+| conformance-test | 53 | AdapterPayloadReuseRejection | Current | storage | - | Operation identifier reuse with a different canonical digest is rejected. |
+| conformance-test | 54 | AdapterMigrationPreservation | Current | storage | - | Physical migrations preserve durable synchronization identity and progress. |
+| conformance-test | 55 | AdapterStartupFailClosed | Current | storage | - | Missing required storage capabilities reject startup. |
+| conformance-test | 56 | AdapterEnvironmentBinding | Current | storage | - | Certification binds the adapter, engine, platform, and feature configuration. |
+| conformance-test | 57 | AdapterCriticalDurability | Current | storage | - | Performance settings never weaken critical durable intent. |
+| conformance-test | 58 | AdapterManifestAndLimitations | Current | storage | - | Official adapters publish stable manifests and explicit limitations. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
