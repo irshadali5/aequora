@@ -16,81 +16,23 @@ dependencies = [
 name = "aequora"
 version = "0.1.0"
 dependencies = [
- "aequora-admin",
- "aequora-admission",
- "aequora-agent",
- "aequora-audit",
- "aequora-authority",
+ "aequora-adapter-sdk",
  "aequora-axum",
- "aequora-blob",
- "aequora-blob-store",
- "aequora-bootstrap",
  "aequora-client",
  "aequora-clock",
- "aequora-codec",
- "aequora-compat",
- "aequora-compute",
- "aequora-config",
  "aequora-conflict",
- "aequora-conformance",
- "aequora-coordination",
- "aequora-crdt",
- "aequora-crypto",
- "aequora-desktop-runtime",
- "aequora-diagnostics",
  "aequora-executor",
- "aequora-feed",
- "aequora-governance",
  "aequora-http",
- "aequora-integrity",
- "aequora-ipc-protocol",
- "aequora-jobs",
- "aequora-journal",
- "aequora-legacy",
- "aequora-legacy-api",
- "aequora-live",
  "aequora-macros",
- "aequora-mapping",
- "aequora-metadata",
- "aequora-migration",
- "aequora-mobile-bindings",
- "aequora-mobile-runtime",
- "aequora-observability",
- "aequora-partition",
- "aequora-performance",
- "aequora-platform-linux",
- "aequora-platform-macos",
- "aequora-platform-windows",
+ "aequora-operation",
  "aequora-profile",
  "aequora-protocol",
- "aequora-queue",
- "aequora-quic",
- "aequora-region",
- "aequora-registry-generated",
- "aequora-registry-types",
- "aequora-replay",
- "aequora-routing",
- "aequora-scheduler",
- "aequora-schema",
- "aequora-scope",
- "aequora-security",
  "aequora-server",
- "aequora-side-effects",
- "aequora-storage-backup",
- "aequora-storage-conformance",
- "aequora-storage-core",
- "aequora-storage-encryption",
- "aequora-storage-maintenance",
- "aequora-storage-profile",
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
  "aequora-testkit",
- "aequora-transport",
  "aequora-types",
- "aequora-update",
- "aequora-validator",
- "aequora-workflow",
  "async-trait",
  "axum",
  "hex",
@@ -99,6 +41,16 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "aequora-adapter-sdk"
+version = "0.1.0"
+dependencies = [
+ "aequora-operation",
+ "aequora-types",
+ "async-trait",
+ "thiserror",
 ]
 
 [[package]]
@@ -255,11 +207,13 @@ dependencies = [
 name = "aequora-client"
 version = "0.1.0"
 dependencies = [
+ "aequora-adapter-sdk",
  "aequora-codec",
  "aequora-coordination",
  "aequora-diagnostics",
  "aequora-live",
  "aequora-observability",
+ "aequora-operation",
  "aequora-protocol",
  "aequora-queue",
  "aequora-region",
@@ -268,6 +222,7 @@ dependencies = [
  "aequora-store",
  "aequora-transport",
  "aequora-types",
+ "async-trait",
  "loom",
  "serde",
  "thiserror",
@@ -697,6 +652,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-operation"
+version = "0.1.0"
+dependencies = [
+ "aequora-types",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-partition"
 version = "0.1.0"
 dependencies = [
@@ -935,6 +899,7 @@ dependencies = [
 name = "aequora-server"
 version = "0.1.0"
 dependencies = [
+ "aequora-adapter-sdk",
  "aequora-admin",
  "aequora-admission",
  "aequora-authority",
@@ -946,6 +911,7 @@ dependencies = [
  "aequora-executor",
  "aequora-jobs",
  "aequora-observability",
+ "aequora-operation",
  "aequora-performance",
  "aequora-protocol",
  "aequora-region",

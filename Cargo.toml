@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/aequora",
+    "crates/aequora-adapter-sdk",
     "crates/aequora-admin",
     "crates/aequora-admission",
     "crates/aequora-axum",
@@ -35,6 +36,7 @@ members = [
     "crates/aequora-macros",
     "crates/aequora-model",
     "crates/aequora-observability",
+    "crates/aequora-operation",
     "crates/aequora-partition",
     "crates/aequora-performance",
     "crates/aequora-protocol",
