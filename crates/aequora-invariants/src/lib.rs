@@ -522,11 +522,31 @@ pub enum InvariantId {
     DesktopPersistenceTruthfulness,
     /// Derived desktop state never becomes authoritative business state.
     DesktopDerivedStateSafety,
+    /// Domain mutation and outbox intent commit as one durable transaction.
+    StorageLocalIntentAtomicity,
+    /// Storage pressure never automatically evicts critical durable intent.
+    StorageCriticalIntentRetention,
+    /// Derived/cache loss cannot remove pending authoritative intent.
+    StorageCacheIsolation,
+    /// Restored or cloned stores cannot silently reuse a mismatched binding.
+    StorageCloneBindingSafety,
+    /// Older binaries reject newer uncertified store formats.
+    StorageDowngradeSafety,
+    /// Storage semantics are certified on each actual target platform.
+    StoragePlatformCertification,
+    /// Temporary data is verified before durable publication.
+    StoragePublicationSafety,
+    /// Low disk cannot produce a false successful commit.
+    StorageAdmissionTruthfulness,
+    /// Secrets never reside as plaintext ordinary sync metadata.
+    StorageSecretIsolation,
+    /// Live embedded stores avoid unverified network or cloud filesystems.
+    StorageFilesystemSafety,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 256] = [
+    pub const ALL: [Self; 266] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -783,6 +803,16 @@ impl InvariantId {
         Self::DesktopModeParity,
         Self::DesktopPersistenceTruthfulness,
         Self::DesktopDerivedStateSafety,
+        Self::StorageLocalIntentAtomicity,
+        Self::StorageCriticalIntentRetention,
+        Self::StorageCacheIsolation,
+        Self::StorageCloneBindingSafety,
+        Self::StorageDowngradeSafety,
+        Self::StoragePlatformCertification,
+        Self::StoragePublicationSafety,
+        Self::StorageAdmissionTruthfulness,
+        Self::StorageSecretIsolation,
+        Self::StorageFilesystemSafety,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1046,6 +1076,16 @@ impl InvariantId {
             Self::DesktopModeParity => "AEQ-INV-DESKTOP007",
             Self::DesktopPersistenceTruthfulness => "AEQ-INV-DESKTOP008",
             Self::DesktopDerivedStateSafety => "AEQ-INV-DESKTOP009",
+            Self::StorageLocalIntentAtomicity => "AEQ-INV-STORAGE001",
+            Self::StorageCriticalIntentRetention => "AEQ-INV-STORAGE002",
+            Self::StorageCacheIsolation => "AEQ-INV-STORAGE003",
+            Self::StorageCloneBindingSafety => "AEQ-INV-STORAGE004",
+            Self::StorageDowngradeSafety => "AEQ-INV-STORAGE005",
+            Self::StoragePlatformCertification => "AEQ-INV-STORAGE006",
+            Self::StoragePublicationSafety => "AEQ-INV-STORAGE007",
+            Self::StorageAdmissionTruthfulness => "AEQ-INV-STORAGE008",
+            Self::StorageSecretIsolation => "AEQ-INV-STORAGE009",
+            Self::StorageFilesystemSafety => "AEQ-INV-STORAGE010",
         }
     }
 
@@ -1808,6 +1848,36 @@ impl InvariantId {
             Self::DesktopDerivedStateSafety => {
                 "desktop indexes caches tray and UI state never become authoritative business state"
             }
+            Self::StorageLocalIntentAtomicity => {
+                "local domain state and outbox intent commit as one durable transaction"
+            }
+            Self::StorageCriticalIntentRetention => {
+                "storage pressure never automatically evicts critical durable intent"
+            }
+            Self::StorageCacheIsolation => {
+                "cache or derived-state loss cannot remove pending authoritative intent"
+            }
+            Self::StorageCloneBindingSafety => {
+                "a restored or cloned store cannot silently reuse a mismatched secure device binding"
+            }
+            Self::StorageDowngradeSafety => {
+                "an older binary rejects a newer store format unless downgrade compatibility is certified"
+            }
+            Self::StoragePlatformCertification => {
+                "required transaction semantics are certified on each actual target platform"
+            }
+            Self::StoragePublicationSafety => {
+                "temporary snapshot and blob data is verified before durable publication"
+            }
+            Self::StorageAdmissionTruthfulness => {
+                "low disk may reduce function but cannot produce a false successful commit"
+            }
+            Self::StorageSecretIsolation => {
+                "secrets and encryption keys are excluded from plaintext ordinary sync metadata"
+            }
+            Self::StorageFilesystemSafety => {
+                "live embedded stores are excluded from unverified network and cloud-synchronized filesystems"
+            }
         }
     }
 
@@ -2076,6 +2146,16 @@ impl InvariantId {
             Self::DesktopModeParity => 253,
             Self::DesktopPersistenceTruthfulness => 254,
             Self::DesktopDerivedStateSafety => 255,
+            Self::StorageLocalIntentAtomicity => 256,
+            Self::StorageCriticalIntentRetention => 257,
+            Self::StorageCacheIsolation => 258,
+            Self::StorageCloneBindingSafety => 259,
+            Self::StorageDowngradeSafety => 260,
+            Self::StoragePlatformCertification => 261,
+            Self::StoragePublicationSafety => 262,
+            Self::StorageAdmissionTruthfulness => 263,
+            Self::StorageSecretIsolation => 264,
+            Self::StorageFilesystemSafety => 265,
         }
     }
 }
@@ -2127,7 +2207,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 256] = [
+pub static REGISTRY: [InvariantEntry; 266] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -3919,6 +3999,76 @@ pub static REGISTRY: [InvariantEntry; 256] = [
         "desktop_cache_rebuild_matrix",
         "desktop_derived_state_contract",
         "desktop_derived_authority_total",
+    ),
+    entry(
+        InvariantId::StorageLocalIntentAtomicity,
+        "storage_local_intent_atomicity",
+        "storage_atomic_commit_matrix",
+        "storage_atomicity_contract",
+        "storage_intent_gap_total",
+    ),
+    entry(
+        InvariantId::StorageCriticalIntentRetention,
+        "storage_critical_intent_retained",
+        "storage_pressure_eviction_matrix",
+        "storage_eviction_contract",
+        "storage_intent_eviction_total",
+    ),
+    entry(
+        InvariantId::StorageCacheIsolation,
+        "storage_cache_non_authoritative",
+        "storage_cache_purge_matrix",
+        "storage_cache_purge_contract",
+        "storage_cache_intent_loss_total",
+    ),
+    entry(
+        InvariantId::StorageCloneBindingSafety,
+        "storage_clone_rebind",
+        "storage_restore_binding_matrix",
+        "storage_restore_contract",
+        "storage_binding_reuse_total",
+    ),
+    entry(
+        InvariantId::StorageDowngradeSafety,
+        "storage_downgrade_rejected",
+        "storage_format_version_matrix",
+        "storage_migration_contract",
+        "storage_unsafe_downgrade_total",
+    ),
+    entry(
+        InvariantId::StoragePlatformCertification,
+        "storage_target_certified",
+        "storage_platform_matrix",
+        "storage_platform_conformance",
+        "storage_uncertified_target_total",
+    ),
+    entry(
+        InvariantId::StoragePublicationSafety,
+        "storage_publish_after_verify",
+        "storage_staging_crash_matrix",
+        "storage_publication_contract",
+        "storage_unverified_publish_total",
+    ),
+    entry(
+        InvariantId::StorageAdmissionTruthfulness,
+        "storage_admission_truthful",
+        "storage_low_disk_matrix",
+        "storage_admission_contract",
+        "storage_false_commit_total",
+    ),
+    entry(
+        InvariantId::StorageSecretIsolation,
+        "storage_secret_isolation",
+        "storage_metadata_secret_scan",
+        "storage_secure_provider_contract",
+        "storage_plaintext_secret_total",
+    ),
+    entry(
+        InvariantId::StorageFilesystemSafety,
+        "storage_filesystem_safe",
+        "storage_path_policy_matrix",
+        "storage_layout_contract",
+        "storage_unsafe_path_total",
     ),
 ];
 
