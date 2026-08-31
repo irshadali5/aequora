@@ -6,6 +6,7 @@
   "rust-analyzer.cfg.setTest": false,
   "rust-analyzer.cargo.allFeatures": false,
   "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.cargo.autoreload": false,
   "rust-analyzer.cargo.buildScripts.enable": false,
   "rust-analyzer.cargo.buildScripts.rebuildOnSave": false,
   "rust-analyzer.cargo.extraEnv": {
@@ -18,7 +19,24 @@
     "1"
   ],
   "rust-analyzer.lru.capacity": 64,
+  "rust-analyzer.files.watcher": "client",
+  "rust-analyzer.files.excludeDirs": [
+    ".git",
+    "target",
+    "site",
+    "wiki"
+  ],
   "rust-analyzer.procMacro.enable": false,
   "rust-analyzer.procMacro.attributes.enable": false,
-  "rust-analyzer.procMacro.processes": 1
+  "rust-analyzer.procMacro.processes": 1,
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/target/**": true,
+    "**/site/**": true
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/site": true
+  }
 }
