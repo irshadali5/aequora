@@ -38,6 +38,8 @@ pub enum ConformanceDomain {
     ChangeFeedConsumer,
     LegacyBridge,
     ExtensionApplication,
+    MobileRuntime,
+    DesktopRuntime,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -73,6 +75,9 @@ pub enum ConformanceProfile {
     ProtocolCore,
     Provider,
     Integration,
+    MobileClientFull,
+    DesktopClientFull,
+    DesktopAgentFull,
 }
 
 impl ConformanceProfile {
@@ -88,6 +93,9 @@ impl ConformanceProfile {
             Self::ProtocolCore => 30,
             Self::Provider => 40,
             Self::Integration => 50,
+            Self::MobileClientFull => 60,
+            Self::DesktopClientFull => 61,
+            Self::DesktopAgentFull => 62,
         })
     }
 
@@ -99,9 +107,12 @@ impl ConformanceProfile {
             | Self::ServerCore
             | Self::ProtocolCore
             | Self::Integration => CertificationTier::CoreTransactional,
-            Self::StorageFullSync | Self::ClientFullSync | Self::Provider => {
-                CertificationTier::FullSync
-            }
+            Self::StorageFullSync
+            | Self::ClientFullSync
+            | Self::Provider
+            | Self::MobileClientFull
+            | Self::DesktopClientFull
+            | Self::DesktopAgentFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -717,6 +728,24 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
             domain,
             ConformanceDomain::LegacyBridge | ConformanceDomain::ExtensionApplication
         ),
+        ConformanceProfile::MobileClientFull => matches!(
+            domain,
+            ConformanceDomain::MobileRuntime
+                | ConformanceDomain::ClientRuntime
+                | ConformanceDomain::ProtocolImplementation
+        ),
+        ConformanceProfile::DesktopClientFull => matches!(
+            domain,
+            ConformanceDomain::DesktopRuntime
+                | ConformanceDomain::ClientRuntime
+                | ConformanceDomain::ProtocolImplementation
+        ),
+        ConformanceProfile::DesktopAgentFull => {
+            matches!(
+                domain,
+                ConformanceDomain::DesktopRuntime | ConformanceDomain::ProtocolImplementation
+            )
+        }
     }
 }
 
@@ -894,6 +923,150 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-CERT004",
         CoreTransactional,
         None
+    ),
+    test_definition!(
+        21,
+        "mobile_process_death_recovery",
+        MobileRuntime,
+        "AEQ-INV-MOBILE001",
+        FullSync,
+        Some("mobile-process-recovery")
+    ),
+    test_definition!(
+        22,
+        "mobile_atomic_local_outbox",
+        MobileRuntime,
+        "AEQ-INV-MOBILE002",
+        FullSync,
+        Some("mobile-atomic-outbox")
+    ),
+    test_definition!(
+        23,
+        "mobile_push_loss_and_duplication",
+        MobileRuntime,
+        "AEQ-INV-MOBILE003",
+        FullSync,
+        Some("mobile-push-hints")
+    ),
+    test_definition!(
+        24,
+        "mobile_background_cursor_checkpoint",
+        MobileRuntime,
+        "AEQ-INV-MOBILE004",
+        FullSync,
+        Some("mobile-background-checkpoint")
+    ),
+    test_definition!(
+        25,
+        "mobile_secure_store_integration",
+        MobileRuntime,
+        "AEQ-INV-MOBILE005",
+        FullSync,
+        Some("mobile-secure-store")
+    ),
+    test_definition!(
+        26,
+        "mobile_resource_semantic_parity",
+        MobileRuntime,
+        "AEQ-INV-MOBILE006",
+        FullSync,
+        Some("mobile-resource-policy")
+    ),
+    test_definition!(
+        27,
+        "mobile_upgrade_intent_preservation",
+        MobileRuntime,
+        "AEQ-INV-MOBILE007",
+        FullSync,
+        Some("mobile-upgrade")
+    ),
+    test_definition!(
+        28,
+        "mobile_storage_failure_truthfulness",
+        MobileRuntime,
+        "AEQ-INV-MOBILE008",
+        FullSync,
+        Some("mobile-storage-pressure")
+    ),
+    test_definition!(
+        29,
+        "mobile_binding_boundary",
+        MobileRuntime,
+        "AEQ-INV-MOBILE009",
+        FullSync,
+        Some("mobile-bindings")
+    ),
+    test_definition!(
+        30,
+        "desktop_single_coordinator",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP001",
+        FullSync,
+        Some("desktop-coordination")
+    ),
+    test_definition!(
+        31,
+        "desktop_stale_fence_rejection",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP002",
+        FullSync,
+        Some("desktop-fencing")
+    ),
+    test_definition!(
+        32,
+        "desktop_sleep_resume_idempotency",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP003",
+        FullSync,
+        Some("desktop-resume")
+    ),
+    test_definition!(
+        33,
+        "desktop_ipc_domain_boundary",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP004",
+        FullSync,
+        Some("desktop-ipc")
+    ),
+    test_definition!(
+        34,
+        "desktop_clone_rebinding",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP005",
+        FullSync,
+        Some("desktop-device-binding")
+    ),
+    test_definition!(
+        35,
+        "desktop_upgrade_intent_preservation",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP006",
+        FullSync,
+        Some("desktop-update")
+    ),
+    test_definition!(
+        36,
+        "desktop_mode_semantic_parity",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP007",
+        FullSync,
+        Some("desktop-mode-parity")
+    ),
+    test_definition!(
+        37,
+        "desktop_persistence_failure_truthfulness",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP008",
+        FullSync,
+        Some("desktop-persistence")
+    ),
+    test_definition!(
+        38,
+        "desktop_derived_state_non_authority",
+        DesktopRuntime,
+        "AEQ-INV-DESKTOP009",
+        FullSync,
+        Some("desktop-derived-state")
     ),
 ];
 
