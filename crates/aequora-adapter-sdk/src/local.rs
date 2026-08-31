@@ -9,7 +9,8 @@ use std::time::Duration;
 #[async_trait]
 pub trait LocalTransaction: Send {
     /// Applies one application-owned mutation inside this physical transaction.
-    async fn apply_domain_mutation(&mut self, mutation: DomainMutation) -> Result<(), AdapterError>;
+    async fn apply_domain_mutation(&mut self, mutation: DomainMutation)
+    -> Result<(), AdapterError>;
 
     /// Inserts the matching canonical outbox record in the same transaction.
     async fn insert_outbox(&mut self, record: OutboxRecord) -> Result<(), AdapterError>;
