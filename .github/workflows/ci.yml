@@ -135,6 +135,8 @@ jobs:
         run: bash scripts/check-desktop-architecture.sh
       - name: Enforce cross-platform local storage contracts
         run: bash scripts/check-local-storage-architecture.sh
+      - name: Enforce reference workspace layers and crate dependency direction
+        run: bash scripts/check-reference-implementation-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
