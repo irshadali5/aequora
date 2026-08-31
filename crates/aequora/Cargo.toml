@@ -44,6 +44,7 @@ aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
 aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
+aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
 aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-crdt = { version = "0.1.0", path = "../aequora-crdt" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
@@ -53,11 +54,18 @@ aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-journal = { version = "0.1.0", path = "../aequora-journal" }
 aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
+aequora-ipc-protocol = { version = "0.1.0", path = "../aequora-ipc-protocol" }
 aequora-legacy = { version = "0.1.0", path = "../aequora-legacy" }
 aequora-legacy-api = { version = "0.1.0", path = "../aequora-legacy-api" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
 aequora-macros = { version = "0.1.0", path = "../aequora-macros" }
 aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
+aequora-mobile-bindings = { version = "0.1.0", path = "../aequora-mobile-bindings" }
+aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime" }
+aequora-agent = { version = "0.1.0", path = "../aequora-agent" }
+aequora-platform-linux = { version = "0.1.0", path = "../aequora-platform-linux" }
+aequora-platform-windows = { version = "0.1.0", path = "../aequora-platform-windows" }
+aequora-platform-macos = { version = "0.1.0", path = "../aequora-platform-macos" }
 aequora-mapping = { version = "0.1.0", path = "../aequora-mapping", optional = true }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration", optional = true }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
@@ -83,6 +91,7 @@ aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres"
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
 aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
+aequora-update = { version = "0.1.0", path = "../aequora-update" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
 aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
