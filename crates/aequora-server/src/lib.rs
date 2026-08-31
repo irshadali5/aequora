@@ -8,18 +8,12 @@ pub mod diagnostics;
 
 /// Database-neutral server orchestration for durable background work.
 pub mod jobs;
+mod sdk;
 
-/// Stable plug-and-play entry point for constructing an authoritative service.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AequoraServer;
-
-impl AequoraServer {
-    /// Starts the type-state server builder.
-    #[must_use]
-    pub fn builder() -> SyncServerBuilder {
-        SyncServerBuilder::new()
-    }
-}
+pub use sdk::{
+    AequoraServer, AequoraServerBuilder, DomainRegistrationError, DomainRegistry,
+    DomainRegistryBuilder, ServerOperationOutcome, StableServerError,
+};
 
 /// Focused imports for application server integrations.
 pub mod prelude {
@@ -29,9 +23,13 @@ pub mod prelude {
         JobAccessPolicy, JobAdminService, JobWorkerConfig, JobWorkerPlanner, WorkerShutdown,
     };
     pub use crate::{
-        AdmittedExchangeService, AequoraServer, ExchangeService, ServerBuildError,
-        ServerCommandOutcome, ServerConfig, ServerError, ServerRegionalReadGuard, SyncServer,
-        SyncServerBuilder,
+        AdmittedExchangeService, AequoraServer, AequoraServerBuilder, DomainRegistrationError,
+        DomainRegistry, DomainRegistryBuilder, ExchangeService, ServerBuildError,
+        ServerCommandOutcome, ServerConfig, ServerError, ServerOperationOutcome,
+        ServerRegionalReadGuard, StableServerError, SyncServer, SyncServerBuilder,
+    };
+    pub use aequora_adapter_sdk::{
+        Authenticator, AuthorityService, DomainContext, DomainHandler, DomainOutcome,
     };
     pub use aequora_admission::{AdmissionController, AdmissionPolicy, HierarchicalAdmission};
     pub use aequora_authority::{

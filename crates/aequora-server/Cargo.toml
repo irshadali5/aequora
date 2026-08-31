@@ -8,6 +8,7 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
 aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
 aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
@@ -19,6 +20,7 @@ aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
+aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
 aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
