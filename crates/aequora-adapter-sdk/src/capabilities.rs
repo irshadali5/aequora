@@ -11,11 +11,11 @@ pub struct AdapterId(pub u128);
 /// Adapter crate/API version, independent from protocol and schema versions.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct AdapterVersion {
-    /// SemVer major version.
+    /// `SemVer` major version.
     pub major: u16,
-    /// SemVer minor version.
+    /// `SemVer` minor version.
     pub minor: u16,
-    /// SemVer patch version.
+    /// `SemVer` patch version.
     pub patch: u16,
 }
 
@@ -250,9 +250,7 @@ impl AdapterManifest {
         }
         let mut ids = BTreeSet::new();
         if self.capabilities.iter().any(|capability| {
-            capability.id.0 == 0
-                || capability.version.0 == 0
-                || !ids.insert(capability.id)
+            capability.id.0 == 0 || capability.version.0 == 0 || !ids.insert(capability.id)
         }) {
             return Err(AdapterError::invalid_configuration(
                 "adapter capabilities must have unique non-zero IDs and versions",
@@ -348,10 +346,7 @@ impl AdapterRequirements {
             ));
         }
         if manifest.support < self.minimum_support
-            || self
-                .roles
-                .iter()
-                .any(|role| !manifest.supports_role(*role))
+            || self.roles.iter().any(|role| !manifest.supports_role(*role))
         {
             return Err(AdapterError::new(
                 crate::AdapterErrorKind::UnsupportedCapability,
@@ -387,9 +382,7 @@ mod tests {
     use super::*;
 
     const ROLES: &[AdapterRole] = &[AdapterRole::LocalReplicaStore];
-    const CAPS: &[AdapterCapability] = &[AdapterCapability::v1(
-        CapabilityId::ATOMIC_LOCAL_OUTBOX,
-    )];
+    const CAPS: &[AdapterCapability] = &[AdapterCapability::v1(CapabilityId::ATOMIC_LOCAL_OUTBOX)];
     const ENGINES: &[&str] = &["reference-1"];
     const TARGETS: &[&str] = &["test-target"];
 
@@ -437,7 +430,9 @@ mod tests {
             verified_capabilities: BTreeSet::new(),
         };
         assert_eq!(
-            requirements.verify(manifest(), &evidence).map_err(|error| error.kind()),
+            requirements
+                .verify(manifest(), &evidence)
+                .map_err(|error| error.kind()),
             Err(crate::AdapterErrorKind::UnsupportedCapability)
         );
     }
