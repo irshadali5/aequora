@@ -1,0 +1,16 @@
+[package]
+name = "aequora-update"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Signed desktop update planning and local-intent preservation contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
