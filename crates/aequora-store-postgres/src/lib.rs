@@ -3,6 +3,7 @@
 //! The backend contract is deliberately transaction-oriented. A `SQLx` implementation can
 //! satisfy it without exposing `sqlx::Transaction` to the rest of Aequora.
 
+use aequora_adapter_sdk as adapter_sdk;
 use aequora_authority::{
     AuthorityRole, AuthorityRuntimeMode, AuthorityState, AuthorityTransitionManifest,
     PromotionClass, TransitionReason,
@@ -31,7 +32,6 @@ use aequora_types::{
     SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
-use aequora_adapter_sdk as adapter_sdk;
 use sqlx::{
     PgPool, Postgres, Row, Transaction,
     postgres::{PgConnectOptions, PgListener, PgPoolOptions, PgSslMode},
@@ -360,9 +360,7 @@ const POSTGRES_SDK_ROLES: &[adapter_sdk::AdapterRole] = &[
 ];
 
 const POSTGRES_SDK_CAPABILITIES: &[adapter_sdk::AdapterCapability] = &[
-    adapter_sdk::AdapterCapability::v1(
-        adapter_sdk::CapabilityId::ATOMIC_AUTHORITATIVE_COMMIT,
-    ),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::ATOMIC_AUTHORITATIVE_COMMIT),
     adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::COMPARE_AND_SWAP),
     adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::JOURNAL),
     adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::OPERATION_LEDGER),
@@ -370,9 +368,7 @@ const POSTGRES_SDK_CAPABILITIES: &[adapter_sdk::AdapterCapability] = &[
     adapter_sdk::AdapterCapability {
         id: adapter_sdk::CapabilityId::SNAPSHOT,
         version: adapter_sdk::CapabilityVersion::V1,
-        level: adapter_sdk::CapabilityLevel::Snapshot(
-            adapter_sdk::SnapshotLevel::Streaming,
-        ),
+        level: adapter_sdk::CapabilityLevel::Snapshot(adapter_sdk::SnapshotLevel::Streaming),
     },
     adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::INTEGRITY),
     adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::AUDIT),
@@ -2843,10 +2839,15 @@ mod tests {
         POSTGRES_STORAGE_ADAPTER_MANIFEST
             .validate()
             .unwrap_or_else(|error| panic!("{error}"));
-        assert!(POSTGRES_STORAGE_ADAPTER_MANIFEST.supports_role(
-            adapter_sdk::AdapterRole::AuthoritativeStore
-        ));
-        assert!(!POSTGRES_STORAGE_ADAPTER_MANIFEST.known_limitations.is_empty());
+        assert!(
+            POSTGRES_STORAGE_ADAPTER_MANIFEST
+                .supports_role(adapter_sdk::AdapterRole::AuthoritativeStore)
+        );
+        assert!(
+            !POSTGRES_STORAGE_ADAPTER_MANIFEST
+                .known_limitations
+                .is_empty()
+        );
     }
 
     #[test]
