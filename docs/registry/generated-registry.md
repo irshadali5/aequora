@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `d614f0c00d7c3b99df2a42bad5d8387cc36114ed6372e2d0c31e8381fd935882`
+Digest: `aedd7cb29285cfadc83b5d449ea9ce12d5626e8b0979701c42e6632a3d55de62`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -146,6 +146,9 @@ Digest: `d614f0c00d7c3b99df2a42bad5d8387cc36114ed6372e2d0c31e8381fd935882`
 | conformance-profile | 30 | ProtocolCore | Current | conformance | - | Protocol negotiation and canonical trace behavior. |
 | conformance-profile | 40 | Provider | Current | conformance | - | Snapshot, crypto, job, and feed provider behavior. |
 | conformance-profile | 50 | Integration | Current | conformance | - | Legacy bridge, extension, and application integration behavior. |
+| conformance-profile | 60 | MobileClientFull | Current | mobile | - | Full mobile runtime, client, and protocol behavior. |
+| conformance-profile | 61 | DesktopClientFull | Current | desktop | - | Full in-process desktop runtime, client, and protocol behavior. |
+| conformance-profile | 62 | DesktopAgentFull | Current | desktop | - | Full desktop agent and local IPC behavior. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -166,6 +169,24 @@ Digest: `d614f0c00d7c3b99df2a42bad5d8387cc36114ed6372e2d0c31e8381fd935882`
 | conformance-test | 18 | LegacyShadowAndCutover | Current | conformance | - | Legacy shadow execution is isolated and cutover is verified. |
 | conformance-test | 19 | ExtensionNamespaceIsolation | Current | conformance | - | Extension IDs cannot collide with core or other namespaces. |
 | conformance-test | 20 | ApplicationCapabilityTruthfulness | Current | conformance | - | Applications cannot advertise unverified capabilities. |
+| conformance-test | 21 | MobileProcessDeathRecovery | Current | mobile | - | Process death resumes from durable synchronization state. |
+| conformance-test | 22 | MobileAtomicLocalOutbox | Current | mobile | - | Local mutation and outbox insertion remain atomic on mobile. |
+| conformance-test | 23 | MobilePushLossAndDuplication | Current | mobile | - | Lost and duplicate push hints do not affect convergence semantics. |
+| conformance-test | 24 | MobileBackgroundCursorCheckpoint | Current | mobile | - | Background expiration never advances a cursor past durable apply. |
+| conformance-test | 25 | MobileSecureStoreIntegration | Current | mobile | - | Mobile private keys use the approved secure provider. |
+| conformance-test | 26 | MobileResourceSemanticParity | Current | mobile | - | Resource adaptation preserves all synchronization semantics. |
+| conformance-test | 27 | MobileUpgradeIntentPreservation | Current | mobile | - | Mobile upgrades preserve pending intent or fail atomically. |
+| conformance-test | 28 | MobileStorageFailureTruthfulness | Current | mobile | - | Unavailable durable storage never reports mutation success. |
+| conformance-test | 29 | MobileBindingBoundary | Current | mobile | - | Platform bindings cannot bypass Rust synchronization semantics. |
+| conformance-test | 30 | DesktopSingleCoordinator | Current | desktop | - | One fenced coordinator owns a desktop local store. |
+| conformance-test | 31 | DesktopStaleFenceRejection | Current | desktop | - | Revived stale desktop processes cannot commit coordinator metadata. |
+| conformance-test | 32 | DesktopSleepResumeIdempotency | Current | desktop | - | Sleep and resume recovery preserves operation idempotency. |
+| conformance-test | 33 | DesktopIpcDomainBoundary | Current | desktop | - | Local IPC routes writes through domain operations only. |
+| conformance-test | 34 | DesktopCloneRebinding | Current | desktop | - | Cloned desktop stores require a new device binding. |
+| conformance-test | 35 | DesktopUpgradeIntentPreservation | Current | desktop | - | Desktop upgrades preserve pending operations or fail safely. |
+| conformance-test | 36 | DesktopModeSemanticParity | Current | desktop | - | In-process and agent modes preserve synchronization semantics. |
+| conformance-test | 37 | DesktopPersistenceFailureTruthfulness | Current | desktop | - | Low disk and credential-store failures are explicit. |
+| conformance-test | 38 | DesktopDerivedStateNonAuthority | Current | desktop | - | Desktop caches and UI state remain derived and rebuildable. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
