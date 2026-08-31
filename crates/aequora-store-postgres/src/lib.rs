@@ -31,6 +31,7 @@ use aequora_types::{
     SyncScopeId, TenantId,
 };
 use async_trait::async_trait;
+use aequora_adapter_sdk as adapter_sdk;
 use sqlx::{
     PgPool, Postgres, Row, Transaction,
     postgres::{PgConnectOptions, PgListener, PgPoolOptions, PgSslMode},
@@ -349,6 +350,60 @@ pub const POSTGRES_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
     capabilities: AdapterCapabilities::FULL_AUTHORITATIVE,
     limitations: &[],
 };
+
+const POSTGRES_SDK_ROLES: &[adapter_sdk::AdapterRole] = &[
+    adapter_sdk::AdapterRole::AuthoritativeStore,
+    adapter_sdk::AdapterRole::JournalStore,
+    adapter_sdk::AdapterRole::OperationLedgerStore,
+    adapter_sdk::AdapterRole::SnapshotStore,
+    adapter_sdk::AdapterRole::IntegrityStore,
+];
+
+const POSTGRES_SDK_CAPABILITIES: &[adapter_sdk::AdapterCapability] = &[
+    adapter_sdk::AdapterCapability::v1(
+        adapter_sdk::CapabilityId::ATOMIC_AUTHORITATIVE_COMMIT,
+    ),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::COMPARE_AND_SWAP),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::JOURNAL),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::OPERATION_LEDGER),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::MIGRATIONS),
+    adapter_sdk::AdapterCapability {
+        id: adapter_sdk::CapabilityId::SNAPSHOT,
+        version: adapter_sdk::CapabilityVersion::V1,
+        level: adapter_sdk::CapabilityLevel::Snapshot(
+            adapter_sdk::SnapshotLevel::Streaming,
+        ),
+    },
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::INTEGRITY),
+    adapter_sdk::AdapterCapability::v1(adapter_sdk::CapabilityId::AUDIT),
+];
+
+/// Part 36 machine-readable manifest for the official `PostgreSQL` authority adapter.
+///
+/// A deployment must still supply a matching [`adapter_sdk::CertifiedEnvironment`] before these
+/// claims satisfy production startup requirements. Neon is certified as a separate deployment
+/// environment even though it uses this adapter implementation.
+pub const POSTGRES_STORAGE_ADAPTER_MANIFEST: adapter_sdk::AdapterManifest =
+    adapter_sdk::AdapterManifest {
+        descriptor: adapter_sdk::AdapterDescriptor {
+            adapter_id: adapter_sdk::AdapterId(0xae01),
+            name: "aequora-postgresql-authority",
+            version: adapter_sdk::AdapterVersion::new(0, 1, 0),
+            store_kind: adapter_sdk::StoreKind::NetworkDatabase,
+        },
+        roles: POSTGRES_SDK_ROLES,
+        capabilities: POSTGRES_SDK_CAPABILITIES,
+        support: adapter_sdk::AdapterSupport::Official,
+        supported_engine_versions: &["PostgreSQL 18"],
+        supported_targets: &["x86_64-unknown-linux-gnu"],
+        known_limitations: &[
+            "Neon and other managed PostgreSQL services require deployment-specific certification",
+            "fencing is composed through the authority epoch store rather than this manifest",
+        ],
+        concurrency: adapter_sdk::ConcurrencyModel::MultiWriter,
+        maintainer_owned: true,
+        release_evidence_complete: true,
+    };
 
 #[derive(Clone, Copy)]
 struct PostgresMigration {
@@ -2775,13 +2830,24 @@ impl<B: PostgresBackend> AuthoritativeIntegritySource for PostgresStore<B> {
 #[cfg(test)]
 mod tests {
     use super::{
-        POSTGRES_MIGRATIONS, PgSslMode, PostgresNotifyHintBroker, PostgresPoolConfig,
-        migration_checksum, parse_connect_options, postgres_transaction_retry_reason,
-        verify_migration_record,
+        POSTGRES_MIGRATIONS, POSTGRES_STORAGE_ADAPTER_MANIFEST, PgSslMode,
+        PostgresNotifyHintBroker, PostgresPoolConfig, adapter_sdk, migration_checksum,
+        parse_connect_options, postgres_transaction_retry_reason, verify_migration_record,
     };
     use aequora_live::{SyncHint, SyncHintReason};
     use aequora_store::{StoreErrorKind, StoreErrorReason};
     use aequora_types::{Sequence, SyncScopeId, TenantId};
+
+    #[test]
+    fn part_36_manifest_is_structurally_valid_and_explicit() {
+        POSTGRES_STORAGE_ADAPTER_MANIFEST
+            .validate()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(POSTGRES_STORAGE_ADAPTER_MANIFEST.supports_role(
+            adapter_sdk::AdapterRole::AuthoritativeStore
+        ));
+        assert!(!POSTGRES_STORAGE_ADAPTER_MANIFEST.known_limitations.is_empty());
+    }
 
     #[test]
     fn notify_hint_codec_is_small_and_exact() {

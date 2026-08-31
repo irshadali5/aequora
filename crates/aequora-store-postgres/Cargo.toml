@@ -8,6 +8,7 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
+aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
