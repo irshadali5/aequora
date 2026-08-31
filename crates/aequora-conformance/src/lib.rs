@@ -80,6 +80,10 @@ pub enum ConformanceProfile {
     DesktopAgentFull,
     MobileLocalStoreFull,
     DesktopLocalStoreFull,
+    LocalAdapter,
+    AuthoritativeAdapter,
+    SnapshotAdapter,
+    FencingAdapter,
 }
 
 impl ConformanceProfile {
@@ -100,6 +104,10 @@ impl ConformanceProfile {
             Self::DesktopAgentFull => 62,
             Self::MobileLocalStoreFull => 63,
             Self::DesktopLocalStoreFull => 64,
+            Self::LocalAdapter => 65,
+            Self::AuthoritativeAdapter => 66,
+            Self::SnapshotAdapter => 67,
+            Self::FencingAdapter => 68,
         })
     }
 
@@ -118,7 +126,11 @@ impl ConformanceProfile {
             | Self::DesktopClientFull
             | Self::DesktopAgentFull
             | Self::MobileLocalStoreFull
-            | Self::DesktopLocalStoreFull => CertificationTier::FullSync,
+            | Self::DesktopLocalStoreFull
+            | Self::LocalAdapter
+            | Self::AuthoritativeAdapter
+            | Self::SnapshotAdapter
+            | Self::FencingAdapter => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -693,8 +705,31 @@ pub fn definitions_for(
     REFERENCE_TESTS
         .iter()
         .filter(|definition| definition.minimum_tier <= tier)
-        .filter(|definition| domain_in_profile(definition.domain, profile))
+        .filter(|definition| definition_in_profile(definition, profile))
         .collect()
+}
+
+const fn definition_in_profile(
+    definition: &TestDefinition,
+    profile: ConformanceProfile,
+) -> bool {
+    match profile {
+        ConformanceProfile::LocalAdapter => matches!(
+            definition.id.0,
+            1 | 4 | 39..=50 | 52..=58
+        ),
+        ConformanceProfile::AuthoritativeAdapter => matches!(
+            definition.id.0,
+            2 | 3 | 5 | 7 | 49 | 51..=58
+        ),
+        ConformanceProfile::SnapshotAdapter => {
+            matches!(definition.id.0, 6 | 49 | 52 | 55 | 56 | 58)
+        }
+        ConformanceProfile::FencingAdapter => {
+            matches!(definition.id.0, 5 | 49 | 52 | 55 | 56 | 58)
+        }
+        _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
+    }
 }
 
 const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfile) -> bool {
@@ -755,6 +790,10 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         ConformanceProfile::MobileLocalStoreFull | ConformanceProfile::DesktopLocalStoreFull => {
             matches!(domain, ConformanceDomain::StorageAdapter)
         }
+        ConformanceProfile::LocalAdapter
+        | ConformanceProfile::AuthoritativeAdapter
+        | ConformanceProfile::SnapshotAdapter
+        | ConformanceProfile::FencingAdapter => false,
     }
 }
 
@@ -1156,6 +1195,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-STORAGE010",
         FullSync,
         Some("storage-layout")
+    ),
+    test_definition!(
+        49,
+        "adapter_capability_conformance",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER001",
+        FullSync,
+        Some("adapter-capability-evidence")
+    ),
+    test_definition!(
+        50,
+        "adapter_atomic_local_outbox",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER002",
+        FullSync,
+        Some("atomic-local-outbox")
+    ),
+    test_definition!(
+        51,
+        "adapter_atomic_authority_commit",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER003",
+        FullSync,
+        Some("atomic-authority-commit")
+    ),
+    test_definition!(
+        52,
+        "adapter_neutral_error_boundary",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER004",
+        FullSync,
+        Some("neutral-adapter-api")
+    ),
+    test_definition!(
+        53,
+        "adapter_payload_reuse_rejection",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER005",
+        FullSync,
+        Some("operation-payload-binding")
+    ),
+    test_definition!(
+        54,
+        "adapter_migration_preservation",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER006",
+        FullSync,
+        Some("adapter-migrations")
+    ),
+    test_definition!(
+        55,
+        "adapter_startup_fail_closed",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER007",
+        FullSync,
+        Some("adapter-startup-validation")
+    ),
+    test_definition!(
+        56,
+        "adapter_environment_binding",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER008",
+        FullSync,
+        Some("adapter-environment-binding")
+    ),
+    test_definition!(
+        57,
+        "adapter_critical_durability",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER009",
+        FullSync,
+        Some("critical-intent-durability")
+    ),
+    test_definition!(
+        58,
+        "adapter_manifest_and_limitations",
+        StorageAdapter,
+        "AEQ-INV-ADAPTER010",
+        FullSync,
+        Some("adapter-support-matrix")
     ),
 ];
 
