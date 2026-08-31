@@ -1,0 +1,17 @@
+[package]
+name = "aequora-ipc-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Versioned authenticated local IPC messages and bounded framing for Aequora desktop agents"
+repository.workspace = true
+
+[dependencies]
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true
