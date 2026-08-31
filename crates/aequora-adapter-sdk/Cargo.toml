@@ -1,0 +1,17 @@
+[package]
+name = "aequora-adapter-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Stable extension contracts for third-party Aequora adapters"
+repository.workspace = true
+
+[dependencies]
+aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+async-trait.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
