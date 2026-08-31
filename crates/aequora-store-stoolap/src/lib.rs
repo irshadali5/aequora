@@ -3,6 +3,7 @@
 //! Domain repositories should use the same Stoolap transaction for their optimistic write
 //! and `aequora_outbox` insert. Reconciliation similarly remains one backend transaction.
 
+use aequora_adapter_sdk as adapter_sdk;
 use aequora_coordination::{
     CoordinationSnapshot, FencingToken, LeaseGrant, LeaseKind, LeaseRequest,
     LocalCoordinationSupport, LocalStoreGeneration, LocalStoreId,
@@ -32,7 +33,6 @@ use aequora_types::{
     OperationId, Sequence, SnapshotId, SyncScopeId,
 };
 use async_trait::async_trait;
-use aequora_adapter_sdk as adapter_sdk;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     str::FromStr,
@@ -3049,10 +3049,15 @@ mod tests {
         STOOLAP_STORAGE_ADAPTER_MANIFEST
             .validate()
             .unwrap_or_else(|error| panic!("{error}"));
-        assert!(STOOLAP_STORAGE_ADAPTER_MANIFEST.supports_role(
-            adapter_sdk::AdapterRole::LocalReplicaStore
-        ));
-        assert!(!STOOLAP_STORAGE_ADAPTER_MANIFEST.known_limitations.is_empty());
+        assert!(
+            STOOLAP_STORAGE_ADAPTER_MANIFEST
+                .supports_role(adapter_sdk::AdapterRole::LocalReplicaStore)
+        );
+        assert!(
+            !STOOLAP_STORAGE_ADAPTER_MANIFEST
+                .known_limitations
+                .is_empty()
+        );
     }
 
     fn persistent_dsn(name: &str) -> (tempfile::TempDir, String) {
