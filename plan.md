@@ -50,6 +50,7 @@ outside the reusable core.
 | 30 | [Certification and conformance ecosystem](sys-arch/30-certification-conformance-ecosystem-architecture.md) |
 | 31 | [Android and iOS mobile runtime platform architecture](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md) |
 | 32 | [Linux, Windows, and macOS desktop runtime architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md) |
+| 33 | [Cross-platform local storage architecture](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md) |
 
 ## Implementation status
 
@@ -76,6 +77,7 @@ implicitly claim completion of an earlier part.
 | Part 30: certification, conformance, and ecosystem architecture | Implemented | [Part 30 report](docs/certification-conformance-ecosystem-completion.md) |
 | Part 31: Android and iOS mobile runtime platform architecture | Implemented | [Part 31 report](docs/android-ios-mobile-runtime-platform-completion.md) |
 | Part 32: Linux, Windows, and macOS desktop runtime architecture | Implemented | [Part 32 report](docs/linux-windows-macos-desktop-runtime-completion.md) |
+| Part 33: Cross-platform local storage architecture | Implemented | [Part 33 report](docs/cross-platform-local-storage-completion.md) |
 
 ## Implementation workflow
 
@@ -106,6 +108,7 @@ bash scripts/check-diagnostics-architecture.sh
 bash scripts/check-legacy-architecture.sh
 bash scripts/check-mobile-architecture.sh
 bash scripts/check-desktop-architecture.sh
+bash scripts/check-local-storage-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
