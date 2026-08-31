@@ -1,0 +1,21 @@
+[package]
+name = "aequora-desktop-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Platform-neutral desktop lifecycle, coordination, and OS integration contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+async-trait.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true
