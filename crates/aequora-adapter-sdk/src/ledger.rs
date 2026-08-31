@@ -8,10 +8,8 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait OperationLedgerStore: Send + Sync {
     /// Looks up the terminal outcome for an operation.
-    async fn lookup(
-        &self,
-        operation_id: OperationId,
-    ) -> Result<Option<LedgerRecord>, AdapterError>;
+    async fn lookup(&self, operation_id: OperationId)
+    -> Result<Option<LedgerRecord>, AdapterError>;
 
     /// Inserts one terminal outcome, rejecting identifier reuse with a different digest.
     async fn insert_outcome(&self, record: LedgerRecord) -> Result<(), AdapterError>;
