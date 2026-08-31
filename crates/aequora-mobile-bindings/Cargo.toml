@@ -1,0 +1,18 @@
+[package]
+name = "aequora-mobile-bindings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Stable panic-contained Kotlin and Swift binding contract for Aequora mobile"
+repository.workspace = true
+
+[dependencies]
+aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime" }
+async-trait.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
