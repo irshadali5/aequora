@@ -1,0 +1,16 @@
+[package]
+name = "aequora-platform-macos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "macOS desktop integration policy normalization for Aequora"
+repository.workspace = true
+
+[dependencies]
+aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
