@@ -58,6 +58,11 @@ aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
 aequora-platform-android = { version = "0.1.0", path = "../aequora-platform-android" }
 aequora-platform-ios = { version = "0.1.0", path = "../aequora-platform-ios" }
+aequora-storage-core = { version = "0.1.0", path = "../aequora-storage-core" }
+aequora-storage-profile = { version = "0.1.0", path = "../aequora-storage-profile" }
+aequora-storage-backup = { version = "0.1.0", path = "../aequora-storage-backup" }
+aequora-storage-conformance = { version = "0.1.0", path = "../aequora-storage-conformance" }
+aequora-blob-store = { version = "0.1.0", path = "../aequora-blob-store" }
 async-trait.workspace = true
 futures-util.workspace = true
 postcard.workspace = true
