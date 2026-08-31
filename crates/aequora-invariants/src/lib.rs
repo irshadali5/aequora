@@ -486,11 +486,47 @@ pub enum InvariantId {
     CertificationCorrectnessPriority,
     /// Advisories change lifecycle status without reusing certification identity.
     CertificationLifecycleIdentity,
+    /// Required synchronization state never exists only in a mobile process.
+    MobileDurableProcessIndependence,
+    /// Mobile local mutation and outbox insertion remain atomic.
+    MobileIntentAtomicity,
+    /// Push notifications can request sync but never carry authoritative state.
+    MobilePushHintOnly,
+    /// Background timeout cannot advance a cursor beyond durable application.
+    MobileCursorCheckpointSafety,
+    /// Private key material remains in an approved secure provider.
+    MobileSecureKeyStorage,
+    /// Resource adaptation cannot weaken correctness or governance.
+    MobileResourceSemanticSafety,
+    /// Upgrade preserves pending intent or fails without partial destruction.
+    MobileUpgradeIntentSafety,
+    /// Failed durable storage cannot be reported as a saved mutation.
+    MobileStorageTruthfulness,
+    /// Platform and UI layers cannot bypass Rust synchronization semantics.
+    MobilePlatformBoundary,
+    /// One active desktop coordinator owns a local store.
+    DesktopSingleCoordinator,
+    /// A stale desktop fencing token cannot commit coordinator metadata.
+    DesktopStaleFenceSafety,
+    /// Resume and ambiguous retry cannot duplicate an authoritative effect.
+    DesktopResumeIdempotency,
+    /// Local IPC cannot bypass domain operations or mutate synchronization metadata.
+    DesktopIpcBoundary,
+    /// A cloned store cannot silently retain its trusted device binding.
+    DesktopCloneBindingSafety,
+    /// Desktop upgrade preserves pending user intent.
+    DesktopUpgradeIntentSafety,
+    /// Agent and in-process modes preserve identical synchronization semantics.
+    DesktopModeParity,
+    /// Disk and credential-store failure is reported truthfully.
+    DesktopPersistenceTruthfulness,
+    /// Derived desktop state never becomes authoritative business state.
+    DesktopDerivedStateSafety,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 238] = [
+    pub const ALL: [Self; 256] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -729,6 +765,24 @@ impl InvariantId {
         Self::CertificationEvidenceIntegrity,
         Self::CertificationCorrectnessPriority,
         Self::CertificationLifecycleIdentity,
+        Self::MobileDurableProcessIndependence,
+        Self::MobileIntentAtomicity,
+        Self::MobilePushHintOnly,
+        Self::MobileCursorCheckpointSafety,
+        Self::MobileSecureKeyStorage,
+        Self::MobileResourceSemanticSafety,
+        Self::MobileUpgradeIntentSafety,
+        Self::MobileStorageTruthfulness,
+        Self::MobilePlatformBoundary,
+        Self::DesktopSingleCoordinator,
+        Self::DesktopStaleFenceSafety,
+        Self::DesktopResumeIdempotency,
+        Self::DesktopIpcBoundary,
+        Self::DesktopCloneBindingSafety,
+        Self::DesktopUpgradeIntentSafety,
+        Self::DesktopModeParity,
+        Self::DesktopPersistenceTruthfulness,
+        Self::DesktopDerivedStateSafety,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -974,6 +1028,24 @@ impl InvariantId {
             Self::CertificationEvidenceIntegrity => "AEQ-INV-CERT007",
             Self::CertificationCorrectnessPriority => "AEQ-INV-CERT008",
             Self::CertificationLifecycleIdentity => "AEQ-INV-CERT009",
+            Self::MobileDurableProcessIndependence => "AEQ-INV-MOBILE001",
+            Self::MobileIntentAtomicity => "AEQ-INV-MOBILE002",
+            Self::MobilePushHintOnly => "AEQ-INV-MOBILE003",
+            Self::MobileCursorCheckpointSafety => "AEQ-INV-MOBILE004",
+            Self::MobileSecureKeyStorage => "AEQ-INV-MOBILE005",
+            Self::MobileResourceSemanticSafety => "AEQ-INV-MOBILE006",
+            Self::MobileUpgradeIntentSafety => "AEQ-INV-MOBILE007",
+            Self::MobileStorageTruthfulness => "AEQ-INV-MOBILE008",
+            Self::MobilePlatformBoundary => "AEQ-INV-MOBILE009",
+            Self::DesktopSingleCoordinator => "AEQ-INV-DESKTOP001",
+            Self::DesktopStaleFenceSafety => "AEQ-INV-DESKTOP002",
+            Self::DesktopResumeIdempotency => "AEQ-INV-DESKTOP003",
+            Self::DesktopIpcBoundary => "AEQ-INV-DESKTOP004",
+            Self::DesktopCloneBindingSafety => "AEQ-INV-DESKTOP005",
+            Self::DesktopUpgradeIntentSafety => "AEQ-INV-DESKTOP006",
+            Self::DesktopModeParity => "AEQ-INV-DESKTOP007",
+            Self::DesktopPersistenceTruthfulness => "AEQ-INV-DESKTOP008",
+            Self::DesktopDerivedStateSafety => "AEQ-INV-DESKTOP009",
         }
     }
 
@@ -1682,6 +1754,60 @@ impl InvariantId {
             Self::CertificationLifecycleIdentity => {
                 "suspension revocation and supersession retain the original certification identity"
             }
+            Self::MobileDurableProcessIndependence => {
+                "required synchronization state never depends solely on Android or iOS process lifetime"
+            }
+            Self::MobileIntentAtomicity => {
+                "mobile local mutation and durable outbox insertion remain one atomic outcome"
+            }
+            Self::MobilePushHintOnly => {
+                "push notifications are untrusted scheduling hints and never authoritative state"
+            }
+            Self::MobileCursorCheckpointSafety => {
+                "background expiration cannot advance a cursor beyond durably applied state"
+            }
+            Self::MobileSecureKeyStorage => {
+                "mobile private keys remain in an approved platform secure provider or equivalent"
+            }
+            Self::MobileResourceSemanticSafety => {
+                "resource adaptation may reduce throughput but cannot weaken correctness authorization audit or conflict semantics"
+            }
+            Self::MobileUpgradeIntentSafety => {
+                "mobile upgrade preserves pending user intent or fails without partial destruction"
+            }
+            Self::MobileStorageTruthfulness => {
+                "unavailable durable storage cannot produce a successful saved-mutation result"
+            }
+            Self::MobilePlatformBoundary => {
+                "platform and UI code cannot advance cursors mutate authority ledgers or bypass domain operations"
+            }
+            Self::DesktopSingleCoordinator => {
+                "at most one active synchronization coordinator owns a desktop local store"
+            }
+            Self::DesktopStaleFenceSafety => {
+                "a stale desktop process cannot commit coordinator metadata after ownership changes"
+            }
+            Self::DesktopResumeIdempotency => {
+                "desktop sleep resume and ambiguous retries cannot duplicate an authoritative effect"
+            }
+            Self::DesktopIpcBoundary => {
+                "desktop IPC routes writes through domain operations and cannot mutate synchronization metadata directly"
+            }
+            Self::DesktopCloneBindingSafety => {
+                "a copied desktop store cannot silently continue with the original trusted device binding"
+            }
+            Self::DesktopUpgradeIntentSafety => {
+                "desktop upgrades preserve pending user intent or fail before destructive migration"
+            }
+            Self::DesktopModeParity => {
+                "agent and in-process desktop modes preserve identical synchronization semantics"
+            }
+            Self::DesktopPersistenceTruthfulness => {
+                "desktop disk and credential-store failures produce explicit failure rather than false persistence success"
+            }
+            Self::DesktopDerivedStateSafety => {
+                "desktop indexes caches tray and UI state never become authoritative business state"
+            }
         }
     }
 
@@ -1932,6 +2058,24 @@ impl InvariantId {
             Self::CertificationEvidenceIntegrity => 235,
             Self::CertificationCorrectnessPriority => 236,
             Self::CertificationLifecycleIdentity => 237,
+            Self::MobileDurableProcessIndependence => 238,
+            Self::MobileIntentAtomicity => 239,
+            Self::MobilePushHintOnly => 240,
+            Self::MobileCursorCheckpointSafety => 241,
+            Self::MobileSecureKeyStorage => 242,
+            Self::MobileResourceSemanticSafety => 243,
+            Self::MobileUpgradeIntentSafety => 244,
+            Self::MobileStorageTruthfulness => 245,
+            Self::MobilePlatformBoundary => 246,
+            Self::DesktopSingleCoordinator => 247,
+            Self::DesktopStaleFenceSafety => 248,
+            Self::DesktopResumeIdempotency => 249,
+            Self::DesktopIpcBoundary => 250,
+            Self::DesktopCloneBindingSafety => 251,
+            Self::DesktopUpgradeIntentSafety => 252,
+            Self::DesktopModeParity => 253,
+            Self::DesktopPersistenceTruthfulness => 254,
+            Self::DesktopDerivedStateSafety => 255,
         }
     }
 }
@@ -1983,7 +2127,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 238] = [
+pub static REGISTRY: [InvariantEntry; 256] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -3649,6 +3793,132 @@ pub static REGISTRY: [InvariantEntry; 238] = [
         "suspend_revoke_supersede_matrix",
         "conformance_catalog_contract",
         "certification_identity_reuse_total",
+    ),
+    entry(
+        InvariantId::MobileDurableProcessIndependence,
+        "mobile_process_independent_state",
+        "process_kill_restart_matrix",
+        "mobile_recovery_store_contract",
+        "mobile_volatile_state_loss_total",
+    ),
+    entry(
+        InvariantId::MobileIntentAtomicity,
+        "mobile_local_intent_atomicity",
+        "disk_full_mutation_matrix",
+        "mobile_local_store_contract",
+        "mobile_intent_atomicity_failure_total",
+    ),
+    entry(
+        InvariantId::MobilePushHintOnly,
+        "mobile_push_hint_only",
+        "push_loss_duplicate_untrusted_matrix",
+        "mobile_push_contract",
+        "mobile_push_authority_attempt_total",
+    ),
+    entry(
+        InvariantId::MobileCursorCheckpointSafety,
+        "mobile_cursor_after_durable_apply",
+        "background_expiration_reconcile_matrix",
+        "mobile_checkpoint_contract",
+        "mobile_cursor_ahead_total",
+    ),
+    entry(
+        InvariantId::MobileSecureKeyStorage,
+        "mobile_secure_key_provider",
+        "locked_key_and_export_matrix",
+        "mobile_secure_store_contract",
+        "mobile_key_exposure_total",
+    ),
+    entry(
+        InvariantId::MobileResourceSemanticSafety,
+        "mobile_resource_semantic_safety",
+        "network_power_thermal_policy_matrix",
+        "mobile_policy_contract",
+        "mobile_semantic_downgrade_total",
+    ),
+    entry(
+        InvariantId::MobileUpgradeIntentSafety,
+        "mobile_upgrade_intent_preservation",
+        "pending_outbox_upgrade_downgrade_matrix",
+        "mobile_migration_contract",
+        "mobile_upgrade_intent_loss_total",
+    ),
+    entry(
+        InvariantId::MobileStorageTruthfulness,
+        "mobile_storage_truthful_result",
+        "storage_unavailable_mutation_matrix",
+        "mobile_store_failure_contract",
+        "mobile_false_saved_total",
+    ),
+    entry(
+        InvariantId::MobilePlatformBoundary,
+        "mobile_platform_no_semantic_bypass",
+        "binding_surface_authority_matrix",
+        "mobile_binding_contract",
+        "mobile_platform_bypass_total",
+    ),
+    entry(
+        InvariantId::DesktopSingleCoordinator,
+        "desktop_single_coordinator",
+        "desktop_multiprocess_election_matrix",
+        "desktop_coordination_contract",
+        "desktop_multiple_coordinator_total",
+    ),
+    entry(
+        InvariantId::DesktopStaleFenceSafety,
+        "desktop_stale_fence_rejected",
+        "desktop_stale_process_revive_matrix",
+        "desktop_fencing_contract",
+        "desktop_stale_commit_total",
+    ),
+    entry(
+        InvariantId::DesktopResumeIdempotency,
+        "desktop_resume_idempotent",
+        "desktop_suspend_ambiguous_retry_matrix",
+        "desktop_resume_contract",
+        "desktop_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::DesktopIpcBoundary,
+        "desktop_ipc_domain_only",
+        "desktop_raw_metadata_command_matrix",
+        "desktop_ipc_contract",
+        "desktop_ipc_bypass_total",
+    ),
+    entry(
+        InvariantId::DesktopCloneBindingSafety,
+        "desktop_clone_rebind",
+        "desktop_store_clone_matrix",
+        "desktop_binding_contract",
+        "desktop_binding_reuse_total",
+    ),
+    entry(
+        InvariantId::DesktopUpgradeIntentSafety,
+        "desktop_upgrade_intent_preserved",
+        "desktop_pending_outbox_upgrade_matrix",
+        "desktop_update_contract",
+        "desktop_upgrade_intent_loss_total",
+    ),
+    entry(
+        InvariantId::DesktopModeParity,
+        "desktop_mode_semantic_parity",
+        "desktop_agent_in_process_trace_matrix",
+        "desktop_mode_contract",
+        "desktop_mode_divergence_total",
+    ),
+    entry(
+        InvariantId::DesktopPersistenceTruthfulness,
+        "desktop_persistence_truthful",
+        "desktop_low_disk_secure_store_matrix",
+        "desktop_persistence_contract",
+        "desktop_false_persistence_total",
+    ),
+    entry(
+        InvariantId::DesktopDerivedStateSafety,
+        "desktop_derived_state_non_authoritative",
+        "desktop_cache_rebuild_matrix",
+        "desktop_derived_state_contract",
+        "desktop_derived_authority_total",
     ),
 ];
 
