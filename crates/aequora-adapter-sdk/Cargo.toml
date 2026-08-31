@@ -8,9 +8,12 @@ description = "Stable extension contracts for third-party Aequora adapters"
 repository.workspace = true
 
 [dependencies]
+aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
+aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 async-trait.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 
 [lints]

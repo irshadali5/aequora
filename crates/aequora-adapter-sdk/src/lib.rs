@@ -4,6 +4,49 @@
 //! framework types. Core cursor ordering, authority, idempotency, and identity semantics are not
 //! extension points.
 
+pub mod authority;
+pub mod capabilities;
+pub mod conformance;
+pub mod errors;
+pub mod fencing;
+pub mod journal;
+pub mod ledger;
+pub mod local;
+pub mod migration;
+pub mod object;
+pub mod records;
+pub mod snapshot;
+
+pub use authority::{
+    AuthorityTransaction, AuthorityTransactionStore, DomainRepositoryFactory,
+    SupportsAtomicAuthorityCommit,
+};
+pub use capabilities::{
+    AdapterCapabilities, AdapterCapability, AdapterDescriptor, AdapterId, AdapterManifest,
+    AdapterRequirements, AdapterRole, AdapterSupport, AdapterVersion, CapabilityId,
+    CapabilityLevel, CapabilityVersion, CertifiedEnvironment, ConcurrencyModel, SnapshotLevel,
+    StoreKind,
+};
+pub use errors::{AdapterDiagnostic, RetryDisposition};
+pub use fencing::{FencingLease, FencingStore, SupportsFencing};
+pub use journal::JournalStore;
+pub use ledger::OperationLedgerStore;
+pub use local::{
+    CursorStore, LocalBackupProvider, LocalTransaction, LocalTransactionStore, OutboxStore,
+    SupportsAtomicLocalOutbox,
+};
+pub use migration::{
+    AdapterMigration, AdapterSchemaVersion, DomainSchemaVersion, MigrationHook, MigrationId,
+    MigrationPlan, MigrationStore,
+};
+pub use object::ObjectStore;
+pub use records::{
+    AuditRecord, AuthorityMutation, Digest, DomainMutation, JournalRecord, LedgerRecord,
+    LocalOperationSequence, OutboxRecord, OutboxState, SnapshotChunk, SnapshotGeneration,
+    SnapshotManifest,
+};
+pub use snapshot::{SnapshotStore, SupportsAtomicSnapshotActivation};
+
 use aequora_operation::{EncodedOperation, LocalCommitStatus, OperationKind, OperationState};
 use aequora_types::{DeviceId, OperationId, SyncScopeId, TenantId};
 use async_trait::async_trait;
@@ -81,6 +124,24 @@ pub struct ClientIdentity {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AdapterErrorKind {
+    /// Adapter or physical store cannot currently be reached.
+    Unavailable,
+    /// A compare-and-swap or transaction precondition failed.
+    Conflict,
+    /// The physical store cannot accept additional durable bytes.
+    DiskFull,
+    /// The physical store is currently read-only.
+    ReadOnly,
+    /// Stored state failed integrity or decoding checks.
+    Corruption,
+    /// A logical or physical uniqueness/constraint rule was violated.
+    ConstraintViolation,
+    /// A serializable transaction must be retried from a deterministic plan.
+    SerializationFailure,
+    /// A bounded operation timed out.
+    Timeout,
+    /// Commit may have succeeded, so the idempotency layer must resolve the outcome.
+    CommitOutcomeUnknown,
     /// Durable storage is unavailable or rejected a commit.
     Storage,
     /// Transport exchange failed before a semantic response was available.
@@ -103,6 +164,8 @@ pub enum AdapterErrorKind {
 pub struct AdapterError {
     kind: AdapterErrorKind,
     message: Arc<str>,
+    retry: RetryDisposition,
+    diagnostic: Option<AdapterDiagnostic>,
 }
 
 impl AdapterError {
@@ -112,6 +175,8 @@ impl AdapterError {
         Self {
             kind,
             message: message.into(),
+            retry: RetryDisposition::NonRetryable,
+            diagnostic: None,
         }
     }
 
@@ -125,6 +190,32 @@ impl AdapterError {
     #[must_use]
     pub const fn kind(&self) -> AdapterErrorKind {
         self.kind
+    }
+
+    /// Adds the adapter's safe retry classification.
+    #[must_use]
+    pub const fn with_retry(mut self, retry: RetryDisposition) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// Adds payload-free adapter diagnostics without exposing a driver error type.
+    #[must_use]
+    pub fn with_diagnostic(mut self, diagnostic: AdapterDiagnostic) -> Self {
+        self.diagnostic = Some(diagnostic);
+        self
+    }
+
+    /// Returns the safe retry/recovery action selected by the adapter.
+    #[must_use]
+    pub const fn retry_disposition(&self) -> RetryDisposition {
+        self.retry
+    }
+
+    /// Returns optional payload-free physical diagnostics.
+    #[must_use]
+    pub const fn diagnostic(&self) -> Option<&AdapterDiagnostic> {
+        self.diagnostic.as_ref()
     }
 }
 
