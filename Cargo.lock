@@ -47,9 +47,12 @@ dependencies = [
 name = "aequora-adapter-sdk"
 version = "0.1.0"
 dependencies = [
+ "aequora-conformance",
  "aequora-operation",
+ "aequora-registry-types",
  "aequora-types",
  "async-trait",
+ "serde",
  "thiserror",
 ]
 
@@ -1012,6 +1015,7 @@ dependencies = [
 name = "aequora-store-postgres"
 version = "0.1.0"
 dependencies = [
+ "aequora-adapter-sdk",
  "aequora-authority",
  "aequora-executor",
  "aequora-integrity",
@@ -1033,6 +1037,7 @@ dependencies = [
 name = "aequora-store-stoolap"
 version = "0.1.0"
 dependencies = [
+ "aequora-adapter-sdk",
  "aequora-coordination",
  "aequora-integrity",
  "aequora-protocol",
