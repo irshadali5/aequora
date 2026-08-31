@@ -52,6 +52,7 @@ outside the reusable core.
 | 32 | [Linux, Windows, and macOS desktop runtime architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md) |
 | 33 | [Cross-platform local storage architecture](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md) |
 | 34 | [Reference implementation and workspace crate boundaries](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md) |
+| 35 | [Public Rust API and SDK stability](sys-arch/35-public-rust-api-sdk-stability-architecture.md) |
 
 ## Implementation status
 
@@ -80,6 +81,7 @@ implicitly claim completion of an earlier part.
 | Part 32: Linux, Windows, and macOS desktop runtime architecture | Implemented | [Part 32 report](docs/linux-windows-macos-desktop-runtime-completion.md) |
 | Part 33: Cross-platform local storage architecture | Implemented | [Part 33 report](docs/cross-platform-local-storage-completion.md) |
 | Part 34: Reference implementation and workspace crate boundaries | Implemented | [Part 34 report](docs/reference-implementation-workspace-boundaries-completion.md) |
+| Part 35: Public Rust API and SDK stability | Implemented | [Part 35 report](docs/public-rust-sdk-completion.md) |
 
 ## Implementation workflow
 
