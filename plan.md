@@ -48,6 +48,8 @@ outside the reusable core.
 | 28 | [Multi-consumer change feed](sys-arch/28-multi-consumer-change-feed-architecture.md) |
 | 29 | [Schema, operation registry, and developer governance](sys-arch/29-schema-operation-registry-developer-governance.md) |
 | 30 | [Certification and conformance ecosystem](sys-arch/30-certification-conformance-ecosystem-architecture.md) |
+| 31 | [Android and iOS mobile runtime platform architecture](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md) |
+| 32 | [Linux, Windows, and macOS desktop runtime architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md) |
 
 ## Implementation status
 
@@ -72,6 +74,8 @@ implicitly claim completion of an earlier part.
 | Part 26: legacy application compatibility and incremental adoption | Implemented | [Part 26 report](docs/legacy-application-compatibility-incremental-adoption-completion.md) |
 | Part 29: schema, operation registry, and developer governance | Implemented | [Part 29 report](docs/schema-operation-registry-developer-governance-completion.md) |
 | Part 30: certification, conformance, and ecosystem architecture | Implemented | [Part 30 report](docs/certification-conformance-ecosystem-completion.md) |
+| Part 31: Android and iOS mobile runtime platform architecture | Implemented | [Part 31 report](docs/android-ios-mobile-runtime-platform-completion.md) |
+| Part 32: Linux, Windows, and macOS desktop runtime architecture | Implemented | [Part 32 report](docs/linux-windows-macos-desktop-runtime-completion.md) |
 
 ## Implementation workflow
 
@@ -100,6 +104,8 @@ bash scripts/check-jobs-architecture.sh
 bash scripts/check-admin-architecture.sh
 bash scripts/check-diagnostics-architecture.sh
 bash scripts/check-legacy-architecture.sh
+bash scripts/check-mobile-architecture.sh
+bash scripts/check-desktop-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
