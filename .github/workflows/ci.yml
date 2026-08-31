@@ -129,6 +129,10 @@ jobs:
           cargo +stable test -p aequora-testkit --test conformance_certification_contracts --locked
           cargo +stable test -p aequora-store-stoolap built_in_stoolap_passes_the_public_local_adapter_contract --locked
           cargo +stable run -p aequora-cli --locked -- conform storage
+      - name: Enforce Android and iOS mobile runtime contracts
+        run: bash scripts/check-mobile-architecture.sh
+      - name: Enforce Linux, Windows, and macOS desktop runtime contracts
+        run: bash scripts/check-desktop-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
