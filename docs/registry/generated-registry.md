@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `aedd7cb29285cfadc83b5d449ea9ce12d5626e8b0979701c42e6632a3d55de62`
+Digest: `d4256a2a6c35f0da37075dce61a76328c8427b9f3812309863a95c8e76516569`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -149,6 +149,8 @@ Digest: `aedd7cb29285cfadc83b5d449ea9ce12d5626e8b0979701c42e6632a3d55de62`
 | conformance-profile | 60 | MobileClientFull | Current | mobile | - | Full mobile runtime, client, and protocol behavior. |
 | conformance-profile | 61 | DesktopClientFull | Current | desktop | - | Full in-process desktop runtime, client, and protocol behavior. |
 | conformance-profile | 62 | DesktopAgentFull | Current | desktop | - | Full desktop agent and local IPC behavior. |
+| conformance-profile | 63 | MobileLocalStoreFull | Current | storage | - | Full target-bound Android or iOS local storage behavior. |
+| conformance-profile | 64 | DesktopLocalStoreFull | Current | storage | - | Full target-bound Linux, Windows, or macOS local storage behavior. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -187,6 +189,16 @@ Digest: `aedd7cb29285cfadc83b5d449ea9ce12d5626e8b0979701c42e6632a3d55de62`
 | conformance-test | 36 | DesktopModeSemanticParity | Current | desktop | - | In-process and agent modes preserve synchronization semantics. |
 | conformance-test | 37 | DesktopPersistenceFailureTruthfulness | Current | desktop | - | Low disk and credential-store failures are explicit. |
 | conformance-test | 38 | DesktopDerivedStateNonAuthority | Current | desktop | - | Desktop caches and UI state remain derived and rebuildable. |
+| conformance-test | 39 | StorageAtomicLocalIntent | Current | storage | - | Domain mutation and outbox commit atomically. |
+| conformance-test | 40 | StorageCriticalIntentRetention | Current | storage | - | Pressure never evicts critical intent. |
+| conformance-test | 41 | StorageCachePurgeIsolation | Current | storage | - | Cache purge preserves pending intent. |
+| conformance-test | 42 | StorageCloneBinding | Current | storage | - | Clone restore requires secure rebinding. |
+| conformance-test | 43 | StorageFormatDowngrade | Current | storage | - | Newer store formats fail closed on older binaries. |
+| conformance-test | 44 | StoragePlatformCertification | Current | storage | - | Claims bind to actual target platform observations. |
+| conformance-test | 45 | StorageVerifiedPublication | Current | storage | - | Staged data verifies before publication. |
+| conformance-test | 46 | StorageLowDiskTruthfulness | Current | storage | - | Low disk cannot produce false commit success. |
+| conformance-test | 47 | StorageSecretIsolation | Current | storage | - | Secrets remain outside ordinary sync metadata. |
+| conformance-test | 48 | StorageFilesystemPlacement | Current | storage | - | Live stores avoid unverified network and cloud paths. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
