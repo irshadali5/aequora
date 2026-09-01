@@ -48,10 +48,19 @@ part-specific completion reports.
 | 28 | [Multi-consumer change feed](sys-arch/28-multi-consumer-change-feed-architecture.md) |
 | 29 | [Schema, operation registry, and developer governance](sys-arch/29-schema-operation-registry-developer-governance.md) |
 | 30 | [Certification and conformance ecosystem](sys-arch/30-certification-conformance-ecosystem-architecture.md) |
+| 31 | [Android and iOS mobile runtime](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md) |
+| 32 | [Desktop runtime platform](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md) |
+| 33 | [Cross-platform local storage](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md) |
+| 34 | [Reference implementation workspace boundaries](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md) |
+| 35 | [Public Rust SDK stability](sys-arch/35-public-rust-api-sdk-stability-architecture.md) |
+| 36 | [Storage adapter SDK](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md) |
+| 37 | [PostgreSQL and Neon authority adapter](sys-arch/37-postgresql-neon-authoritative-adapter-detailed-architecture.md) |
+| 38 | [Stoolap local persistence](sys-arch/38-stoolap-embedded-local-replica-client-persistence-architecture.md) |
+| 39 | [Axum server integration](sys-arch/39-axum-server-integration-middleware-architecture.md) |
 
 ## Repository status
 
-The reusable implementation is complete through Part 30. See the [implementation plan](plan.md)
+The reusable implementation is complete through Part 39. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
 evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
 each built binary and environment and is not inferred from repository ownership.
