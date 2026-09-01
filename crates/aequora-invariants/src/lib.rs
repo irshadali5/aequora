@@ -622,11 +622,31 @@ pub enum InvariantId {
     PostgresRetentionSafety,
     /// Neon operational behavior never changes authority semantics.
     PostgresNeonSemanticParity,
+    /// Durable provisional domain mutation and outbox intent commit atomically in Stoolap.
+    StoolapLocalAtomicity,
+    /// Authoritative apply, outcomes, conflicts, overlay, and cursor commit atomically in Stoolap.
+    StoolapReconciliationAtomicity,
+    /// Possibly transmitted Stoolap operations retain identity and semantic payload.
+    StoolapRetryIdentity,
+    /// Rebootstrap, repair, migration, and storage pressure preserve pending intent.
+    StoolapIntentPreservation,
+    /// Stoolap cursors cannot exceed durably installed authoritative state.
+    StoolapCursorSafety,
+    /// Only the current fenced coordinator performs leader-owned Stoolap transitions.
+    StoolapFencedCoordinator,
+    /// Restored or cloned Stoolap replicas validate device binding and secure-key state.
+    StoolapCloneSafety,
+    /// Stoolap storage reclamation never evicts critical pending intent or correctness metadata.
+    StoolapStoragePressureSafety,
+    /// Stoolap-specific types remain inside the physical local adapter.
+    StoolapTypeIsolation,
+    /// Stoolap support claims require a passing target-bound conformance profile.
+    StoolapPlatformCertification,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 306] = [
+    pub const ALL: [Self; 316] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -933,6 +953,16 @@ impl InvariantId {
         Self::PostgresSideEffectIntent,
         Self::PostgresRetentionSafety,
         Self::PostgresNeonSemanticParity,
+        Self::StoolapLocalAtomicity,
+        Self::StoolapReconciliationAtomicity,
+        Self::StoolapRetryIdentity,
+        Self::StoolapIntentPreservation,
+        Self::StoolapCursorSafety,
+        Self::StoolapFencedCoordinator,
+        Self::StoolapCloneSafety,
+        Self::StoolapStoragePressureSafety,
+        Self::StoolapTypeIsolation,
+        Self::StoolapPlatformCertification,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1246,6 +1276,16 @@ impl InvariantId {
             Self::PostgresSideEffectIntent => "AEQ-INV-PG008",
             Self::PostgresRetentionSafety => "AEQ-INV-PG009",
             Self::PostgresNeonSemanticParity => "AEQ-INV-PG010",
+            Self::StoolapLocalAtomicity => "AEQ-INV-STOOLAP001",
+            Self::StoolapReconciliationAtomicity => "AEQ-INV-STOOLAP002",
+            Self::StoolapRetryIdentity => "AEQ-INV-STOOLAP003",
+            Self::StoolapIntentPreservation => "AEQ-INV-STOOLAP004",
+            Self::StoolapCursorSafety => "AEQ-INV-STOOLAP005",
+            Self::StoolapFencedCoordinator => "AEQ-INV-STOOLAP006",
+            Self::StoolapCloneSafety => "AEQ-INV-STOOLAP007",
+            Self::StoolapStoragePressureSafety => "AEQ-INV-STOOLAP008",
+            Self::StoolapTypeIsolation => "AEQ-INV-STOOLAP009",
+            Self::StoolapPlatformCertification => "AEQ-INV-STOOLAP010",
         }
     }
 
@@ -2158,6 +2198,36 @@ impl InvariantId {
             Self::PostgresNeonSemanticParity => {
                 "Neon autosuspend scaling branching and pooling never redefine authority semantics"
             }
+            Self::StoolapLocalAtomicity => {
+                "every durable provisional domain mutation commits atomically with its Stoolap outbox intent"
+            }
+            Self::StoolapReconciliationAtomicity => {
+                "Stoolap authoritative apply outcomes conflicts overlay reconciliation and cursor commit atomically"
+            }
+            Self::StoolapRetryIdentity => {
+                "a possibly transmitted Stoolap operation retains its OperationId and semantic payload across retries"
+            }
+            Self::StoolapIntentPreservation => {
+                "Stoolap rebootstrap migration repair and storage reclamation preserve pending user intent"
+            }
+            Self::StoolapCursorSafety => {
+                "a Stoolap cursor never advances beyond authoritative state durably installed locally"
+            }
+            Self::StoolapFencedCoordinator => {
+                "only the current fenced coordinator performs leader-owned Stoolap metadata transitions"
+            }
+            Self::StoolapCloneSafety => {
+                "a restored or cloned Stoolap store validates device binding generation and secure-key state"
+            }
+            Self::StoolapStoragePressureSafety => {
+                "Stoolap storage pressure never evicts critical pending intent or correctness metadata"
+            }
+            Self::StoolapTypeIsolation => {
+                "Stoolap-specific types remain inside the physical local adapter boundary"
+            }
+            Self::StoolapPlatformCertification => {
+                "Stoolap support on a platform requires the matching target-bound conformance profile"
+            }
         }
     }
 
@@ -2476,6 +2546,16 @@ impl InvariantId {
             Self::PostgresSideEffectIntent => 303,
             Self::PostgresRetentionSafety => 304,
             Self::PostgresNeonSemanticParity => 305,
+            Self::StoolapLocalAtomicity => 306,
+            Self::StoolapReconciliationAtomicity => 307,
+            Self::StoolapRetryIdentity => 308,
+            Self::StoolapIntentPreservation => 309,
+            Self::StoolapCursorSafety => 310,
+            Self::StoolapFencedCoordinator => 311,
+            Self::StoolapCloneSafety => 312,
+            Self::StoolapStoragePressureSafety => 313,
+            Self::StoolapTypeIsolation => 314,
+            Self::StoolapPlatformCertification => 315,
         }
     }
 }
@@ -2527,7 +2607,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 306] = [
+pub static REGISTRY: [InvariantEntry; 316] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4669,6 +4749,76 @@ pub static REGISTRY: [InvariantEntry; 306] = [
         "neon_operational_profile_matrix",
         "neon_authority_semantic_conformance",
         "neon_semantic_drift_total",
+    ),
+    entry(
+        InvariantId::StoolapLocalAtomicity,
+        "stoolap_tx_a_atomicity",
+        "stoolap_tx_a_failpoint_matrix",
+        "stoolap_domain_outbox_atomicity",
+        "stoolap_partial_local_commit_total",
+    ),
+    entry(
+        InvariantId::StoolapReconciliationAtomicity,
+        "stoolap_tx_c_atomicity",
+        "stoolap_tx_c_failpoint_matrix",
+        "stoolap_reconcile_cursor_atomicity",
+        "stoolap_partial_reconcile_total",
+    ),
+    entry(
+        InvariantId::StoolapRetryIdentity,
+        "stoolap_retry_identity",
+        "stoolap_crash_retry_matrix",
+        "stoolap_digest_bound_claim_retry",
+        "stoolap_retry_identity_mismatch_total",
+    ),
+    entry(
+        InvariantId::StoolapIntentPreservation,
+        "stoolap_pending_intent_preservation",
+        "stoolap_rebootstrap_repair_matrix",
+        "stoolap_pending_intent_recovery",
+        "stoolap_pending_intent_loss_total",
+    ),
+    entry(
+        InvariantId::StoolapCursorSafety,
+        "stoolap_cursor_after_apply",
+        "stoolap_cursor_failpoint_matrix",
+        "stoolap_reconcile_cursor_boundary",
+        "stoolap_cursor_ahead_total",
+    ),
+    entry(
+        InvariantId::StoolapFencedCoordinator,
+        "stoolap_current_fence_only",
+        "stoolap_coordinator_race_matrix",
+        "stoolap_fenced_metadata_transitions",
+        "stoolap_stale_fence_total",
+    ),
+    entry(
+        InvariantId::StoolapCloneSafety,
+        "stoolap_clone_rebinding",
+        "stoolap_restore_binding_matrix",
+        "stoolap_device_binding_validation",
+        "stoolap_clone_identity_reuse_total",
+    ),
+    entry(
+        InvariantId::StoolapStoragePressureSafety,
+        "stoolap_critical_storage_preservation",
+        "stoolap_storage_pressure_matrix",
+        "stoolap_storage_preflight",
+        "stoolap_critical_eviction_total",
+    ),
+    entry(
+        InvariantId::StoolapTypeIsolation,
+        "stoolap_physical_type_isolation",
+        "stoolap_public_surface_scan",
+        "stoolap_adapter_boundary_gate",
+        "stoolap_type_leak_total",
+    ),
+    entry(
+        InvariantId::StoolapPlatformCertification,
+        "stoolap_target_bound_support",
+        "stoolap_platform_profile_matrix",
+        "stoolap_environment_conformance",
+        "stoolap_uncertified_target_total",
     ),
 ];
 
