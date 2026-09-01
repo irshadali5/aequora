@@ -59,10 +59,11 @@ part-specific completion reports.
 | 39 | [Axum server integration](sys-arch/39-axum-server-integration-middleware-architecture.md) |
 | 40 | [Dioxus client integration](sys-arch/40-dioxus-client-integration-reactive-state-architecture.md) |
 | 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
+| 42 | [SQLite embedded local adapter](sys-arch/42-sqlite-embedded-local-adapter-architecture.md) |
 
 ## Repository status
 
-The reusable implementation is complete through Part 41. See the [implementation plan](plan.md)
+The reusable implementation is complete through Part 42. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
 evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
 each built binary and environment and is not inferred from repository ownership.
