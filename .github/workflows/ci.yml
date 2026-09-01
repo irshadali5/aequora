@@ -149,6 +149,8 @@ jobs:
         run: bash scripts/check-axum-server-architecture.sh
       - name: Enforce Dioxus reactive client boundary contracts
         run: bash scripts/check-dioxus-client-architecture.sh
+      - name: Enforce CLI and developer toolchain contracts
+        run: bash scripts/check-cli-toolchain-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
