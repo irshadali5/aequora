@@ -3,10 +3,35 @@
 //! Domain repositories should use the same Stoolap transaction for their optimistic write
 //! and `aequora_outbox` insert. Reconciliation similarly remains one backend transaction.
 
+pub mod backup;
+pub mod bootstrap;
+pub mod capabilities;
+pub mod config;
+pub mod conflict;
+pub mod connection;
+pub mod cursor;
+pub mod domain_bridge;
+pub mod entity_meta;
+pub mod errors;
+pub mod fencing;
+pub mod health;
+pub mod integrity;
+pub mod migration;
+pub mod outbox;
+pub mod repair;
+pub mod scheduler;
+pub mod snapshot;
+pub mod storage;
+
+pub use capabilities::{
+    STOOLAP_DESKTOP_LOCAL_FULL_PROFILE, STOOLAP_LOCAL_ADAPTER_IDENTITY, STOOLAP_LOCAL_CORE_PROFILE,
+    STOOLAP_MOBILE_LOCAL_FULL_PROFILE,
+};
+
 use aequora_adapter_sdk as adapter_sdk;
 use aequora_coordination::{
     CoordinationSnapshot, FencingToken, LeaseGrant, LeaseKind, LeaseRequest,
-    LocalCoordinationSupport, LocalStoreGeneration, LocalStoreId,
+    LocalCoordinationSupport, LocalStoreGeneration, LocalStoreId, ProcessInstanceId,
 };
 use aequora_integrity::{
     CURRENT_HASH_SCHEMA, CanonicalEntity, IntegrityGeneration, IntegritySnapshot, IntegritySupport,
@@ -29,7 +54,7 @@ use aequora_store::{
     SnapshotProgress, StoreError, TransactionCapabilities, TransactionCapabilityProvider,
 };
 use aequora_types::{
-    AuthorityEpoch, AuthorityId, Cursor, EntityId, EntityRef, EntityType, EntityVersion,
+    AuthorityEpoch, AuthorityId, Cursor, DeviceId, EntityId, EntityRef, EntityType, EntityVersion,
     OperationId, Sequence, SnapshotId, SyncScopeId,
 };
 use async_trait::async_trait;
@@ -195,6 +220,97 @@ CREATE TABLE IF NOT EXISTS aequora_authority_trust (
 );
 ";
 
+/// Completes the Part 38 identity, claim, bootstrap, repair, scheduler, and storage metadata.
+pub const MIGRATION_0007: &str = r"
+ALTER TABLE aequora_local_store ADD COLUMN device_id TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+ALTER TABLE aequora_local_store ADD COLUMN device_binding_generation INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE aequora_local_store ADD COLUMN created_at_unix_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE aequora_local_store ADD COLUMN last_opened_by_build TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE aequora_outbox ADD COLUMN payload_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE aequora_outbox ADD COLUMN in_flight_owner TEXT;
+ALTER TABLE aequora_outbox ADD COLUMN in_flight_since_unix_ms INTEGER;
+
+CREATE TABLE IF NOT EXISTS aequora_outbox_dependency (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    operation_id TEXT NOT NULL,
+    depends_on_operation_id TEXT NOT NULL,
+    UNIQUE (operation_id, depends_on_operation_id)
+);
+
+CREATE TABLE IF NOT EXISTS aequora_entity_meta (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    entity_type INTEGER NOT NULL,
+    entity_id TEXT NOT NULL,
+    authoritative_version INTEGER,
+    optimistic_generation INTEGER NOT NULL DEFAULT 0,
+    tombstone_state TEXT NOT NULL DEFAULT 'live',
+    last_authoritative_sequence INTEGER,
+    scope_membership TEXT NOT NULL DEFAULT '',
+    integrity_digest TEXT,
+    UNIQUE (entity_type, entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS aequora_bootstrap (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    scope_id TEXT NOT NULL UNIQUE,
+    phase TEXT NOT NULL,
+    bootstrap_generation INTEGER NOT NULL,
+    authority_id TEXT,
+    authority_epoch INTEGER,
+    boundary_sequence INTEGER,
+    failure_detail TEXT,
+    updated_at_unix_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aequora_snapshot_stage_meta (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    scope_id TEXT NOT NULL UNIQUE,
+    snapshot_id TEXT NOT NULL,
+    expected_bytes INTEGER NOT NULL,
+    received_bytes INTEGER NOT NULL,
+    manifest_digest TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS aequora_integrity_checkpoint (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    scope_id TEXT NOT NULL UNIQUE,
+    cursor_sequence INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    status TEXT NOT NULL,
+    checked_at_unix_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aequora_repair_state (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    scope_id TEXT NOT NULL UNIQUE,
+    repair_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    checkpoint TEXT,
+    updated_at_unix_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aequora_scheduler (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    next_attempt_unix_ms INTEGER NOT NULL DEFAULT 0,
+    retry_after_unix_ms INTEGER NOT NULL DEFAULT 0,
+    circuit_open_until_unix_ms INTEGER NOT NULL DEFAULT 0,
+    data_budget_used_bytes INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS aequora_blob_meta (
+    row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    blob_id TEXT NOT NULL UNIQUE,
+    digest TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    availability TEXT NOT NULL,
+    pin_state TEXT NOT NULL,
+    last_access_unix_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS aequora_conflict_status_idx ON aequora_conflicts (resolved, operation_id);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     row_id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -206,7 +322,7 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest Stoolap schema revision understood by this Aequora release.
-pub const STOOLAP_SCHEMA_VERSION: u32 = 6;
+pub const STOOLAP_SCHEMA_VERSION: u32 = 7;
 
 /// Versioned role and capability declaration for the built-in Stoolap local adapter.
 pub const STOOLAP_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
@@ -313,6 +429,11 @@ const STOOLAP_MIGRATIONS: &[StoolapMigration] = &[
         name: "authority_epoch_cursor_binding",
         sql: MIGRATION_0006,
     },
+    StoolapMigration {
+        version: 7,
+        name: "part_38_local_replica_production_metadata",
+        sql: MIGRATION_0007,
+    },
 ];
 
 struct AppliedMigration {
@@ -328,6 +449,21 @@ pub struct StoolapSchemaStatus {
     pub applied_version: u32,
     /// Highest migration supported by this Aequora build.
     pub expected_version: u32,
+}
+
+/// Persistent physical-replica identity and its logical device binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StoolapLocalIdentity {
+    /// Identity of the physical database replica.
+    pub local_store_id: LocalStoreId,
+    /// Monotonic physical/logical store generation.
+    pub store_generation: LocalStoreGeneration,
+    /// Registered logical device currently bound to this store.
+    pub device_id: DeviceId,
+    /// Monotonic binding generation used for clone detection.
+    pub device_binding_generation: u64,
+    /// Installed Aequora metadata schema.
+    pub metadata_schema_version: u32,
 }
 
 impl StoolapSchemaStatus {
@@ -955,6 +1091,298 @@ impl StoolapDatabase {
         Ok(())
     }
 
+    /// Reads the physical store identity and current logical device binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when identity metadata is missing, malformed, or out of range.
+    pub fn local_identity(&self) -> Result<StoolapLocalIdentity, StoreError> {
+        let row = self
+            .database
+            .query(
+                "SELECT store_id, store_generation, device_id, device_binding_generation, metadata_schema_version FROM aequora_local_store WHERE singleton = 1",
+                (),
+            )
+            .map_err(stoolap_error)?
+            .next()
+            .ok_or_else(|| StoreError::permanent("Stoolap local-store identity is missing"))?
+            .map_err(stoolap_error)?;
+        let store_id: String = row.get(0).map_err(stoolap_error)?;
+        let store_generation: i64 = row.get(1).map_err(stoolap_error)?;
+        let device_id: String = row.get(2).map_err(stoolap_error)?;
+        let device_binding_generation: i64 = row.get(3).map_err(stoolap_error)?;
+        let schema_version: i64 = row.get(4).map_err(stoolap_error)?;
+        Ok(StoolapLocalIdentity {
+            local_store_id: parse_id(&store_id, "local store ID")?,
+            store_generation: LocalStoreGeneration(from_i64(store_generation, "store generation")?),
+            device_id: parse_id(&device_id, "device ID")?,
+            device_binding_generation: from_i64(
+                device_binding_generation,
+                "device binding generation",
+            )?,
+            metadata_schema_version: u32::try_from(schema_version)
+                .map_err(|_| StoreError::permanent("invalid Stoolap metadata schema version"))?,
+        })
+    }
+
+    /// Atomically changes the logical device binding and advances its generation.
+    ///
+    /// This is an explicit recovery/registration action; opening a copied store never performs it
+    /// implicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the expected generation is stale or the update cannot commit.
+    pub fn rebind_device(
+        &self,
+        expected_generation: u64,
+        device_id: DeviceId,
+    ) -> Result<StoolapLocalIdentity, StoreError> {
+        let next_generation = expected_generation
+            .checked_add(1)
+            .ok_or_else(|| StoreError::permanent("device binding generation exhausted"))?;
+        let affected = self
+            .database
+            .execute(
+                "UPDATE aequora_local_store SET device_id=$1, device_binding_generation=$2 WHERE singleton=1 AND device_binding_generation=$3",
+                (
+                    device_id.to_string(),
+                    to_i64(next_generation, "device binding generation")?,
+                    to_i64(expected_generation, "expected device binding generation")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        if affected != 1 {
+            return Err(StoreError::permanent(
+                "stale Stoolap device binding generation",
+            ));
+        }
+        self.local_identity()
+    }
+
+    /// Atomically claims a bounded eligible upload batch under the current coordinator fence.
+    ///
+    /// Claiming sets `ever_sent` before the operation leaves the process. Retries therefore retain
+    /// the same operation identity and canonical semantic digest after crashes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error for an empty bound, stale fence, corrupt envelope/digest, or failed
+    /// transaction.
+    pub fn claim_operations(
+        &self,
+        owner: ProcessInstanceId,
+        limit: usize,
+        fence: LeaseGrant,
+    ) -> Result<Vec<outbox::ClaimedOperation>, StoreError> {
+        self.claim_operations_inner(owner, limit, Some(fence))
+    }
+
+    /// Claims a batch when the host explicitly guarantees exclusive single-process ownership.
+    ///
+    /// Multi-process desktop/agent deployments must use [`Self::claim_operations`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error for an empty bound, corrupt envelope/digest, or failed transaction.
+    pub fn claim_operations_single_process(
+        &self,
+        owner: ProcessInstanceId,
+        limit: usize,
+    ) -> Result<Vec<outbox::ClaimedOperation>, StoreError> {
+        self.claim_operations_inner(owner, limit, None)
+    }
+
+    fn claim_operations_inner(
+        &self,
+        owner: ProcessInstanceId,
+        limit: usize,
+        fence: Option<LeaseGrant>,
+    ) -> Result<Vec<outbox::ClaimedOperation>, StoreError> {
+        if limit == 0 {
+            return Err(StoreError::permanent(
+                "Stoolap outbox claim limit must be greater than zero",
+            ));
+        }
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        if let Some(grant) = fence {
+            validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+            if grant.owner_id != owner {
+                return Err(StoreError::leadership_lost(
+                    "claim owner does not match the current Stoolap lease",
+                ));
+            }
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let now = to_i64(unix_time_millis(), "claim timestamp")?;
+        let rows = transaction
+            .query(
+                "SELECT operation_id, envelope, payload_digest FROM aequora_outbox WHERE state IN ('pending', 'retry') AND operation_id NOT IN (SELECT operation_id FROM aequora_retry_schedule WHERE next_attempt_unix_ms > $1) AND operation_id NOT IN (SELECT operation_id FROM aequora_scope_quarantine) ORDER BY enqueued_order LIMIT $2",
+                (now, limit),
+            )
+            .map_err(stoolap_error)?;
+        let mut selected = Vec::new();
+        for row in rows {
+            let row = row.map_err(stoolap_error)?;
+            selected.push((
+                row.get::<String>(0).map_err(stoolap_error)?,
+                row.get::<String>(1).map_err(stoolap_error)?,
+                row.get::<String>(2).map_err(stoolap_error)?,
+            ));
+        }
+        let mut claimed = Vec::with_capacity(selected.len());
+        for (operation_id, encoded, stored_digest) in selected {
+            let operation: OperationEnvelope = decode(&encoded)?;
+            let digest = semantic_envelope_hash(&operation)
+                .map_err(|error| StoreError::permanent(error.to_string()))?;
+            if !stored_digest.is_empty() && decode_hash(&stored_digest)? != digest {
+                return Err(StoreError::permanent(
+                    "Stoolap outbox payload digest mismatch",
+                ));
+            }
+            let digest_hex = hex::encode(digest);
+            let affected = transaction
+                .execute(
+                    "UPDATE aequora_outbox SET state='sending', ever_sent=1, immutable_hash=$1, payload_digest=$1, in_flight_owner=$2, in_flight_since_unix_ms=$3 WHERE operation_id=$4 AND state IN ('pending', 'retry')",
+                    (&digest_hex, owner.to_string(), now, &operation_id),
+                )
+                .map_err(stoolap_error)?;
+            if affected != 1 {
+                return Err(StoreError::transient(
+                    "Stoolap outbox claim lost a concurrent candidate",
+                ));
+            }
+            claimed.push(outbox::ClaimedOperation {
+                operation,
+                payload_digest: digest,
+            });
+        }
+        transaction.commit().map_err(stoolap_error)?;
+        Ok(claimed)
+    }
+
+    /// Returns stale in-flight claims to retry under the current coordinator fence.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the fence is stale or recovery cannot commit.
+    pub fn recover_stale_claims(
+        &self,
+        stale_before_unix_ms: u64,
+        fence: LeaseGrant,
+    ) -> Result<u64, StoreError> {
+        self.recover_stale_claims_inner(stale_before_unix_ms, Some(fence))
+    }
+
+    /// Recovers stale claims under an explicit exclusive single-process host guarantee.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when recovery cannot commit.
+    pub fn recover_stale_claims_single_process(
+        &self,
+        stale_before_unix_ms: u64,
+    ) -> Result<u64, StoreError> {
+        self.recover_stale_claims_inner(stale_before_unix_ms, None)
+    }
+
+    fn recover_stale_claims_inner(
+        &self,
+        stale_before_unix_ms: u64,
+        fence: Option<LeaseGrant>,
+    ) -> Result<u64, StoreError> {
+        let mut transaction = self.database.begin().map_err(stoolap_error)?;
+        if let Some(grant) = fence {
+            validate_coordination_fence(&mut transaction, grant, unix_time_millis())?;
+        }
+        let affected = transaction
+            .execute(
+                "UPDATE aequora_outbox SET state='retry', in_flight_owner=NULL, in_flight_since_unix_ms=NULL WHERE state='sending' AND in_flight_since_unix_ms <= $1",
+                (to_i64(stale_before_unix_ms, "stale claim timestamp")?,),
+            )
+            .map_err(stoolap_error)?;
+        transaction.commit().map_err(stoolap_error)?;
+        u64::try_from(affected)
+            .map_err(|_| StoreError::permanent("negative stale Stoolap claim count"))
+    }
+
+    /// Persists only scheduler data required across process restarts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when a timestamp exceeds the engine range or the checkpoint fails.
+    pub fn store_scheduler_checkpoint(
+        &self,
+        checkpoint: scheduler::SchedulerCheckpoint,
+    ) -> Result<(), StoreError> {
+        self.database
+            .execute(
+                "UPDATE aequora_scheduler SET next_attempt_unix_ms=$1, retry_after_unix_ms=$2, circuit_open_until_unix_ms=$3, data_budget_used_bytes=$4 WHERE singleton=1",
+                (
+                    to_i64(checkpoint.next_attempt_unix_ms, "scheduler next attempt")?,
+                    to_i64(checkpoint.retry_after_unix_ms, "scheduler Retry-After")?,
+                    to_i64(checkpoint.circuit_open_until_unix_ms, "scheduler circuit deadline")?,
+                    to_i64(checkpoint.data_budget_used_bytes, "scheduler data budget")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+        Ok(())
+    }
+
+    /// Loads restart-safe scheduler state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the singleton checkpoint is missing or malformed.
+    pub fn scheduler_checkpoint(&self) -> Result<scheduler::SchedulerCheckpoint, StoreError> {
+        let row = self
+            .database
+            .query(
+                "SELECT next_attempt_unix_ms, retry_after_unix_ms, circuit_open_until_unix_ms, data_budget_used_bytes FROM aequora_scheduler WHERE singleton=1",
+                (),
+            )
+            .map_err(stoolap_error)?
+            .next()
+            .ok_or_else(|| StoreError::permanent("Stoolap scheduler checkpoint is missing"))?
+            .map_err(stoolap_error)?;
+        Ok(scheduler::SchedulerCheckpoint {
+            next_attempt_unix_ms: from_i64(
+                row.get(0).map_err(stoolap_error)?,
+                "scheduler next attempt",
+            )?,
+            retry_after_unix_ms: from_i64(
+                row.get(1).map_err(stoolap_error)?,
+                "scheduler Retry-After",
+            )?,
+            circuit_open_until_unix_ms: from_i64(
+                row.get(2).map_err(stoolap_error)?,
+                "scheduler circuit deadline",
+            )?,
+            data_budget_used_bytes: from_i64(
+                row.get(3).map_err(stoolap_error)?,
+                "scheduler data budget",
+            )?,
+        })
+    }
+
+    /// Produces a structured payload-free health snapshot without deleting damaged state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when basic schema or write probing fails.
+    pub fn structured_health(&self) -> Result<health::StoolapHealth, StoreError> {
+        self.health_check()?;
+        Ok(health::StoolapHealth {
+            store: health::HealthCheckState::Ready,
+            schema: health::HealthCheckState::Ready,
+            writes: health::HealthCheckState::Ready,
+            storage: health::HealthCheckState::Ready,
+            migration: health::MigrationHealth::Current,
+            integrity: health::IntegrityHealth::VerificationPending,
+            leader: health::LeaderHealth::CurrentOrFollowerSafe,
+        })
+    }
+
     /// Runs an optimistic domain mutation and outbox append in the same Stoolap transaction.
     ///
     /// # Errors
@@ -990,7 +1418,7 @@ fn migrate_database(database: &Database) -> Result<(), StoreError> {
         {
             continue;
         }
-        database.execute(migration.sql, ()).map_err(stoolap_error)?;
+        apply_idempotent_migration_ddl(database, migration.sql)?;
         let mut transaction = database.begin().map_err(stoolap_error)?;
         if transaction
             .query_opt::<i64, _>(
@@ -1026,6 +1454,45 @@ fn migrate_database(database: &Database) -> Result<(), StoreError> {
     Ok(())
 }
 
+fn apply_idempotent_migration_ddl(database: &Database, sql: &str) -> Result<(), StoreError> {
+    for statement in sql
+        .split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let tokens = statement.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() >= 6
+            && tokens[0].eq_ignore_ascii_case("ALTER")
+            && tokens[1].eq_ignore_ascii_case("TABLE")
+            && tokens[3].eq_ignore_ascii_case("ADD")
+            && tokens[4].eq_ignore_ascii_case("COLUMN")
+            && stoolap_column_exists(database, tokens[2], tokens[5])?
+        {
+            continue;
+        }
+        database.execute(statement, ()).map_err(stoolap_error)?;
+    }
+    Ok(())
+}
+
+fn stoolap_column_exists(
+    database: &Database,
+    table: &str,
+    column: &str,
+) -> Result<bool, StoreError> {
+    let rows = database
+        .query(&format!("DESCRIBE {table}"), ())
+        .map_err(stoolap_error)?;
+    for row in rows {
+        let row = row.map_err(stoolap_error)?;
+        let field: String = row.get(0).map_err(stoolap_error)?;
+        if field.eq_ignore_ascii_case(column) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn ensure_coordination_state(database: &Database) -> Result<(), StoreError> {
     let mut transaction = database.begin().map_err(stoolap_error)?;
     if transaction
@@ -1043,6 +1510,29 @@ fn ensure_coordination_state(database: &Database) -> Result<(), StoreError> {
             )
             .map_err(stoolap_error)?;
     }
+    let device_id = transaction
+        .query_one::<String, _>(
+            "SELECT device_id FROM aequora_local_store WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?;
+    if device_id == "00000000-0000-0000-0000-000000000000" {
+        transaction
+            .execute(
+                "UPDATE aequora_local_store SET device_id=$1, created_at_unix_ms=$2 WHERE singleton=1",
+                (
+                    DeviceId::new().to_string(),
+                    to_i64(unix_time_millis(), "store creation timestamp")?,
+                ),
+            )
+            .map_err(stoolap_error)?;
+    }
+    transaction
+        .execute(
+            "UPDATE aequora_local_store SET metadata_schema_version=$1, last_opened_by_build=$2 WHERE singleton=1",
+            (i64::from(STOOLAP_SCHEMA_VERSION), env!("CARGO_PKG_VERSION")),
+        )
+        .map_err(stoolap_error)?;
     if transaction
         .query_opt::<i64, _>(
             "SELECT fencing_token FROM aequora_coordinator_lease WHERE singleton = 1",
@@ -1055,6 +1545,43 @@ fn ensure_coordination_state(database: &Database) -> Result<(), StoreError> {
             .execute(
                 "INSERT INTO aequora_coordinator_lease (singleton, owner_id, fencing_token, expires_at_unix_ms, last_heartbeat_unix_ms, lease_kind) VALUES (1, NULL, 0, 0, 0, 'sync')",
                 (),
+            )
+            .map_err(stoolap_error)?;
+    }
+    if transaction
+        .query_opt::<i64, _>(
+            "SELECT singleton FROM aequora_scheduler WHERE singleton = 1",
+            (),
+        )
+        .map_err(stoolap_error)?
+        .is_none()
+    {
+        transaction
+            .execute("INSERT INTO aequora_scheduler (singleton) VALUES (1)", ())
+            .map_err(stoolap_error)?;
+    }
+    let rows = transaction
+        .query(
+            "SELECT operation_id, envelope FROM aequora_outbox WHERE payload_digest = ''",
+            (),
+        )
+        .map_err(stoolap_error)?;
+    let mut missing_digests = Vec::new();
+    for row in rows {
+        let row = row.map_err(stoolap_error)?;
+        missing_digests.push((
+            row.get::<String>(0).map_err(stoolap_error)?,
+            row.get::<String>(1).map_err(stoolap_error)?,
+        ));
+    }
+    for (operation_id, encoded) in missing_digests {
+        let operation: OperationEnvelope = decode(&encoded)?;
+        let digest = semantic_envelope_hash(&operation)
+            .map_err(|error| StoreError::permanent(error.to_string()))?;
+        transaction
+            .execute(
+                "UPDATE aequora_outbox SET payload_digest=$1 WHERE operation_id=$2",
+                (hex::encode(digest), operation_id),
             )
             .map_err(stoolap_error)?;
     }
@@ -1210,10 +1737,14 @@ fn insert_outbox(
         )
         .map_err(stoolap_error)?;
     let envelope = encode(operation)?;
+    let payload_digest = hex::encode(
+        semantic_envelope_hash(operation)
+            .map_err(|error| StoreError::permanent(error.to_string()))?,
+    );
     transaction
         .execute(
-            "INSERT INTO aequora_outbox (operation_id, enqueued_order, envelope, state) VALUES ($1, $2, $3, 'pending')",
-            (&operation_id, next_order, &envelope),
+            "INSERT INTO aequora_outbox (operation_id, enqueued_order, envelope, state, payload_digest) VALUES ($1, $2, $3, 'pending', $4)",
+            (&operation_id, next_order, &envelope, &payload_digest),
         )
         .map_err(stoolap_error)?;
     Ok(())
@@ -3554,6 +4085,32 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_part_38_alter_migration_is_idempotently_recovered() {
+        let (_directory, dsn) = persistent_dsn("part-38-alter-replay");
+        let backend = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .database()
+            .execute(
+                "DELETE FROM aequora_schema_migrations WHERE version=$1",
+                (i64::from(STOOLAP_SCHEMA_VERSION),),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        drop(backend);
+
+        let recovered = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            recovered.schema_status(),
+            Ok(StoolapSchemaStatus {
+                applied_version: STOOLAP_SCHEMA_VERSION,
+                expected_version: STOOLAP_SCHEMA_VERSION,
+            })
+        );
+        recovered
+            .health_check()
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+
+    #[test]
     fn persistent_migration_checksum_drift_is_rejected() {
         let (_directory, dsn) = persistent_dsn("checksum-drift");
         let backend = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
@@ -4302,5 +4859,137 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{error}")),
             operations
         );
+    }
+
+    #[tokio::test]
+    async fn part_38_claim_is_bounded_digest_bound_and_crash_retryable() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let first = operation(entity());
+        let second = operation(entity());
+        backend
+            .append_operation(first.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .append_operation(second)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let claimed = backend
+            .claim_operations_single_process(ProcessInstanceId::new(), 1)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].operation, first);
+        assert_eq!(
+            claimed[0].payload_digest,
+            semantic_envelope_hash(&first).unwrap_or_else(|error| panic!("{error}"))
+        );
+        assert_eq!(
+            backend
+                .operation_state(first.operation_id)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            Some(OutboxState::Sending)
+        );
+        assert_eq!(
+            backend
+                .recover_stale_claims_single_process(i64::MAX as u64)
+                .unwrap_or_else(|error| panic!("{error}")),
+            1
+        );
+        let retried = backend
+            .claim_operations_single_process(ProcessInstanceId::new(), 1)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(retried[0].operation.operation_id, first.operation_id);
+        assert_eq!(retried[0].payload_digest, claimed[0].payload_digest);
+    }
+
+    #[tokio::test]
+    async fn part_38_corrupt_claim_digest_rolls_back_the_complete_claim() {
+        let backend = StoolapDatabase::open_in_memory().unwrap_or_else(|error| panic!("{error}"));
+        let operation = operation(entity());
+        backend
+            .append_operation(operation.clone())
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        backend
+            .database
+            .execute(
+                "UPDATE aequora_outbox SET payload_digest=$1 WHERE operation_id=$2",
+                ("00".repeat(32), operation.operation_id.to_string()),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(
+            backend
+                .claim_operations_single_process(ProcessInstanceId::new(), 1)
+                .is_err()
+        );
+        assert_eq!(
+            backend
+                .operation_state(operation.operation_id)
+                .await
+                .unwrap_or_else(|error| panic!("{error}")),
+            Some(OutboxState::Pending)
+        );
+    }
+
+    #[test]
+    fn part_38_identity_scheduler_health_and_storage_policy_are_durable() {
+        let (_directory, dsn) = persistent_dsn("part-38-identity.db");
+        let backend = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        let identity = backend
+            .local_identity()
+            .unwrap_or_else(|error| panic!("{error}"));
+        let rebound = backend
+            .rebind_device(identity.device_binding_generation, DeviceId::new())
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            rebound.device_binding_generation,
+            identity.device_binding_generation + 1
+        );
+        let checkpoint = scheduler::SchedulerCheckpoint {
+            next_attempt_unix_ms: 11,
+            retry_after_unix_ms: 12,
+            circuit_open_until_unix_ms: 13,
+            data_budget_used_bytes: 14,
+        };
+        backend
+            .store_scheduler_checkpoint(checkpoint)
+            .unwrap_or_else(|error| panic!("{error}"));
+        drop(backend);
+
+        let reopened = StoolapDatabase::open(&dsn).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            reopened
+                .local_identity()
+                .unwrap_or_else(|error| panic!("{error}")),
+            rebound
+        );
+        assert_eq!(
+            reopened
+                .scheduler_checkpoint()
+                .unwrap_or_else(|error| panic!("{error}")),
+            checkpoint
+        );
+        assert!(
+            reopened
+                .structured_health()
+                .unwrap_or_else(|error| panic!("{error}"))
+                .ready()
+        );
+        assert_eq!(
+            storage::preflight_storage(100, 90, 20, 15),
+            storage::StoragePreflight::ReclaimEvictable { bytes: 10 }
+        );
+        assert_eq!(
+            backup::validate_restore_binding(2, 3, backup::SecureKeyState::Available),
+            backup::RestoreDisposition::RebindDevice
+        );
+        assert_eq!(STOOLAP_LOCAL_CORE_PROFILE, "StoolapLocalCore");
+        assert_eq!(
+            STOOLAP_DESKTOP_LOCAL_FULL_PROFILE,
+            "StoolapDesktopLocalFull"
+        );
+        assert_eq!(STOOLAP_MOBILE_LOCAL_FULL_PROFILE, "StoolapMobileLocalFull");
     }
 }
