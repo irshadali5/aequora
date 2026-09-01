@@ -792,6 +792,14 @@ where
             "a retry must not change lineage for an existing operation ID",
         ));
     }
+    let mut altered_payload_retry = commit.clone();
+    altered_payload_retry.payload.push(0xff);
+    altered_payload_retry.command_digest = *blake3::hash(&altered_payload_retry.payload).as_bytes();
+    if store.commit_operation(altered_payload_retry).await.is_ok() {
+        return Err(AdapterContractError::Violation(
+            "a retry must not change canonical payload for an existing operation ID",
+        ));
+    }
     let stored_acknowledgement = store
         .operation_result(commit.tenant_id, commit.operation_id)
         .await?
@@ -1019,14 +1027,14 @@ where
         payload: [baseline.payload.as_slice(), b"-race-left"].concat(),
         ..baseline.clone()
     };
-    left_commit.command_digest[0] ^= 1;
+    left_commit.command_digest = *blake3::hash(&left_commit.payload).as_bytes();
     let mut right_commit = CommitOperation {
         authority: None,
         operation_id: OperationId::new(),
         payload: [baseline.payload.as_slice(), b"-race-right"].concat(),
         ..left_commit.clone()
     };
-    right_commit.command_digest[0] ^= 2;
+    right_commit.command_digest = *blake3::hash(&right_commit.payload).as_bytes();
 
     let (left, right) = join(
         store.commit_operation(left_commit.clone()),
