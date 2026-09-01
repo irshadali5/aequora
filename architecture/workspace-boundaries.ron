@@ -122,6 +122,9 @@
             crates: [
                 "aequora",
                 "aequora-cli",
+                "aequora-cli-core",
+                "aequora-devtools",
+                "aequora-inspect",
                 "aequora-registry-cli",
             ],
         ),
