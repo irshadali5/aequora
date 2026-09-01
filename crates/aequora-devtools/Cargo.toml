@@ -1,0 +1,19 @@
+[package]
+name = "aequora-devtools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic and production-guarded project scaffolding for Aequora"
+repository.workspace = true
+
+[features]
+default = []
+test-failpoints = []
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
