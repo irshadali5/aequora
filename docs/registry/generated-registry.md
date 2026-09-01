@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `7e6eb62cd1f409056b886bacc2e32c15d5eac7c55a4131ed3779ebe4e2adb91e`
+Digest: `be6e2dad3b3c904fc9eeeedc56fb11ba90a6eb7e0b36930fdfbaf4592f2d92f6`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -160,6 +160,8 @@ Digest: `7e6eb62cd1f409056b886bacc2e32c15d5eac7c55a4131ed3779ebe4e2adb91e`
 | conformance-profile | 71 | StoolapLocalCore | Current | storage | - | Core Stoolap Tx A, Tx C, identity, migration, retry, and crash-recovery semantics. |
 | conformance-profile | 72 | StoolapDesktopLocalFull | Current | storage | - | Full target-bound Stoolap local persistence on Linux, Windows, or macOS. |
 | conformance-profile | 73 | StoolapMobileLocalFull | Current | storage | - | Full target-bound Stoolap local persistence on supported Android or iOS targets. |
+| conformance-profile | 74 | AxumServerFull | Current | transport | - | Bounded authenticated Axum transport integration around transport-neutral server core. |
+| conformance-profile | 75 | DioxusClientFull | Current | client | - | Bounded reactive Dioxus view over durable local-first client state. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -238,6 +240,26 @@ Digest: `7e6eb62cd1f409056b886bacc2e32c15d5eac7c55a4131ed3779ebe4e2adb91e`
 | conformance-test | 76 | StoolapStoragePressure | Current | storage | - | Storage pressure never evicts critical pending intent or correctness metadata. |
 | conformance-test | 77 | StoolapTypeIsolation | Current | storage | - | Stoolap physical types remain inside the adapter boundary. |
 | conformance-test | 78 | StoolapPlatformCertification | Current | storage | - | Platform support requires a matching target-bound conformance profile. |
+| conformance-test | 79 | AxumTransportIsolation | Current | transport | - | Routes orchestrate transport concerns while synchronization correctness remains in server core. |
+| conformance-test | 80 | AxumCredentialIsolation | Current | transport | - | Opaque bearer credentials normalize into AuthContext and never reach domain or storage code. |
+| conformance-test | 81 | AxumResourceBounds | Current | transport | - | Wire, decompressed, operation, dependency, and response work has hard bounds. |
+| conformance-test | 82 | AxumCommitDeliveryIndependence | Current | transport | - | Disconnect and response failure recover through durable operation identity after commit. |
+| conformance-test | 83 | AxumOverloadBounds | Current | transport | - | Global, tenant, and rate saturation reject before unbounded resource growth. |
+| conformance-test | 84 | AxumIdentityBinding | Current | transport | - | Authenticated actor, tenant, and device identity is validated before execution. |
+| conformance-test | 85 | AxumStableSemantics | Current | transport | - | HTTP status is accompanied by stable Aequora error semantics and request correlation. |
+| conformance-test | 86 | AxumLiveHintDurability | Current | transport | - | Live HTTP hints remain advisory and cursor exchange remains authoritative. |
+| conformance-test | 87 | AxumNodeEpochIndependence | Current | transport | - | HTTP node lifecycle does not alter the authority epoch. |
+| conformance-test | 88 | AxumErrorSanitization | Current | transport | - | Public errors expose no database, topology, credential, or stack details. |
+| conformance-test | 89 | DioxusDurableStateOwnership | Current | client | - | Correctness-critical state remains durable below Dioxus component memory. |
+| conformance-test | 90 | DioxusLocalCommitTruth | Current | client | - | Saved locally is reported only after durable domain and outbox commit. |
+| conformance-test | 91 | DioxusAuthorityDistinction | Current | client | - | Local durability never claims authoritative acceptance. |
+| conformance-test | 92 | DioxusEventLossSafety | Current | client | - | Lost advisory events recover by rereading durable local state. |
+| conformance-test | 93 | DioxusUnmountSafety | Current | client | - | Component unmount cannot erase committed operation intent. |
+| conformance-test | 94 | DioxusStoreIsolation | Current | client | - | Reactive state and query caches are isolated by active store namespace. |
+| conformance-test | 95 | DioxusConflictSemantics | Current | client | - | Conflict resolution creates durable semantic intent. |
+| conformance-test | 96 | DioxusOfflineCapability | Current | client | - | Offline mode retains domain-permitted local reads and writes. |
+| conformance-test | 97 | DioxusBackgroundOwnership | Current | client | - | Platform runtimes own OS background scheduling outside component lifetimes. |
+| conformance-test | 98 | DioxusEventBounds | Current | client | - | Latest-value coalescing bounds UI event storms and slow subscribers. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
