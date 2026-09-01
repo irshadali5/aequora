@@ -57,6 +57,8 @@ outside the reusable core.
 | 37 | [PostgreSQL/Neon authoritative adapter](sys-arch/37-postgresql-neon-authoritative-adapter-detailed-architecture.md) |
 | 38 | [Stoolap embedded local persistence](sys-arch/38-stoolap-embedded-local-replica-client-persistence-architecture.md) |
 | 39 | [Axum server integration and middleware](sys-arch/39-axum-server-integration-middleware-architecture.md) |
+| 40 | [Dioxus client integration](sys-arch/40-dioxus-client-integration-reactive-state-architecture.md) |
+| 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
 
 ## Implementation status
 
@@ -90,6 +92,8 @@ implicitly claim completion of an earlier part.
 | Part 37: PostgreSQL/Neon authoritative adapter | Implemented | [Part 37 report](docs/postgresql-neon-authority-completion.md) |
 | Part 38: Stoolap embedded local replica and client persistence | Implemented | [Part 38 report](docs/stoolap-local-persistence-completion.md) |
 | Part 39: Axum server integration, authentication, and middleware | Implemented | [Part 39 report](docs/axum-server-integration-completion.md) |
+| Part 40: Dioxus client integration and reactive state | Implemented | [Part 40 report](docs/dioxus-client-integration-completion.md) |
+| Part 41: CLI and developer toolchain | Implemented | [Part 41 report](docs/cli-developer-toolchain-completion.md) |
 
 ## Implementation workflow
 
@@ -125,6 +129,8 @@ bash scripts/check-reference-implementation-architecture.sh
 bash scripts/check-postgres-authority-architecture.sh
 bash scripts/check-stoolap-local-persistence-architecture.sh
 bash scripts/check-axum-server-architecture.sh
+bash scripts/check-dioxus-client-architecture.sh
+bash scripts/check-cli-toolchain-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
