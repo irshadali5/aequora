@@ -54,6 +54,7 @@ outside the reusable core.
 | 34 | [Reference implementation and workspace crate boundaries](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md) |
 | 35 | [Public Rust API and SDK stability](sys-arch/35-public-rust-api-sdk-stability-architecture.md) |
 | 36 | [Storage adapter SDK and official adapter architecture](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md) |
+| 37 | [PostgreSQL/Neon authoritative adapter](sys-arch/37-postgresql-neon-authoritative-adapter-detailed-architecture.md) |
 
 ## Implementation status
 
@@ -84,6 +85,7 @@ implicitly claim completion of an earlier part.
 | Part 34: Reference implementation and workspace crate boundaries | Implemented | [Part 34 report](docs/reference-implementation-workspace-boundaries-completion.md) |
 | Part 35: Public Rust API and SDK stability | Implemented | [Part 35 report](docs/public-rust-sdk-completion.md) |
 | Part 36: Storage adapter SDK and official adapter architecture | Implemented | [Part 36 report](docs/storage-adapter-sdk-completion.md) |
+| Part 37: PostgreSQL/Neon authoritative adapter | Implemented | [Part 37 report](docs/postgresql-neon-authority-completion.md) |
 
 ## Implementation workflow
 
@@ -116,6 +118,7 @@ bash scripts/check-mobile-architecture.sh
 bash scripts/check-desktop-architecture.sh
 bash scripts/check-local-storage-architecture.sh
 bash scripts/check-reference-implementation-architecture.sh
+bash scripts/check-postgres-authority-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
