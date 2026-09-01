@@ -282,6 +282,7 @@ Select each deployment axis independently:
 |---|---|---|
 | default `postcard` | AEQ1 framed binary protocol | codec and wire DTOs |
 | `stoolap` | Embedded local/client persistence | `StoolapDatabase`, `StoolapStore` |
+| `sqlite` | Portable embedded local/client persistence | `SQLiteDatabase`, `SQLiteConfig` |
 | `postgres` | PostgreSQL or Neon authority | `SqlxPostgresBackend`, `PostgresStore` |
 | `axum` | HTTP server gateway | `router_with_lifecycle`, `ServerLifecycle` |
 | `http-client` | Bounded Reqwest transport | `HttpTransport`, `RequestHeaders` |
@@ -297,6 +298,9 @@ Recommended dependencies:
 # Native client
 aequora = { version = "0.1", features = ["stoolap", "http-client", "tracing"] }
 
+# Portable SQLite client
+aequora = { version = "0.1", features = ["sqlite", "http-client", "tracing"] }
+
 # Authority server
 aequora = { version = "0.1", features = ["postgres", "axum", "tracing"] }
 
@@ -304,8 +308,9 @@ aequora = { version = "0.1", features = ["postgres", "axum", "tracing"] }
 aequora = { version = "0.1", features = ["stoolap", "postgres", "axum", "http-client", "testkit"] }
 ```
 
-The database-neutrality gate compiles custom/custom, Stoolap/custom, custom/PostgreSQL, and
-Stoolap/PostgreSQL profiles to prevent cross-adapter leakage.
+The database-neutrality gate compiles custom/custom, Stoolap/custom, SQLite/custom,
+custom/PostgreSQL, Stoolap/PostgreSQL, and SQLite/PostgreSQL profiles to prevent cross-adapter
+leakage.
 
 ## Production components
 
@@ -322,6 +327,27 @@ use aequora::stoolap::{StoolapDatabase, StoolapStore};
 let backend = StoolapDatabase::open("file:///var/lib/my-app/client")?;
 backend.health_check()?;
 let local_store = StoolapStore::new(backend);
+# Ok(())
+# }
+```
+
+### SQLite client
+
+`SQLiteDatabase` is the official portable desktop/Android/iOS replica. Production open enforces
+WAL, foreign keys, normal synchronous durability, and a bounded busy timeout. Application domain
+writes join the outbox through `transact_local_mutation`; authoritative projections and cursors
+join Tx C through `SQLiteProjectionHook`.
+
+```rust,no_run
+use aequora_store_sqlite::{SQLiteConfig, SQLiteDatabase, SQLitePlatform};
+
+# fn open() -> Result<(), Box<dyn std::error::Error>> {
+let config = SQLiteConfig::production(
+    "/var/lib/my-app/client.sqlite3",
+    SQLitePlatform::Desktop,
+);
+let backend = SQLiteDatabase::open(config)?;
+assert!(backend.health()?.ready);
 # Ok(())
 # }
 ```
@@ -607,4 +633,3 @@ and graceful rollout/drain against the actual infrastructure.
 ## License
 
 Licensed under the [MIT License](LICENSE-MIT).
-
