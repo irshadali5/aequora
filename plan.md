@@ -55,6 +55,7 @@ outside the reusable core.
 | 35 | [Public Rust API and SDK stability](sys-arch/35-public-rust-api-sdk-stability-architecture.md) |
 | 36 | [Storage adapter SDK and official adapter architecture](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md) |
 | 37 | [PostgreSQL/Neon authoritative adapter](sys-arch/37-postgresql-neon-authoritative-adapter-detailed-architecture.md) |
+| 38 | [Stoolap embedded local persistence](sys-arch/38-stoolap-embedded-local-replica-client-persistence-architecture.md) |
 
 ## Implementation status
 
@@ -86,6 +87,7 @@ implicitly claim completion of an earlier part.
 | Part 35: Public Rust API and SDK stability | Implemented | [Part 35 report](docs/public-rust-sdk-completion.md) |
 | Part 36: Storage adapter SDK and official adapter architecture | Implemented | [Part 36 report](docs/storage-adapter-sdk-completion.md) |
 | Part 37: PostgreSQL/Neon authoritative adapter | Implemented | [Part 37 report](docs/postgresql-neon-authority-completion.md) |
+| Part 38: Stoolap embedded local replica and client persistence | Implemented | [Part 38 report](docs/stoolap-local-persistence-completion.md) |
 
 ## Implementation workflow
 
@@ -119,6 +121,7 @@ bash scripts/check-desktop-architecture.sh
 bash scripts/check-local-storage-architecture.sh
 bash scripts/check-reference-implementation-architecture.sh
 bash scripts/check-postgres-authority-architecture.sh
+bash scripts/check-stoolap-local-persistence-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
