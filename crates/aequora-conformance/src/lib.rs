@@ -93,6 +93,9 @@ pub enum ConformanceProfile {
     AxumServerFull,
     DioxusClientFull,
     CliToolchainFull,
+    SQLiteLocalCore,
+    SQLiteDesktopLocalFull,
+    SQLiteMobileLocalFull,
 }
 
 impl ConformanceProfile {
@@ -125,6 +128,9 @@ impl ConformanceProfile {
             Self::AxumServerFull => 74,
             Self::DioxusClientFull => 75,
             Self::CliToolchainFull => 76,
+            Self::SQLiteLocalCore => 77,
+            Self::SQLiteDesktopLocalFull => 78,
+            Self::SQLiteMobileLocalFull => 79,
         })
     }
 
@@ -136,7 +142,8 @@ impl ConformanceProfile {
             | Self::ServerCore
             | Self::ProtocolCore
             | Self::Integration
-            | Self::StoolapLocalCore => CertificationTier::CoreTransactional,
+            | Self::StoolapLocalCore
+            | Self::SQLiteLocalCore => CertificationTier::CoreTransactional,
             Self::StorageFullSync
             | Self::ClientFullSync
             | Self::Provider
@@ -156,6 +163,9 @@ impl ConformanceProfile {
             | Self::AxumServerFull
             | Self::DioxusClientFull
             | Self::CliToolchainFull => CertificationTier::FullSync,
+            Self::SQLiteDesktopLocalFull | Self::SQLiteMobileLocalFull => {
+                CertificationTier::FullSync
+            }
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -765,6 +775,10 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::AxumServerFull => matches!(definition.id.0, 79..=88),
         ConformanceProfile::DioxusClientFull => matches!(definition.id.0, 89..=98),
         ConformanceProfile::CliToolchainFull => matches!(definition.id.0, 99..=108),
+        ConformanceProfile::SQLiteLocalCore => matches!(definition.id.0, 109..=112),
+        ConformanceProfile::SQLiteDesktopLocalFull | ConformanceProfile::SQLiteMobileLocalFull => {
+            matches!(definition.id.0, 109..=113)
+        }
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -838,7 +852,10 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::StoolapMobileLocalFull
         | ConformanceProfile::AxumServerFull
         | ConformanceProfile::DioxusClientFull
-        | ConformanceProfile::CliToolchainFull => false,
+        | ConformanceProfile::CliToolchainFull
+        | ConformanceProfile::SQLiteLocalCore
+        | ConformanceProfile::SQLiteDesktopLocalFull
+        | ConformanceProfile::SQLiteMobileLocalFull => false,
     }
 }
 
@@ -1720,6 +1737,46 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-CLI010",
         FullSync,
         Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        109,
+        "sqlite_wal_durability",
+        StorageAdapter,
+        "AEQ-INV-SQLITE001",
+        CoreTransactional,
+        Some("sqlite-local-core")
+    ),
+    test_definition!(
+        110,
+        "sqlite_single_writer",
+        StorageAdapter,
+        "AEQ-INV-SQLITE002",
+        CoreTransactional,
+        Some("sqlite-local-core")
+    ),
+    test_definition!(
+        111,
+        "sqlite_cursor_atomicity",
+        StorageAdapter,
+        "AEQ-INV-SQLITE003",
+        CoreTransactional,
+        Some("sqlite-local-core")
+    ),
+    test_definition!(
+        112,
+        "sqlite_outbox_preservation",
+        StorageAdapter,
+        "AEQ-INV-SQLITE004",
+        CoreTransactional,
+        Some("sqlite-local-core")
+    ),
+    test_definition!(
+        113,
+        "sqlite_adapter_parity",
+        StorageAdapter,
+        "AEQ-INV-SQLITE005",
+        FullSync,
+        Some("sqlite-local-full")
     ),
 ];
 
@@ -2742,6 +2799,40 @@ mod tests {
             assert!(desktop.contains(&ConformanceTestId(id)));
             assert!(mobile.contains(&ConformanceTestId(id)));
         }
+    }
+
+    #[test]
+    fn sqlite_profiles_separate_portable_core_from_target_bound_full_evidence() {
+        let core = definitions_for(
+            ConformanceProfile::SQLiteLocalCore,
+            CertificationTier::CoreTransactional,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+        let desktop = definitions_for(
+            ConformanceProfile::SQLiteDesktopLocalFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+        let mobile = definitions_for(
+            ConformanceProfile::SQLiteMobileLocalFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+
+        for id in 109..=112 {
+            assert!(core.contains(&ConformanceTestId(id)));
+            assert!(desktop.contains(&ConformanceTestId(id)));
+            assert!(mobile.contains(&ConformanceTestId(id)));
+        }
+        assert!(!core.contains(&ConformanceTestId(113)));
+        assert!(desktop.contains(&ConformanceTestId(113)));
+        assert!(mobile.contains(&ConformanceTestId(113)));
     }
 
     #[test]
