@@ -140,10 +140,10 @@ SQLite must pass every Aequora adapter test:
 
 ## Invariants
 
-- WAL is mandatory for production.
-- One logical writer owns the replica.
-- Cursor changes occur only inside Tx C.
-- Outbox entries are append-only until lifecycle completion.
-- SQLite and Stoolap expose identical adapter behavior to higher layers.
+- **AEQ-INV-SQLITE001** — WAL is mandatory for production.
+- **AEQ-INV-SQLITE002** — One logical writer owns the replica.
+- **AEQ-INV-SQLITE003** — Cursor changes occur only inside Tx C.
+- **AEQ-INV-SQLITE004** — Outbox entries are append-only until lifecycle completion.
+- **AEQ-INV-SQLITE005** — SQLite and Stoolap expose identical adapter behavior to higher layers.
 
 SQLite is therefore the stable reference implementation for every future embedded database adapter in Aequora.
