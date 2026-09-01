@@ -702,11 +702,21 @@ pub enum InvariantId {
     CliProductionGuard,
     /// CLI tools reuse canonical SDK and control-plane semantics.
     CliCanonicalSemantics,
+    /// Production `SQLite` replicas operate in WAL mode.
+    SqliteWalDurability,
+    /// Exactly one logical writer owns `SQLite` synchronization mutations.
+    SqliteSingleWriter,
+    /// `SQLite` cursors change only with durable Tx C reconciliation.
+    SqliteCursorAtomicity,
+    /// `SQLite` outbox identity and payload remain durable through lifecycle completion.
+    SqliteOutboxPreservation,
+    /// `SQLite` and Stoolap expose identical neutral adapter behavior.
+    SqliteAdapterParity,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 346] = [
+    pub const ALL: [Self; 351] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1053,6 +1063,11 @@ impl InvariantId {
         Self::CliSemanticMutation,
         Self::CliProductionGuard,
         Self::CliCanonicalSemantics,
+        Self::SqliteWalDurability,
+        Self::SqliteSingleWriter,
+        Self::SqliteCursorAtomicity,
+        Self::SqliteOutboxPreservation,
+        Self::SqliteAdapterParity,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1406,6 +1421,11 @@ impl InvariantId {
             Self::CliSemanticMutation => "AEQ-INV-CLI008",
             Self::CliProductionGuard => "AEQ-INV-CLI009",
             Self::CliCanonicalSemantics => "AEQ-INV-CLI010",
+            Self::SqliteWalDurability => "AEQ-INV-SQLITE001",
+            Self::SqliteSingleWriter => "AEQ-INV-SQLITE002",
+            Self::SqliteCursorAtomicity => "AEQ-INV-SQLITE003",
+            Self::SqliteOutboxPreservation => "AEQ-INV-SQLITE004",
+            Self::SqliteAdapterParity => "AEQ-INV-SQLITE005",
         }
     }
 
@@ -2438,6 +2458,21 @@ impl InvariantId {
             Self::CliCanonicalSemantics => {
                 "CLI and developer tooling reuse canonical SDK and control-plane semantics"
             }
+            Self::SqliteWalDurability => {
+                "every production SQLite local replica opens and remains in WAL journal mode"
+            }
+            Self::SqliteSingleWriter => {
+                "one logical writer serializes SQLite local mutation and reconciliation transactions"
+            }
+            Self::SqliteCursorAtomicity => {
+                "a SQLite cursor changes only in the transaction that durably installs its authoritative state"
+            }
+            Self::SqliteOutboxPreservation => {
+                "SQLite outbox identity and canonical payload remain durable until lifecycle completion"
+            }
+            Self::SqliteAdapterParity => {
+                "SQLite and Stoolap expose identical synchronization behavior through neutral adapter contracts"
+            }
         }
     }
 
@@ -2796,6 +2831,11 @@ impl InvariantId {
             Self::CliSemanticMutation => 343,
             Self::CliProductionGuard => 344,
             Self::CliCanonicalSemantics => 345,
+            Self::SqliteWalDurability => 346,
+            Self::SqliteSingleWriter => 347,
+            Self::SqliteCursorAtomicity => 348,
+            Self::SqliteOutboxPreservation => 349,
+            Self::SqliteAdapterParity => 350,
         }
     }
 }
@@ -2847,7 +2887,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 346] = [
+pub static REGISTRY: [InvariantEntry; 351] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5269,6 +5309,41 @@ pub static REGISTRY: [InvariantEntry; 346] = [
         "cli_sdk_equivalence_matrix",
         "cli_public_api_dependency_gate",
         "cli_semantic_drift_total",
+    ),
+    entry(
+        InvariantId::SqliteWalDurability,
+        "sqlite_production_wal",
+        "sqlite_wal_open_matrix",
+        "sqlite_wal_configuration_contract",
+        "sqlite_non_wal_open_total",
+    ),
+    entry(
+        InvariantId::SqliteSingleWriter,
+        "sqlite_single_logical_writer",
+        "sqlite_writer_contention_matrix",
+        "sqlite_immediate_transaction_contract",
+        "sqlite_writer_violation_total",
+    ),
+    entry(
+        InvariantId::SqliteCursorAtomicity,
+        "sqlite_cursor_after_reconciliation",
+        "sqlite_tx_c_failure_matrix",
+        "sqlite_reconcile_cursor_atomicity",
+        "sqlite_cursor_ahead_total",
+    ),
+    entry(
+        InvariantId::SqliteOutboxPreservation,
+        "sqlite_outbox_lifecycle_preservation",
+        "sqlite_crash_reopen_matrix",
+        "sqlite_digest_bound_outbox_contract",
+        "sqlite_outbox_loss_total",
+    ),
+    entry(
+        InvariantId::SqliteAdapterParity,
+        "sqlite_stoolap_semantic_parity",
+        "sqlite_reference_differential_matrix",
+        "sqlite_local_adapter_conformance",
+        "sqlite_semantic_drift_total",
     ),
 ];
 
