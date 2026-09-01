@@ -682,11 +682,31 @@ pub enum InvariantId {
     DioxusBackgroundOwnership,
     /// Large synchronization batches cannot create unbounded UI queues or rerenders.
     DioxusEventBounds,
+    /// CLI tooling cannot bypass domain, authority, idempotency, migration, or control semantics.
+    CliNoInvariantBypass,
+    /// Machine-readable output is versioned independently from human terminal formatting.
+    CliMachineOutputVersioning,
+    /// Secrets and classified sensitive values are redacted by default.
+    CliSensitiveRedaction,
+    /// Dangerous production actions use typed authorization and reviewed plan/apply semantics.
+    CliPlanApplySafety,
+    /// Timeout, cancellation, or response loss never denies a durable submission.
+    CliSubmissionAmbiguity,
+    /// Local inspection respects ownership, leases, and fencing.
+    CliStoreOwnership,
+    /// Migration application verifies immutable identity and runtime preconditions.
+    CliMigrationSafety,
+    /// Operational changes use registered semantic or control operations.
+    CliSemanticMutation,
+    /// Development-only destructive facilities are excluded or production-guarded.
+    CliProductionGuard,
+    /// CLI tools reuse canonical SDK and control-plane semantics.
+    CliCanonicalSemantics,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 336] = [
+    pub const ALL: [Self; 346] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1023,6 +1043,16 @@ impl InvariantId {
         Self::DioxusOfflineCapability,
         Self::DioxusBackgroundOwnership,
         Self::DioxusEventBounds,
+        Self::CliNoInvariantBypass,
+        Self::CliMachineOutputVersioning,
+        Self::CliSensitiveRedaction,
+        Self::CliPlanApplySafety,
+        Self::CliSubmissionAmbiguity,
+        Self::CliStoreOwnership,
+        Self::CliMigrationSafety,
+        Self::CliSemanticMutation,
+        Self::CliProductionGuard,
+        Self::CliCanonicalSemantics,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1366,6 +1396,16 @@ impl InvariantId {
             Self::DioxusOfflineCapability => "AEQ-INV-DIOXUS008",
             Self::DioxusBackgroundOwnership => "AEQ-INV-DIOXUS009",
             Self::DioxusEventBounds => "AEQ-INV-DIOXUS010",
+            Self::CliNoInvariantBypass => "AEQ-INV-CLI001",
+            Self::CliMachineOutputVersioning => "AEQ-INV-CLI002",
+            Self::CliSensitiveRedaction => "AEQ-INV-CLI003",
+            Self::CliPlanApplySafety => "AEQ-INV-CLI004",
+            Self::CliSubmissionAmbiguity => "AEQ-INV-CLI005",
+            Self::CliStoreOwnership => "AEQ-INV-CLI006",
+            Self::CliMigrationSafety => "AEQ-INV-CLI007",
+            Self::CliSemanticMutation => "AEQ-INV-CLI008",
+            Self::CliProductionGuard => "AEQ-INV-CLI009",
+            Self::CliCanonicalSemantics => "AEQ-INV-CLI010",
         }
     }
 
@@ -2368,6 +2408,36 @@ impl InvariantId {
             Self::DioxusEventBounds => {
                 "large synchronization batches cannot create unbounded UI queues rerenders or memory growth"
             }
+            Self::CliNoInvariantBypass => {
+                "CLI tooling cannot bypass domain authority idempotency migration or control-plane invariants"
+            }
+            Self::CliMachineOutputVersioning => {
+                "machine-readable output is versioned and never requires scraping human terminal formatting"
+            }
+            Self::CliSensitiveRedaction => {
+                "secrets and registry-classified sensitive values are redacted by default"
+            }
+            Self::CliPlanApplySafety => {
+                "dangerous production mutations require typed authorization and reviewed plan/apply semantics"
+            }
+            Self::CliSubmissionAmbiguity => {
+                "timeout cancellation or response loss never implies a durably submitted operation did not execute"
+            }
+            Self::CliStoreOwnership => {
+                "local store inspection respects process ownership leases and fencing"
+            }
+            Self::CliMigrationSafety => {
+                "migration application verifies identity checksum source state capabilities and fencing"
+            }
+            Self::CliSemanticMutation => {
+                "conflict repair authority and consumer changes use registered semantic or control operations"
+            }
+            Self::CliProductionGuard => {
+                "development-only destructive facilities cannot be accidentally enabled against production"
+            }
+            Self::CliCanonicalSemantics => {
+                "CLI and developer tooling reuse canonical SDK and control-plane semantics"
+            }
         }
     }
 
@@ -2716,6 +2786,16 @@ impl InvariantId {
             Self::DioxusOfflineCapability => 333,
             Self::DioxusBackgroundOwnership => 334,
             Self::DioxusEventBounds => 335,
+            Self::CliNoInvariantBypass => 336,
+            Self::CliMachineOutputVersioning => 337,
+            Self::CliSensitiveRedaction => 338,
+            Self::CliPlanApplySafety => 339,
+            Self::CliSubmissionAmbiguity => 340,
+            Self::CliStoreOwnership => 341,
+            Self::CliMigrationSafety => 342,
+            Self::CliSemanticMutation => 343,
+            Self::CliProductionGuard => 344,
+            Self::CliCanonicalSemantics => 345,
         }
     }
 }
@@ -2767,7 +2847,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 336] = [
+pub static REGISTRY: [InvariantEntry; 346] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5119,6 +5199,76 @@ pub static REGISTRY: [InvariantEntry; 336] = [
         "ui_event_storm_coalesces",
         "dioxus_bounded_event_contract",
         "dioxus_unbounded_event_total",
+    ),
+    entry(
+        InvariantId::CliNoInvariantBypass,
+        "cli_no_invariant_bypass",
+        "cli_semantic_boundary_matrix",
+        "cli_sdk_control_api_gate",
+        "cli_direct_mutation_attempt_total",
+    ),
+    entry(
+        InvariantId::CliMachineOutputVersioning,
+        "cli_machine_output_versioned",
+        "cli_machine_output_golden",
+        "cli_output_schema_contract",
+        "cli_schema_mismatch_total",
+    ),
+    entry(
+        InvariantId::CliSensitiveRedaction,
+        "cli_sensitive_redaction",
+        "cli_secret_leak_matrix",
+        "cli_redaction_contract",
+        "cli_sensitive_leak_total",
+    ),
+    entry(
+        InvariantId::CliPlanApplySafety,
+        "cli_plan_apply_safety",
+        "cli_dangerous_action_matrix",
+        "cli_control_plan_contract",
+        "cli_unplanned_action_total",
+    ),
+    entry(
+        InvariantId::CliSubmissionAmbiguity,
+        "cli_submission_ambiguity",
+        "cli_timeout_cancel_matrix",
+        "cli_idempotent_submission_contract",
+        "cli_unknown_submission_total",
+    ),
+    entry(
+        InvariantId::CliStoreOwnership,
+        "cli_store_ownership",
+        "cli_concurrent_owner_matrix",
+        "cli_fenced_inspection_contract",
+        "cli_writer_conflict_total",
+    ),
+    entry(
+        InvariantId::CliMigrationSafety,
+        "cli_migration_safety",
+        "cli_migration_precondition_matrix",
+        "cli_migration_identity_contract",
+        "cli_migration_rejection_total",
+    ),
+    entry(
+        InvariantId::CliSemanticMutation,
+        "cli_semantic_mutation_only",
+        "cli_operational_action_matrix",
+        "cli_registered_operation_contract",
+        "cli_metadata_mutation_attempt_total",
+    ),
+    entry(
+        InvariantId::CliProductionGuard,
+        "cli_production_guard",
+        "cli_dev_action_profile_matrix",
+        "cli_failpoint_build_contract",
+        "cli_production_dev_action_total",
+    ),
+    entry(
+        InvariantId::CliCanonicalSemantics,
+        "cli_canonical_semantics",
+        "cli_sdk_equivalence_matrix",
+        "cli_public_api_dependency_gate",
+        "cli_semantic_drift_total",
     ),
 ];
 
