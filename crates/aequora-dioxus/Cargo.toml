@@ -1,0 +1,22 @@
+[package]
+name = "aequora-dioxus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[dependencies]
+aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
+aequora-client = { version = "0.1.0", path = "../aequora-client" }
+aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
+aequora-types = { version = "0.1.0", path = "../aequora-types" }
+dioxus.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
