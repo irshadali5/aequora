@@ -8,7 +8,7 @@ pub use sdk::{
     AequoraClient, AequoraClientBuilder, AequoraError, AequoraErrorCode, BlobHandle,
     BootstrapProgress, ClientSdkConfig, ConflictHandle, DataChange, DiagnosticsHandle, EventStream,
     OperationHandle, OperationRef, RetryClass, ScopeHandle, ScopeSubscriptionState, SyncEvent,
-    SyncNextAction, SyncReason, SyncResult,
+    SyncNextAction, SyncReason, SyncResult, SyncStatus as ClientSdkSyncStatus,
 };
 
 /// Focused imports for application client integrations.
