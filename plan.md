@@ -59,6 +59,7 @@ outside the reusable core.
 | 39 | [Axum server integration and middleware](sys-arch/39-axum-server-integration-middleware-architecture.md) |
 | 40 | [Dioxus client integration](sys-arch/40-dioxus-client-integration-reactive-state-architecture.md) |
 | 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
+| 42 | [SQLite embedded local adapter](sys-arch/42-sqlite-embedded-local-adapter-architecture.md) |
 
 ## Implementation status
 
@@ -94,6 +95,7 @@ implicitly claim completion of an earlier part.
 | Part 39: Axum server integration, authentication, and middleware | Implemented | [Part 39 report](docs/axum-server-integration-completion.md) |
 | Part 40: Dioxus client integration and reactive state | Implemented | [Part 40 report](docs/dioxus-client-integration-completion.md) |
 | Part 41: CLI and developer toolchain | Implemented | [Part 41 report](docs/cli-developer-toolchain-completion.md) |
+| Part 42: SQLite embedded local adapter | Implemented | [Part 42 report](docs/sqlite-local-adapter-completion.md) |
 
 ## Implementation workflow
 
@@ -131,6 +133,7 @@ bash scripts/check-stoolap-local-persistence-architecture.sh
 bash scripts/check-axum-server-architecture.sh
 bash scripts/check-dioxus-client-architecture.sh
 bash scripts/check-cli-toolchain-architecture.sh
+bash scripts/check-sqlite-local-adapter-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
