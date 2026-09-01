@@ -20,6 +20,7 @@ macros = ["dep:aequora-executor", "dep:aequora-macros", "dep:aequora-profile"]
 axum = ["dep:aequora-axum"]
 http-client = ["dep:aequora-http"]
 postgres = ["dep:aequora-store-postgres"]
+sqlite = ["dep:aequora-store-sqlite"]
 stoolap = ["dep:aequora-store-stoolap"]
 testkit = ["dep:aequora-testkit"]
 
@@ -38,6 +39,7 @@ aequora-profile = { version = "0.1.0", path = "../aequora-profile", optional = t
 aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
+aequora-store-sqlite = { version = "0.1.0", path = "../aequora-store-sqlite", optional = true }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
 aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
 
@@ -51,7 +53,7 @@ required-features = ["stoolap", "testkit"]
 
 [[test]]
 name = "adapter_manifests"
-required-features = ["postgres", "stoolap"]
+required-features = ["postgres", "sqlite", "stoolap"]
 
 [[test]]
 name = "derive_operation"
