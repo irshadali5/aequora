@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `357a7648dbce214df45dfd736514a9554d605baf18f4e25f7ab7004dc1fc8f08`
+Digest: `c0740295935de3ad195a7a67d82f83844d13e5dbd4faf5a127daf12e6e1138b4`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -155,6 +155,8 @@ Digest: `357a7648dbce214df45dfd736514a9554d605baf18f4e25f7ab7004dc1fc8f08`
 | conformance-profile | 66 | AuthoritativeAdapter | Current | storage | - | Authoritative transaction, journal, ledger, idempotency, and fencing semantics. |
 | conformance-profile | 67 | SnapshotAdapter | Current | storage | - | Immutable snapshot publication, resume, verification, and atomic activation semantics. |
 | conformance-profile | 68 | FencingAdapter | Current | storage | - | Lease takeover, stale-writer rejection, and monotonic fencing semantics. |
+| conformance-profile | 69 | PostgresAuthorityFull | Current | storage | - | Full PostgreSQL authoritative transaction, ledger, journal, retention, restore, and readiness semantics. |
+| conformance-profile | 70 | NeonOperationalProfile | Current | storage | - | Neon operational evidence layered over unchanged PostgreSQL authority semantics. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -213,6 +215,16 @@ Digest: `357a7648dbce214df45dfd736514a9554d605baf18f4e25f7ab7004dc1fc8f08`
 | conformance-test | 56 | AdapterEnvironmentBinding | Current | storage | - | Certification binds the adapter, engine, platform, and feature configuration. |
 | conformance-test | 57 | AdapterCriticalDurability | Current | storage | - | Performance settings never weaken critical durable intent. |
 | conformance-test | 58 | AdapterManifestAndLimitations | Current | storage | - | Official adapters publish stable manifests and explicit limitations. |
+| conformance-test | 59 | PostgresTxBAtomicity | Current | storage | - | Business, version, journal, ledger, audit, and side-effect intents commit atomically. |
+| conformance-test | 60 | PostgresIdempotentReplay | Current | storage | - | Identical operation retries return the durable logical outcome without another effect. |
+| conformance-test | 61 | PostgresPayloadBinding | Current | storage | - | Changed canonical payloads cannot reuse an OperationId. |
+| conformance-test | 62 | PostgresCommittedTimeline | Current | storage | - | Journal cursor order is allocated transactionally and rolls back on abort. |
+| conformance-test | 63 | PostgresRestoreEpoch | Current | storage | - | PITR and restored history create a newer authority epoch before serving sync. |
+| conformance-test | 64 | PostgresTypeIsolation | Current | storage | - | SQLx and PostgreSQL types remain inside the physical adapter. |
+| conformance-test | 65 | PostgresReadinessSettings | Current | storage | - | Unsafe transaction settings, schema, writer, or authority state fail readiness. |
+| conformance-test | 66 | PostgresDurableSideEffectIntent | Current | storage | - | Side-effect intent commits in Tx B and provider execution remains outside it. |
+| conformance-test | 67 | PostgresRetentionFloor | Current | storage | - | Compaction respects active lease and bootstrap floors. |
+| conformance-test | 68 | NeonSemanticParity | Current | storage | - | Neon autosuspend, pooling, branches, and scale do not change authority semantics. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
