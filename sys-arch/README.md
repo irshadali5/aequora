@@ -105,3 +105,29 @@ Welcome to the **Aequora System Architecture Wiki**. This repository contains th
   Schema registry contracts, automated linting, CI/CD breaking change detection, and developer SDK tooling.
 - **[Part 30: Certification, Conformance, and Ecosystem Architecture](30-certification-conformance-ecosystem-architecture.md)**  
   Automated compliance test suites, standard reference benchmarks, plug-in provider certification, and ecosystem packaging.
+
+---
+
+### 🧩 Tier 8: Platform, SDK & Concrete Integrations
+*Reference crate boundaries, public SDKs, physical storage adapters, and production transport composition.*
+
+- **[Part 31: Android and iOS Mobile Runtime Platform Architecture](31-android-ios-mobile-runtime-platform-architecture.md)**
+  Mobile lifecycle, background scheduling, platform bridges, ABI stability, and constrained execution.
+- **[Part 32: Linux, Windows, and macOS Desktop Runtime Architecture](32-linux-windows-macos-desktop-runtime-architecture.md)**
+  In-process and agent modes, IPC framing, lifecycle integration, upgrades, and platform isolation.
+- **[Part 33: Cross-Platform Local Storage Architecture](33-cross-platform-local-storage-mobile-desktop-architecture.md)**
+  Portable local persistence contracts, staging, clone safety, encryption, and platform certification.
+- **[Part 34: Reference Implementation Workspace and Crate Boundaries](34-reference-implementation-workspace-crate-boundary-architecture.md)**
+  Executable dependency direction, feature ownership, composition roots, and workspace governance.
+- **[Part 35: Public Rust API and SDK Stability Architecture](35-public-rust-api-sdk-stability-architecture.md)**
+  Stable client/server APIs, extension points, cancellation semantics, and semver automation.
+- **[Part 36: Storage Adapter SDK and Official Adapter Architecture](36-storage-adapter-sdk-official-adapter-architecture.md)**
+  Neutral adapter contracts, capability manifests, conformance, and official support claims.
+- **[Part 37: PostgreSQL and Neon Authoritative Adapter Architecture](37-postgresql-neon-authoritative-adapter-detailed-architecture.md)**
+  Transactional authority, ledger, journal, restore epochs, retention, and Neon operations.
+- **[Part 38: Stoolap Embedded Local Persistence Architecture](38-stoolap-embedded-local-replica-client-persistence-architecture.md)**
+  Atomic local intent, reconciliation, recovery, fencing, storage pressure, and target certification.
+- **[Part 39: Axum Server Integration and Middleware Architecture](39-axum-server-integration-middleware-architecture.md)**
+  Routes, authentication, bounded request processing, admission, errors, health, and graceful shutdown.
+- **[Part 40: Dioxus Client Integration and Reactive State Architecture](40-dioxus-client-integration-reactive-state-architecture.md)**
+  Provider context, durable-derived queries, local-first mutations, bounded invalidation, lifecycle hints, and tenant isolation.
