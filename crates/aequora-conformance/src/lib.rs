@@ -40,6 +40,7 @@ pub enum ConformanceDomain {
     ExtensionApplication,
     MobileRuntime,
     DesktopRuntime,
+    DeveloperTooling,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -91,6 +92,7 @@ pub enum ConformanceProfile {
     StoolapMobileLocalFull,
     AxumServerFull,
     DioxusClientFull,
+    CliToolchainFull,
 }
 
 impl ConformanceProfile {
@@ -122,6 +124,7 @@ impl ConformanceProfile {
             Self::StoolapMobileLocalFull => 73,
             Self::AxumServerFull => 74,
             Self::DioxusClientFull => 75,
+            Self::CliToolchainFull => 76,
         })
     }
 
@@ -151,7 +154,8 @@ impl ConformanceProfile {
             | Self::StoolapDesktopLocalFull
             | Self::StoolapMobileLocalFull
             | Self::AxumServerFull
-            | Self::DioxusClientFull => CertificationTier::FullSync,
+            | Self::DioxusClientFull
+            | Self::CliToolchainFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -760,6 +764,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         }
         ConformanceProfile::AxumServerFull => matches!(definition.id.0, 79..=88),
         ConformanceProfile::DioxusClientFull => matches!(definition.id.0, 89..=98),
+        ConformanceProfile::CliToolchainFull => matches!(definition.id.0, 99..=108),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -832,7 +837,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::StoolapDesktopLocalFull
         | ConformanceProfile::StoolapMobileLocalFull
         | ConformanceProfile::AxumServerFull
-        | ConformanceProfile::DioxusClientFull => false,
+        | ConformanceProfile::DioxusClientFull
+        | ConformanceProfile::CliToolchainFull => false,
     }
 }
 
@@ -1634,6 +1640,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-DIOXUS010",
         FullSync,
         Some("dioxus-client-full")
+    ),
+    test_definition!(
+        99,
+        "cli_no_invariant_bypass",
+        DeveloperTooling,
+        "AEQ-INV-CLI001",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        100,
+        "cli_machine_output_versioning",
+        DeveloperTooling,
+        "AEQ-INV-CLI002",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        101,
+        "cli_sensitive_redaction",
+        DeveloperTooling,
+        "AEQ-INV-CLI003",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        102,
+        "cli_plan_apply_safety",
+        DeveloperTooling,
+        "AEQ-INV-CLI004",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        103,
+        "cli_submission_ambiguity",
+        DeveloperTooling,
+        "AEQ-INV-CLI005",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        104,
+        "cli_store_ownership",
+        DeveloperTooling,
+        "AEQ-INV-CLI006",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        105,
+        "cli_migration_safety",
+        DeveloperTooling,
+        "AEQ-INV-CLI007",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        106,
+        "cli_semantic_mutation",
+        DeveloperTooling,
+        "AEQ-INV-CLI008",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        107,
+        "cli_production_guard",
+        DeveloperTooling,
+        "AEQ-INV-CLI009",
+        FullSync,
+        Some("cli-toolchain-full")
+    ),
+    test_definition!(
+        108,
+        "cli_canonical_semantics",
+        DeveloperTooling,
+        "AEQ-INV-CLI010",
+        FullSync,
+        Some("cli-toolchain-full")
     ),
 ];
 
@@ -2680,5 +2766,17 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<BTreeSet<_>>();
         assert_eq!(ids, (89..=98).collect());
+    }
+
+    #[test]
+    fn cli_profile_selects_only_part_41_toolchain_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::CliToolchainFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(ids, (99..=108).collect());
     }
 }
