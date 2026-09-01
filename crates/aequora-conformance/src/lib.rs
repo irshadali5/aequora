@@ -84,6 +84,8 @@ pub enum ConformanceProfile {
     AuthoritativeAdapter,
     SnapshotAdapter,
     FencingAdapter,
+    PostgresAuthorityFull,
+    NeonOperationalProfile,
 }
 
 impl ConformanceProfile {
@@ -108,6 +110,8 @@ impl ConformanceProfile {
             Self::AuthoritativeAdapter => 66,
             Self::SnapshotAdapter => 67,
             Self::FencingAdapter => 68,
+            Self::PostgresAuthorityFull => 69,
+            Self::NeonOperationalProfile => 70,
         })
     }
 
@@ -130,7 +134,9 @@ impl ConformanceProfile {
             | Self::LocalAdapter
             | Self::AuthoritativeAdapter
             | Self::SnapshotAdapter
-            | Self::FencingAdapter => CertificationTier::FullSync,
+            | Self::FencingAdapter
+            | Self::PostgresAuthorityFull
+            | Self::NeonOperationalProfile => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -724,6 +730,12 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::FencingAdapter => {
             matches!(definition.id.0, 5 | 49 | 52 | 55 | 56 | 58)
         }
+        ConformanceProfile::PostgresAuthorityFull => {
+            matches!(definition.id.0, 2 | 3 | 5 | 7 | 49 | 51..=68)
+        }
+        ConformanceProfile::NeonOperationalProfile => {
+            matches!(definition.id.0, 2 | 3 | 5 | 7 | 49 | 51..=68)
+        }
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -789,7 +801,9 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         ConformanceProfile::LocalAdapter
         | ConformanceProfile::AuthoritativeAdapter
         | ConformanceProfile::SnapshotAdapter
-        | ConformanceProfile::FencingAdapter => false,
+        | ConformanceProfile::FencingAdapter
+        | ConformanceProfile::PostgresAuthorityFull
+        | ConformanceProfile::NeonOperationalProfile => false,
     }
 }
 
@@ -1271,6 +1285,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-ADAPTER010",
         FullSync,
         Some("adapter-support-matrix")
+    ),
+    test_definition!(
+        59,
+        "postgres_tx_b_atomicity",
+        StorageAdapter,
+        "AEQ-INV-PG001",
+        FullSync,
+        Some("postgres-authority-full")
+    ),
+    test_definition!(
+        60,
+        "postgres_idempotent_replay",
+        StorageAdapter,
+        "AEQ-INV-PG002",
+        FullSync,
+        Some("postgres-operation-ledger")
+    ),
+    test_definition!(
+        61,
+        "postgres_payload_binding",
+        StorageAdapter,
+        "AEQ-INV-PG003",
+        FullSync,
+        Some("postgres-operation-ledger")
+    ),
+    test_definition!(
+        62,
+        "postgres_committed_timeline",
+        StorageAdapter,
+        "AEQ-INV-PG004",
+        FullSync,
+        Some("postgres-transactional-timeline")
+    ),
+    test_definition!(
+        63,
+        "postgres_restore_epoch",
+        StorageAdapter,
+        "AEQ-INV-PG005",
+        FullSync,
+        Some("postgres-restore-epoch")
+    ),
+    test_definition!(
+        64,
+        "postgres_type_isolation",
+        StorageAdapter,
+        "AEQ-INV-PG006",
+        FullSync,
+        Some("postgres-adapter-boundary")
+    ),
+    test_definition!(
+        65,
+        "postgres_readiness_settings",
+        StorageAdapter,
+        "AEQ-INV-PG007",
+        FullSync,
+        Some("postgres-readiness")
+    ),
+    test_definition!(
+        66,
+        "postgres_durable_side_effect_intent",
+        StorageAdapter,
+        "AEQ-INV-PG008",
+        FullSync,
+        Some("postgres-side-effect-outbox")
+    ),
+    test_definition!(
+        67,
+        "postgres_retention_floor",
+        StorageAdapter,
+        "AEQ-INV-PG009",
+        FullSync,
+        Some("postgres-safe-retention")
+    ),
+    test_definition!(
+        68,
+        "neon_semantic_parity",
+        StorageAdapter,
+        "AEQ-INV-PG010",
+        FullSync,
+        Some("neon-operational-profile")
     ),
 ];
 
