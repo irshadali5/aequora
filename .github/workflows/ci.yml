@@ -145,6 +145,8 @@ jobs:
         run: bash scripts/check-postgres-authority-architecture.sh
       - name: Enforce Stoolap embedded local persistence contracts
         run: bash scripts/check-stoolap-local-persistence-architecture.sh
+      - name: Enforce SQLite embedded local adapter contracts
+        run: bash scripts/check-sqlite-local-adapter-architecture.sh
       - name: Enforce Axum server integration and middleware contracts
         run: bash scripts/check-axum-server-architecture.sh
       - name: Enforce Dioxus reactive client boundary contracts
