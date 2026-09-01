@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `c0740295935de3ad195a7a67d82f83844d13e5dbd4faf5a127daf12e6e1138b4`
+Digest: `7e6eb62cd1f409056b886bacc2e32c15d5eac7c55a4131ed3779ebe4e2adb91e`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -157,6 +157,9 @@ Digest: `c0740295935de3ad195a7a67d82f83844d13e5dbd4faf5a127daf12e6e1138b4`
 | conformance-profile | 68 | FencingAdapter | Current | storage | - | Lease takeover, stale-writer rejection, and monotonic fencing semantics. |
 | conformance-profile | 69 | PostgresAuthorityFull | Current | storage | - | Full PostgreSQL authoritative transaction, ledger, journal, retention, restore, and readiness semantics. |
 | conformance-profile | 70 | NeonOperationalProfile | Current | storage | - | Neon operational evidence layered over unchanged PostgreSQL authority semantics. |
+| conformance-profile | 71 | StoolapLocalCore | Current | storage | - | Core Stoolap Tx A, Tx C, identity, migration, retry, and crash-recovery semantics. |
+| conformance-profile | 72 | StoolapDesktopLocalFull | Current | storage | - | Full target-bound Stoolap local persistence on Linux, Windows, or macOS. |
+| conformance-profile | 73 | StoolapMobileLocalFull | Current | storage | - | Full target-bound Stoolap local persistence on supported Android or iOS targets. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -225,6 +228,16 @@ Digest: `c0740295935de3ad195a7a67d82f83844d13e5dbd4faf5a127daf12e6e1138b4`
 | conformance-test | 66 | PostgresDurableSideEffectIntent | Current | storage | - | Side-effect intent commits in Tx B and provider execution remains outside it. |
 | conformance-test | 67 | PostgresRetentionFloor | Current | storage | - | Compaction respects active lease and bootstrap floors. |
 | conformance-test | 68 | NeonSemanticParity | Current | storage | - | Neon autosuspend, pooling, branches, and scale do not change authority semantics. |
+| conformance-test | 69 | StoolapTxAAtomicity | Current | storage | - | Provisional domain mutation and corresponding outbox intent commit atomically. |
+| conformance-test | 70 | StoolapTxCAtomicity | Current | storage | - | Authoritative apply, outcomes, conflicts, overlay, and cursor commit atomically. |
+| conformance-test | 71 | StoolapRetryIdentity | Current | storage | - | Possibly transmitted operations retain OperationId and canonical digest across crash recovery. |
+| conformance-test | 72 | StoolapIntentPreservation | Current | storage | - | Rebootstrap, migration, repair, and storage reclamation preserve pending intent. |
+| conformance-test | 73 | StoolapCursorSafety | Current | storage | - | Cursor advancement cannot exceed authoritative state durably installed locally. |
+| conformance-test | 74 | StoolapFencedCoordinator | Current | storage | - | Only the current fenced coordinator performs leader-owned metadata transitions. |
+| conformance-test | 75 | StoolapCloneRebinding | Current | storage | - | Cloned or restored stores validate device binding generation and secure-key state. |
+| conformance-test | 76 | StoolapStoragePressure | Current | storage | - | Storage pressure never evicts critical pending intent or correctness metadata. |
+| conformance-test | 77 | StoolapTypeIsolation | Current | storage | - | Stoolap physical types remain inside the adapter boundary. |
+| conformance-test | 78 | StoolapPlatformCertification | Current | storage | - | Platform support requires a matching target-bound conformance profile. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
