@@ -14,6 +14,7 @@ pub use aequora_operation::{
     EntityRef, LocalCommitStatus, MutationReceipt, Operation, OperationEncodingError,
     OperationKind, OperationSchemaVersion, OperationState, OperationUpdate,
 };
+pub use aequora_registry_generated as registry;
 pub use aequora_server::{
     AequoraServer, AequoraServerBuilder, DomainRegistrationError, DomainRegistry,
     DomainRegistryBuilder, ServerOperationOutcome, StableServerError,
