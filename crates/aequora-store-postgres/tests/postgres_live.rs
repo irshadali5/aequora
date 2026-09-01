@@ -1,14 +1,38 @@
 use aequora_protocol::ChangeKind;
 use aequora_store::{AuditOffset, CommitOperation};
 use aequora_store_postgres::{
-    POSTGRES_SCHEMA_VERSION, PostgresBackend, PostgresPoolConfig, PostgresStore,
+    POSTGRES_SCHEMA_VERSION, PostgresBackend, PostgresCommitHook, PostgresCommitHookError,
+    PostgresCommitHookOutcome, PostgresPoolConfig, PostgresSideEffectIntent, PostgresStore,
     SqlxPostgresBackend,
 };
 use aequora_testkit::{InMemoryAuthoritativeStore, contracts::verify_authoritative_store};
 use aequora_types::{
     ActorId, DeviceId, EntityId, EntityRef, EntityType, EntityVersion, EventId, HybridTimestamp,
-    LineageContext, NodeId, OperationId, Sequence, SyncScopeId, TenantId,
+    JobId, LineageContext, NodeId, OperationId, Sequence, SyncScopeId, TenantId,
 };
+use async_trait::async_trait;
+use sqlx::{Postgres, Transaction};
+
+struct DurableIntentHook;
+
+#[async_trait]
+impl PostgresCommitHook for DurableIntentHook {
+    async fn apply(
+        &self,
+        _transaction: &mut Transaction<'_, Postgres>,
+        commit: &CommitOperation,
+    ) -> Result<PostgresCommitHookOutcome, PostgresCommitHookError> {
+        Ok(
+            PostgresCommitHookOutcome::new(commit.payload.clone()).with_side_effect_intents(vec![
+                PostgresSideEffectIntent {
+                    job_id: JobId::from_uuid(commit.event_id.as_uuid()),
+                    kind: commit.operation_kind,
+                    payload: b"deliver-after-commit".to_vec(),
+                },
+            ]),
+        )
+    }
+}
 
 #[tokio::test]
 async fn authoritative_transaction_snapshot_and_compaction_are_real() {
@@ -22,7 +46,7 @@ async fn authoritative_transaction_snapshot_and_compaction_are_real() {
     )
     .await
     .unwrap_or_else(|error| panic!("{error}"));
-    exercise_backend(&backend).await;
+    exercise_backend(&backend.with_commit_hook(DurableIntentHook)).await;
 }
 
 #[tokio::test]
@@ -36,7 +60,7 @@ async fn neon_pooled_runtime_and_direct_migration_endpoints_are_real() {
     let backend = SqlxPostgresBackend::connect_neon(&pooled_url, &direct_url, 2)
         .await
         .unwrap_or_else(|error| panic!("{error}"));
-    exercise_backend(&backend).await;
+    exercise_backend(&backend.with_commit_hook(DurableIntentHook)).await;
 }
 
 async fn exercise_backend(backend: &SqlxPostgresBackend) {
@@ -78,11 +102,30 @@ async fn exercise_backend(backend: &SqlxPostgresBackend) {
         verify_authoritative_store(&InMemoryAuthoritativeStore::default(), commit.clone())
             .await
             .unwrap_or_else(|error| panic!("reference contract failed: {error}"));
-    let report = verify_authoritative_store(&store, commit)
+    let report = verify_authoritative_store(&store, commit.clone())
         .await
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(report.acknowledgement.operation_id, operation_id);
     assert_eq!(report.acknowledgement, reference.acknowledgement);
+    let metrics = backend.metrics().snapshot();
+    assert!(metrics.committed_transactions >= 1);
+    assert!(metrics.duplicate_operations >= 1);
+    assert!(metrics.journal_appends >= 1);
+
+    let mut altered = commit;
+    altered.command_digest[0] ^= 0xff;
+    assert!(backend.commit_operation(altered).await.is_err());
+
+    let durable_intents: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM aequora_side_effect_jobs
+          WHERE tenant_id=$1 AND operation_id=$2 AND status='pending'",
+    )
+    .bind(tenant.as_uuid())
+    .bind(operation_id.as_uuid())
+    .fetch_one(backend.pool())
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(durable_intents, 1);
 
     verify_data_path(backend, tenant, scope, operation_id, entity, payload).await;
     verify_mid_transaction_failure_rolls_back(backend, tenant, scope).await;
