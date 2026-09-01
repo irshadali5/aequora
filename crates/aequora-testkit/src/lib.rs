@@ -157,6 +157,7 @@ impl OperationExecutor for AllowAllExecutor {
 struct AuthoritativeState {
     entities: HashMap<EntityKey, EntitySnapshot>,
     ledger: HashMap<OperationKey, OperationAck>,
+    operation_digests: HashMap<OperationKey, ([u8; 32], u16)>,
     operation_lineages: HashMap<OperationKey, LineageContext>,
     journal: Vec<RemoteChange>,
     sequences: HashMap<ScopeKey, Sequence>,
@@ -349,6 +350,13 @@ impl OperationLedger for InMemoryAuthoritativeStore {
                     "retry changed operation lineage for an existing OperationId",
                 ));
             }
+            if state.operation_digests.get(&operation_key)
+                != Some(&(commit.command_digest, commit.operation_kind))
+            {
+                return Err(StoreError::permanent(
+                    "OperationId reuse changed the canonical payload digest or operation kind",
+                ));
+            }
             return Ok(CommitOutcome::Duplicate(previous.clone()));
         }
         let entity_key = (commit.tenant_id, commit.entity);
@@ -448,6 +456,10 @@ impl OperationLedger for InMemoryAuthoritativeStore {
         state
             .operation_lineages
             .insert(operation_key, commit.operation_lineage);
+        state.operation_digests.insert(
+            operation_key,
+            (commit.command_digest, commit.operation_kind),
+        );
         state.ledger.insert(operation_key, ack.clone());
         state.audit.push(audit);
         fail_at(failpoint, CommitFailPoint::AfterCommit)?;
