@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `be6e2dad3b3c904fc9eeeedc56fb11ba90a6eb7e0b36930fdfbaf4592f2d92f6`
+Digest: `f923cc67bc1ed5b398acbf42be4a7965c8161285ce7db2705ae247422d36ba67`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -162,6 +162,7 @@ Digest: `be6e2dad3b3c904fc9eeeedc56fb11ba90a6eb7e0b36930fdfbaf4592f2d92f6`
 | conformance-profile | 73 | StoolapMobileLocalFull | Current | storage | - | Full target-bound Stoolap local persistence on supported Android or iOS targets. |
 | conformance-profile | 74 | AxumServerFull | Current | transport | - | Bounded authenticated Axum transport integration around transport-neutral server core. |
 | conformance-profile | 75 | DioxusClientFull | Current | client | - | Bounded reactive Dioxus view over durable local-first client state. |
+| conformance-profile | 76 | CliToolchainFull | Current | developer-experience | - | Typed, versioned, redacted, ownership-aware CLI and developer toolchain behavior. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -260,6 +261,16 @@ Digest: `be6e2dad3b3c904fc9eeeedc56fb11ba90a6eb7e0b36930fdfbaf4592f2d92f6`
 | conformance-test | 96 | DioxusOfflineCapability | Current | client | - | Offline mode retains domain-permitted local reads and writes. |
 | conformance-test | 97 | DioxusBackgroundOwnership | Current | client | - | Platform runtimes own OS background scheduling outside component lifetimes. |
 | conformance-test | 98 | DioxusEventBounds | Current | client | - | Latest-value coalescing bounds UI event storms and slow subscribers. |
+| conformance-test | 99 | CliNoInvariantBypass | Current | developer-experience | - | CLI actions remain clients of canonical SDK and control-plane boundaries. |
+| conformance-test | 100 | CliMachineOutputVersioning | Current | developer-experience | - | Machine output carries a stable schema version and field names. |
+| conformance-test | 101 | CliSensitiveRedaction | Current | developer-experience | - | Secrets and classified sensitive fields are redacted by default. |
+| conformance-test | 102 | CliPlanApplySafety | Current | developer-experience | - | Dangerous actions require reviewed plans, reason, authorization, and step-up where applicable. |
+| conformance-test | 103 | CliSubmissionAmbiguity | Current | developer-experience | - | Timeout and cancellation after durable submission stop waiting without denying execution. |
+| conformance-test | 104 | CliStoreOwnership | Current | developer-experience | - | Inspection routes through agent IPC or explicit read-only/fenced direct access. |
+| conformance-test | 105 | CliMigrationSafety | Current | developer-experience | - | Migration identity, checksum, source state, capability, and fencing are verified before application. |
+| conformance-test | 106 | CliSemanticMutation | Current | developer-experience | - | Operational mutation uses registered semantic and control operations. |
+| conformance-test | 107 | CliProductionGuard | Current | developer-experience | - | Development reset, seed, benchmark, and failpoint actions reject production targets. |
+| conformance-test | 108 | CliCanonicalSemantics | Current | developer-experience | - | The CLI composes reusable canonical clients instead of reimplementing synchronization. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
