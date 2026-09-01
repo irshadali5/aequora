@@ -89,6 +89,8 @@ pub enum ConformanceProfile {
     StoolapLocalCore,
     StoolapDesktopLocalFull,
     StoolapMobileLocalFull,
+    AxumServerFull,
+    DioxusClientFull,
 }
 
 impl ConformanceProfile {
@@ -118,6 +120,8 @@ impl ConformanceProfile {
             Self::StoolapLocalCore => 71,
             Self::StoolapDesktopLocalFull => 72,
             Self::StoolapMobileLocalFull => 73,
+            Self::AxumServerFull => 74,
+            Self::DioxusClientFull => 75,
         })
     }
 
@@ -145,7 +149,9 @@ impl ConformanceProfile {
             | Self::PostgresAuthorityFull
             | Self::NeonOperationalProfile
             | Self::StoolapDesktopLocalFull
-            | Self::StoolapMobileLocalFull => CertificationTier::FullSync,
+            | Self::StoolapMobileLocalFull
+            | Self::AxumServerFull
+            | Self::DioxusClientFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -752,6 +758,8 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         | ConformanceProfile::StoolapMobileLocalFull => {
             matches!(definition.id.0, 1 | 4 | 39..=58 | 69..=78)
         }
+        ConformanceProfile::AxumServerFull => matches!(definition.id.0, 79..=88),
+        ConformanceProfile::DioxusClientFull => matches!(definition.id.0, 89..=98),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -822,7 +830,9 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::NeonOperationalProfile
         | ConformanceProfile::StoolapLocalCore
         | ConformanceProfile::StoolapDesktopLocalFull
-        | ConformanceProfile::StoolapMobileLocalFull => false,
+        | ConformanceProfile::StoolapMobileLocalFull
+        | ConformanceProfile::AxumServerFull
+        | ConformanceProfile::DioxusClientFull => false,
     }
 }
 
@@ -1464,6 +1474,166 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-STOOLAP010",
         FullSync,
         Some("stoolap-platform-profile")
+    ),
+    test_definition!(
+        79,
+        "axum_transport_isolation",
+        ServerRuntime,
+        "AEQ-INV-AXUM001",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        80,
+        "axum_credential_isolation",
+        ServerRuntime,
+        "AEQ-INV-AXUM002",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        81,
+        "axum_resource_bounds",
+        ServerRuntime,
+        "AEQ-INV-AXUM003",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        82,
+        "axum_commit_delivery_independence",
+        ServerRuntime,
+        "AEQ-INV-AXUM004",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        83,
+        "axum_overload_bounds",
+        ServerRuntime,
+        "AEQ-INV-AXUM005",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        84,
+        "axum_identity_binding",
+        ServerRuntime,
+        "AEQ-INV-AXUM006",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        85,
+        "axum_stable_semantics",
+        ServerRuntime,
+        "AEQ-INV-AXUM007",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        86,
+        "axum_live_hint_durability",
+        ServerRuntime,
+        "AEQ-INV-AXUM008",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        87,
+        "axum_node_epoch_independence",
+        ServerRuntime,
+        "AEQ-INV-AXUM009",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        88,
+        "axum_error_sanitization",
+        ServerRuntime,
+        "AEQ-INV-AXUM010",
+        FullSync,
+        Some("axum-server-full")
+    ),
+    test_definition!(
+        89,
+        "dioxus_durable_state_ownership",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS001",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        90,
+        "dioxus_local_commit_truth",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS002",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        91,
+        "dioxus_authority_distinction",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS003",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        92,
+        "dioxus_event_loss_safety",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS004",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        93,
+        "dioxus_unmount_safety",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS005",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        94,
+        "dioxus_store_isolation",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS006",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        95,
+        "dioxus_conflict_semantics",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS007",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        96,
+        "dioxus_offline_capability",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS008",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        97,
+        "dioxus_background_ownership",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS009",
+        FullSync,
+        Some("dioxus-client-full")
+    ),
+    test_definition!(
+        98,
+        "dioxus_event_bounds",
+        ClientRuntime,
+        "AEQ-INV-DIOXUS010",
+        FullSync,
+        Some("dioxus-client-full")
     ),
 ];
 
@@ -2486,5 +2656,29 @@ mod tests {
             assert!(desktop.contains(&ConformanceTestId(id)));
             assert!(mobile.contains(&ConformanceTestId(id)));
         }
+    }
+
+    #[test]
+    fn axum_profile_selects_only_part_39_transport_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::AxumServerFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(ids, (79..=88).collect());
+    }
+
+    #[test]
+    fn dioxus_profile_selects_only_part_40_ui_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::DioxusClientFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(ids, (89..=98).collect());
     }
 }
