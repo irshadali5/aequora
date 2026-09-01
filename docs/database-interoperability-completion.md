@@ -29,7 +29,8 @@ mode from optional generic-record, legacy CDC, and database-migration tooling.
 | PostgreSQL | No | Yes | Full production | 18 | Source | `POSTGRES_ADAPTER_MANIFEST` |
 | TestKit in-memory | Reference only | Reference only | Not production | process memory | Both | Test-only semantics |
 
-This table does not claim SQLite, Redb, MySQL, document, graph, or key-value adapters. Those engines
+Part 42 now supplies the official SQLite local-replica adapter. This table does not claim Redb,
+MySQL, document, graph, or key-value adapters. Those engines
 become supported only after a concrete adapter publishes a truthful manifest and passes the
 relevant real-engine contracts.
 
