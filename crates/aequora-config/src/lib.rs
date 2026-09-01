@@ -458,6 +458,12 @@ pub struct OperationalConfig {
     pub drain_timeout_ms: u64,
     /// Whole seconds advertised to clients after overload or deadline rejection.
     pub retry_after_seconds: u64,
+    /// Maximum bearer credential bytes accepted at the HTTP boundary.
+    pub max_credential_bytes: usize,
+    /// Authentication-provider deadline in milliseconds.
+    pub authentication_timeout_ms: u64,
+    /// Accept a valid incoming request ID from a trusted ingress.
+    pub trust_request_id_header: bool,
 }
 
 impl Default for OperationalConfig {
@@ -474,6 +480,9 @@ impl Default for OperationalConfig {
             readiness_timeout_ms: 2_000,
             drain_timeout_ms: 30_000,
             retry_after_seconds: 1,
+            max_credential_bytes: 4_096,
+            authentication_timeout_ms: 2_000,
+            trust_request_id_header: false,
         }
     }
 }
@@ -502,6 +511,8 @@ impl OperationalConfig {
             || self.readiness_timeout_ms == 0
             || self.drain_timeout_ms == 0
             || self.retry_after_seconds == 0
+            || self.max_credential_bytes == 0
+            || self.authentication_timeout_ms == 0
         {
             return Some("operational limits must be greater than zero");
         }
@@ -828,6 +839,11 @@ impl AequoraConfig {
             readiness_timeout: Duration::from_millis(self.operational.readiness_timeout_ms),
             drain_timeout: Duration::from_millis(self.operational.drain_timeout_ms),
             retry_after_seconds: self.operational.retry_after_seconds,
+            max_credential_bytes: self.operational.max_credential_bytes,
+            authentication_timeout: Duration::from_millis(
+                self.operational.authentication_timeout_ms,
+            ),
+            trust_request_id_header: self.operational.trust_request_id_header,
         })
     }
 
@@ -1043,6 +1059,12 @@ mod tests {
         config.operational.drain_timeout_ms = 0;
         assert!(config.validate().is_err());
         config = AequoraConfig::default();
+        config.operational.max_credential_bytes = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.operational.authentication_timeout_ms = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
         config.admission.retry_after_ms = 0;
         assert!(config.validate().is_err());
         assert!(AequoraConfig::from_ron("(admission: (unknown: 1))").is_err());
@@ -1052,7 +1074,7 @@ mod tests {
     #[test]
     fn operational_limits_reach_the_axum_boundary() {
         let config = AequoraConfig::from_ron(
-            "(operational: (max_in_flight_requests: 7, max_in_flight_per_tenant: 3, tenant_requests_per_second: 11, tenant_request_burst: 13, max_rate_limit_tenants: 17, rate_limit_idle_timeout_ms: 19000, body_read_timeout_ms: 5000, request_timeout_ms: 9000, readiness_timeout_ms: 700, drain_timeout_ms: 12000, retry_after_seconds: 3))",
+            "(operational: (max_in_flight_requests: 7, max_in_flight_per_tenant: 3, tenant_requests_per_second: 11, tenant_request_burst: 13, max_rate_limit_tenants: 17, rate_limit_idle_timeout_ms: 19000, body_read_timeout_ms: 5000, request_timeout_ms: 9000, readiness_timeout_ms: 700, drain_timeout_ms: 12000, retry_after_seconds: 3, max_credential_bytes: 2048, authentication_timeout_ms: 600, trust_request_id_header: true))",
         )
         .unwrap_or_else(|error| panic!("{error}"));
         let axum = config
@@ -1069,6 +1091,9 @@ mod tests {
         assert_eq!(axum.readiness_timeout, Duration::from_millis(700));
         assert_eq!(axum.drain_timeout, Duration::from_secs(12));
         assert_eq!(axum.retry_after_seconds, 3);
+        assert_eq!(axum.max_credential_bytes, 2_048);
+        assert_eq!(axum.authentication_timeout, Duration::from_millis(600));
+        assert!(axum.trust_request_id_header);
     }
 
     #[test]
