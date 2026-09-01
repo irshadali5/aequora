@@ -79,9 +79,10 @@ Current repository manifests are:
 |---|---|---|---|---|
 | `aequora-store-postgres` (`aequora-postgres` architecture role) | authority, journal, ledger, snapshot, integrity, audit, side-effect intents, device/retention metadata | PostgreSQL 18 | multi-writer | `PostgresAuthorityFull`; Neon adds separate operational certification |
 | `aequora-store-stoolap` (`aequora-stoolap` architecture role) | local, snapshot, integrity, repair, backup metadata, fencing | Stoolap 0.4.0 | single writer, multi-process | `StoolapLocalCore`; each `StoolapDesktopLocalFull`/`StoolapMobileLocalFull` target needs its own artifact |
+| `aequora-store-sqlite` (`aequora-sqlite` architecture role) | local, snapshot, WAL persistence, online backup, incremental blob metadata | SQLite 3.46 bundled | single writer, WAL readers | `SQLiteLocalCore`; each `SQLiteDesktopLocalFull`/`SQLiteMobileLocalFull` target needs its own artifact |
 
-SQLite and standalone object-storage adapters are not implemented by this repository today. They
-must not be advertised until a concrete crate publishes a manifest and passes the matching suite.
+Standalone object-storage adapters are not implemented by this repository today and must not be
+advertised until a concrete crate publishes a manifest and passes the matching suite.
 
 ## Adapter documentation checklist
 
