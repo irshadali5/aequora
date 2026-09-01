@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `f923cc67bc1ed5b398acbf42be4a7965c8161285ce7db2705ae247422d36ba67`
+Digest: `195b13d940bcaa7267dd03a18048741909445b52b0ff9e103722b5ebfa3f4d05`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -163,6 +163,9 @@ Digest: `f923cc67bc1ed5b398acbf42be4a7965c8161285ce7db2705ae247422d36ba67`
 | conformance-profile | 74 | AxumServerFull | Current | transport | - | Bounded authenticated Axum transport integration around transport-neutral server core. |
 | conformance-profile | 75 | DioxusClientFull | Current | client | - | Bounded reactive Dioxus view over durable local-first client state. |
 | conformance-profile | 76 | CliToolchainFull | Current | developer-experience | - | Typed, versioned, redacted, ownership-aware CLI and developer toolchain behavior. |
+| conformance-profile | 77 | SQLiteLocalCore | Current | storage | - | Portable SQLite WAL, Tx A, Tx C, outbox, cursor, backup, and crash-reopen semantics. |
+| conformance-profile | 78 | SQLiteDesktopLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Linux, Windows, or macOS. |
+| conformance-profile | 79 | SQLiteMobileLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Android or iOS. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -271,6 +274,11 @@ Digest: `f923cc67bc1ed5b398acbf42be4a7965c8161285ce7db2705ae247422d36ba67`
 | conformance-test | 106 | CliSemanticMutation | Current | developer-experience | - | Operational mutation uses registered semantic and control operations. |
 | conformance-test | 107 | CliProductionGuard | Current | developer-experience | - | Development reset, seed, benchmark, and failpoint actions reject production targets. |
 | conformance-test | 108 | CliCanonicalSemantics | Current | developer-experience | - | The CLI composes reusable canonical clients instead of reimplementing synchronization. |
+| conformance-test | 109 | SQLiteWalDurability | Current | storage | - | Production replicas enforce WAL, normal synchronous durability, foreign keys, and bounded busy waits. |
+| conformance-test | 110 | SQLiteSingleWriter | Current | storage | - | One logical writer serializes immediate transactions while independent WAL readers remain available. |
+| conformance-test | 111 | SQLiteCursorAtomicity | Current | storage | - | Authoritative apply, operation outcomes, conflicts, and cursor advancement commit atomically. |
+| conformance-test | 112 | SQLiteOutboxPreservation | Current | storage | - | Outbox identity and canonical digest survive retry, crash, backup, and lifecycle completion. |
+| conformance-test | 113 | SQLiteAdapterParity | Current | storage | - | Reference, SQLite, and Stoolap local stores expose the same neutral synchronization semantics. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
