@@ -642,11 +642,51 @@ pub enum InvariantId {
     StoolapTypeIsolation,
     /// Stoolap support claims require a passing target-bound conformance profile.
     StoolapPlatformCertification,
+    /// Axum owns transport orchestration and never synchronization or domain correctness.
+    AxumTransportIsolation,
+    /// Raw HTTP authentication credentials never reach domain or storage boundaries.
+    AxumCredentialIsolation,
+    /// HTTP wire, decompressed, operation, and dependency work is bounded before execution.
+    AxumResourceBounds,
+    /// Response loss cannot invalidate an already committed authoritative operation.
+    AxumCommitDeliveryIndependence,
+    /// Overload is rejected before unbounded task, memory, or database-pool growth.
+    AxumOverloadBounds,
+    /// Protocol tenant and device claims match authenticated server identity before execution.
+    AxumIdentityBinding,
+    /// HTTP status never replaces stable Aequora operation and error semantics.
+    AxumStableSemantics,
+    /// Durable convergence never depends on delivery of live HTTP hints.
+    AxumLiveHintDurability,
+    /// Ordinary HTTP node lifecycle never creates an authority epoch.
+    AxumNodeEpochIndependence,
+    /// Public HTTP failures never expose internal topology, credentials, or stack details.
+    AxumErrorSanitization,
+    /// Correctness-critical synchronization state never exists only in Dioxus memory.
+    DioxusDurableStateOwnership,
+    /// The UI reports local durability only after domain state and outbox intent commit.
+    DioxusLocalCommitTruth,
+    /// Local persistence never implies authoritative server confirmation.
+    DioxusAuthorityDistinction,
+    /// Loss of advisory UI events cannot lose synchronization correctness.
+    DioxusEventLossSafety,
+    /// Component unmount cannot erase previously committed operation intent.
+    DioxusUnmountSafety,
+    /// Query caches and reactive state are isolated by active store identity.
+    DioxusStoreIsolation,
+    /// Conflict resolution is durable semantic intent, not direct UI-state mutation.
+    DioxusConflictSemantics,
+    /// Offline mode preserves domain-permitted local reads and writes.
+    DioxusOfflineCapability,
+    /// OS background work is owned by platform/client runtimes, not mounted components.
+    DioxusBackgroundOwnership,
+    /// Large synchronization batches cannot create unbounded UI queues or rerenders.
+    DioxusEventBounds,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 316] = [
+    pub const ALL: [Self; 336] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -963,6 +1003,26 @@ impl InvariantId {
         Self::StoolapStoragePressureSafety,
         Self::StoolapTypeIsolation,
         Self::StoolapPlatformCertification,
+        Self::AxumTransportIsolation,
+        Self::AxumCredentialIsolation,
+        Self::AxumResourceBounds,
+        Self::AxumCommitDeliveryIndependence,
+        Self::AxumOverloadBounds,
+        Self::AxumIdentityBinding,
+        Self::AxumStableSemantics,
+        Self::AxumLiveHintDurability,
+        Self::AxumNodeEpochIndependence,
+        Self::AxumErrorSanitization,
+        Self::DioxusDurableStateOwnership,
+        Self::DioxusLocalCommitTruth,
+        Self::DioxusAuthorityDistinction,
+        Self::DioxusEventLossSafety,
+        Self::DioxusUnmountSafety,
+        Self::DioxusStoreIsolation,
+        Self::DioxusConflictSemantics,
+        Self::DioxusOfflineCapability,
+        Self::DioxusBackgroundOwnership,
+        Self::DioxusEventBounds,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1286,6 +1346,26 @@ impl InvariantId {
             Self::StoolapStoragePressureSafety => "AEQ-INV-STOOLAP008",
             Self::StoolapTypeIsolation => "AEQ-INV-STOOLAP009",
             Self::StoolapPlatformCertification => "AEQ-INV-STOOLAP010",
+            Self::AxumTransportIsolation => "AEQ-INV-AXUM001",
+            Self::AxumCredentialIsolation => "AEQ-INV-AXUM002",
+            Self::AxumResourceBounds => "AEQ-INV-AXUM003",
+            Self::AxumCommitDeliveryIndependence => "AEQ-INV-AXUM004",
+            Self::AxumOverloadBounds => "AEQ-INV-AXUM005",
+            Self::AxumIdentityBinding => "AEQ-INV-AXUM006",
+            Self::AxumStableSemantics => "AEQ-INV-AXUM007",
+            Self::AxumLiveHintDurability => "AEQ-INV-AXUM008",
+            Self::AxumNodeEpochIndependence => "AEQ-INV-AXUM009",
+            Self::AxumErrorSanitization => "AEQ-INV-AXUM010",
+            Self::DioxusDurableStateOwnership => "AEQ-INV-DIOXUS001",
+            Self::DioxusLocalCommitTruth => "AEQ-INV-DIOXUS002",
+            Self::DioxusAuthorityDistinction => "AEQ-INV-DIOXUS003",
+            Self::DioxusEventLossSafety => "AEQ-INV-DIOXUS004",
+            Self::DioxusUnmountSafety => "AEQ-INV-DIOXUS005",
+            Self::DioxusStoreIsolation => "AEQ-INV-DIOXUS006",
+            Self::DioxusConflictSemantics => "AEQ-INV-DIOXUS007",
+            Self::DioxusOfflineCapability => "AEQ-INV-DIOXUS008",
+            Self::DioxusBackgroundOwnership => "AEQ-INV-DIOXUS009",
+            Self::DioxusEventBounds => "AEQ-INV-DIOXUS010",
         }
     }
 
@@ -2228,6 +2308,66 @@ impl InvariantId {
             Self::StoolapPlatformCertification => {
                 "Stoolap support on a platform requires the matching target-bound conformance profile"
             }
+            Self::AxumTransportIsolation => {
+                "Axum routes contain transport orchestration while correctness remains in transport-neutral server core"
+            }
+            Self::AxumCredentialIsolation => {
+                "raw authentication credentials never reach domain handlers or storage adapters"
+            }
+            Self::AxumResourceBounds => {
+                "HTTP wire decompressed operation and dependency work is bounded before expensive execution"
+            }
+            Self::AxumCommitDeliveryIndependence => {
+                "client disconnect or response failure cannot invalidate an already committed authoritative operation"
+            }
+            Self::AxumOverloadBounds => {
+                "temporary overload is rejected before unbounded memory task or database-pool growth"
+            }
+            Self::AxumIdentityBinding => {
+                "protocol tenant and device identity matches authenticated server identity before execution"
+            }
+            Self::AxumStableSemantics => {
+                "HTTP status remains transport metadata and never replaces stable operation or error semantics"
+            }
+            Self::AxumLiveHintDurability => {
+                "missed HTTP live hints cannot lose durable state because cursor exchange remains authoritative"
+            }
+            Self::AxumNodeEpochIndependence => {
+                "ordinary Axum node restart scaling or replacement never creates a new AuthorityEpoch"
+            }
+            Self::AxumErrorSanitization => {
+                "public HTTP errors never expose internal database topology credential or stack details"
+            }
+            Self::DioxusDurableStateOwnership => {
+                "correctness-critical synchronization state never exists only in Dioxus component memory"
+            }
+            Self::DioxusLocalCommitTruth => {
+                "the UI reports local durability only after domain state and outbox intent commit atomically"
+            }
+            Self::DioxusAuthorityDistinction => {
+                "successful local persistence never implies authoritative server confirmation"
+            }
+            Self::DioxusEventLossSafety => {
+                "loss of advisory UI events cannot lose correctness because durable state can be reread"
+            }
+            Self::DioxusUnmountSafety => {
+                "component unmount cannot cancel or erase previously committed operation intent"
+            }
+            Self::DioxusStoreIsolation => {
+                "query caches and reactive state are isolated by active local store identity"
+            }
+            Self::DioxusConflictSemantics => {
+                "conflict resolution uses durable domain intent rather than direct UI-state mutation"
+            }
+            Self::DioxusOfflineCapability => {
+                "offline mode preserves every domain-permitted local read and write"
+            }
+            Self::DioxusBackgroundOwnership => {
+                "OS background scheduling belongs to platform and client runtimes rather than mounted components"
+            }
+            Self::DioxusEventBounds => {
+                "large synchronization batches cannot create unbounded UI queues rerenders or memory growth"
+            }
         }
     }
 
@@ -2556,6 +2696,26 @@ impl InvariantId {
             Self::StoolapStoragePressureSafety => 313,
             Self::StoolapTypeIsolation => 314,
             Self::StoolapPlatformCertification => 315,
+            Self::AxumTransportIsolation => 316,
+            Self::AxumCredentialIsolation => 317,
+            Self::AxumResourceBounds => 318,
+            Self::AxumCommitDeliveryIndependence => 319,
+            Self::AxumOverloadBounds => 320,
+            Self::AxumIdentityBinding => 321,
+            Self::AxumStableSemantics => 322,
+            Self::AxumLiveHintDurability => 323,
+            Self::AxumNodeEpochIndependence => 324,
+            Self::AxumErrorSanitization => 325,
+            Self::DioxusDurableStateOwnership => 326,
+            Self::DioxusLocalCommitTruth => 327,
+            Self::DioxusAuthorityDistinction => 328,
+            Self::DioxusEventLossSafety => 329,
+            Self::DioxusUnmountSafety => 330,
+            Self::DioxusStoreIsolation => 331,
+            Self::DioxusConflictSemantics => 332,
+            Self::DioxusOfflineCapability => 333,
+            Self::DioxusBackgroundOwnership => 334,
+            Self::DioxusEventBounds => 335,
         }
     }
 }
@@ -2607,7 +2767,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 316] = [
+pub static REGISTRY: [InvariantEntry; 336] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4819,6 +4979,146 @@ pub static REGISTRY: [InvariantEntry; 316] = [
         "stoolap_platform_profile_matrix",
         "stoolap_environment_conformance",
         "stoolap_uncertified_target_total",
+    ),
+    entry(
+        InvariantId::AxumTransportIsolation,
+        "axum_transport_only",
+        "axum_route_boundary_scan",
+        "axum_thin_route_contract",
+        "axum_domain_leak_total",
+    ),
+    entry(
+        InvariantId::AxumCredentialIsolation,
+        "axum_credential_isolation",
+        "axum_auth_redaction_matrix",
+        "axum_auth_context_extraction",
+        "axum_credential_leak_total",
+    ),
+    entry(
+        InvariantId::AxumResourceBounds,
+        "axum_resource_bounds",
+        "axum_malformed_and_bomb_matrix",
+        "axum_bounded_decode_pipeline",
+        "axum_limit_rejection_total",
+    ),
+    entry(
+        InvariantId::AxumCommitDeliveryIndependence,
+        "axum_commit_before_delivery",
+        "axum_disconnect_retry_matrix",
+        "axum_idempotent_delivery_contract",
+        "axum_delivery_commit_violation_total",
+    ),
+    entry(
+        InvariantId::AxumOverloadBounds,
+        "axum_bounded_overload",
+        "axum_saturation_matrix",
+        "axum_hierarchical_admission",
+        "axum_unbounded_admission_total",
+    ),
+    entry(
+        InvariantId::AxumIdentityBinding,
+        "axum_identity_binding",
+        "axum_cross_tenant_device_matrix",
+        "axum_authenticated_identity_contract",
+        "axum_identity_mismatch_total",
+    ),
+    entry(
+        InvariantId::AxumStableSemantics,
+        "axum_stable_error_semantics",
+        "axum_status_error_matrix",
+        "axum_error_envelope_contract",
+        "axum_unstable_error_total",
+    ),
+    entry(
+        InvariantId::AxumLiveHintDurability,
+        "axum_live_hint_advisory_only",
+        "axum_hint_loss_matrix",
+        "axum_cursor_recovery_contract",
+        "axum_hint_dependency_total",
+    ),
+    entry(
+        InvariantId::AxumNodeEpochIndependence,
+        "axum_node_epoch_independence",
+        "axum_node_replacement_matrix",
+        "axum_stateless_node_contract",
+        "axum_node_epoch_change_total",
+    ),
+    entry(
+        InvariantId::AxumErrorSanitization,
+        "axum_public_error_sanitization",
+        "axum_error_leak_matrix",
+        "axum_sanitized_envelope_contract",
+        "axum_error_leak_total",
+    ),
+    entry(
+        InvariantId::DioxusDurableStateOwnership,
+        "dioxus_durable_state_ownership",
+        "ui_restart_rehydrates_durable_state",
+        "dioxus_state_boundary_gate",
+        "dioxus_volatile_intent_total",
+    ),
+    entry(
+        InvariantId::DioxusLocalCommitTruth,
+        "dioxus_local_commit_truth",
+        "mutation_receipt_after_commit",
+        "dioxus_mutation_contract",
+        "dioxus_early_saved_total",
+    ),
+    entry(
+        InvariantId::DioxusAuthorityDistinction,
+        "dioxus_authority_distinction",
+        "local_receipt_not_authority",
+        "dioxus_status_contract",
+        "dioxus_false_confirmation_total",
+    ),
+    entry(
+        InvariantId::DioxusEventLossSafety,
+        "dioxus_event_loss_safety",
+        "lost_hint_forces_durable_reread",
+        "dioxus_invalidation_contract",
+        "dioxus_event_dependency_total",
+    ),
+    entry(
+        InvariantId::DioxusUnmountSafety,
+        "dioxus_unmount_safety",
+        "unmount_after_local_commit",
+        "dioxus_cancellation_contract",
+        "dioxus_unmount_intent_loss_total",
+    ),
+    entry(
+        InvariantId::DioxusStoreIsolation,
+        "dioxus_store_isolation",
+        "rapid_tenant_switch",
+        "dioxus_namespace_contract",
+        "dioxus_cross_store_leak_total",
+    ),
+    entry(
+        InvariantId::DioxusConflictSemantics,
+        "dioxus_conflict_semantics",
+        "resolution_creates_durable_intent",
+        "dioxus_conflict_contract",
+        "dioxus_direct_conflict_mutation_total",
+    ),
+    entry(
+        InvariantId::DioxusOfflineCapability,
+        "dioxus_offline_capability",
+        "offline_read_write_matrix",
+        "dioxus_offline_contract",
+        "dioxus_offline_capability_loss_total",
+    ),
+    entry(
+        InvariantId::DioxusBackgroundOwnership,
+        "dioxus_background_ownership",
+        "component_unmount_scheduler_survives",
+        "dioxus_platform_boundary_gate",
+        "dioxus_component_scheduler_total",
+    ),
+    entry(
+        InvariantId::DioxusEventBounds,
+        "dioxus_event_bounds",
+        "ui_event_storm_coalesces",
+        "dioxus_bounded_event_contract",
+        "dioxus_unbounded_event_total",
     ),
 ];
 
