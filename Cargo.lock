@@ -27,6 +27,7 @@ dependencies = [
  "aequora-operation",
  "aequora-profile",
  "aequora-protocol",
+ "aequora-registry-generated",
  "aequora-server",
  "aequora-store",
  "aequora-store-postgres",
