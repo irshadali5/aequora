@@ -11,12 +11,12 @@ use aequora_store::StoreErrorKind;
 use aequora_types::{OPERATIONAL_ERROR_CODE_HEADER, OperationalErrorCode, TenantId};
 use async_trait::async_trait;
 use axum::{
-    Extension, Router,
+    Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
-        header::{CONTENT_TYPE, RETRY_AFTER},
+        header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, RETRY_AFTER},
         request::Parts,
     },
     response::{IntoResponse, Response},
@@ -26,7 +26,9 @@ use bytes::BytesMut;
 use http_body_util::BodyExt as _;
 use std::{
     collections::HashMap,
+    fmt,
     future::Future,
+    str::FromStr as _,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
@@ -34,6 +36,67 @@ use tokio::{sync::Notify, time::timeout};
 
 /// Primary synchronization media type.
 pub const POSTCARD_CONTENT_TYPE: &str = "application/vnd.aequora.postcard";
+/// Stable JSON media type used for transport-level error envelopes.
+pub const ERROR_CONTENT_TYPE: &str = "application/json";
+/// Validated or server-generated request correlation header.
+pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
+/// Opaque credential presented at the HTTP boundary.
+///
+/// The value is intentionally neither serializable nor printable. Authentication adapters can
+/// inspect it only while producing a canonical [`AuthContext`].
+#[derive(Clone)]
+pub struct PresentedCredential(Arc<str>);
+
+impl PresentedCredential {
+    fn new(value: &str) -> Self {
+        Self(Arc::from(value))
+    }
+
+    /// Borrows the credential for authentication only.
+    #[must_use]
+    pub fn expose_for_authentication(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for PresentedCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PresentedCredential([REDACTED])")
+    }
+}
+
+/// Stable reason an HTTP authentication provider rejected or could not validate a credential.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthenticationFailure {
+    /// Credential syntax or signature is invalid.
+    Invalid,
+    /// Credential is outside its validity window.
+    Expired,
+    /// Credential or its device binding has been revoked.
+    Revoked,
+    /// Authentication provider is temporarily unavailable.
+    Unavailable,
+}
+
+/// Transport authentication boundary that normalizes credentials into server-core identity.
+#[async_trait]
+pub trait HttpAuthenticator: Send + Sync {
+    /// Validates one opaque credential without passing it to domain or storage code.
+    async fn authenticate(
+        &self,
+        credential: &PresentedCredential,
+    ) -> Result<AuthContext, AuthenticationFailure>;
+}
+
+/// Canonical transport context passed to thin route orchestration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RequestContext {
+    /// Validated or server-generated request correlation identity.
+    pub request_id: aequora_types::RequestId,
+    /// Server-validated actor, tenant, and device identity.
+    pub auth: AuthContext,
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -42,6 +105,7 @@ struct AppState {
     observer: Arc<dyn Observer>,
     readiness: Arc<dyn ReadinessProbe>,
     lifecycle: ServerLifecycle,
+    authenticator: Option<Arc<dyn HttpAuthenticator>>,
 }
 
 #[derive(Debug)]
@@ -460,6 +524,14 @@ pub struct AxumConfig {
     pub drain_timeout: Duration,
     /// Whole seconds advertised in `Retry-After` for overload and deadline responses.
     pub retry_after_seconds: u64,
+    /// Maximum accepted bearer credential bytes before authentication is invoked.
+    pub max_credential_bytes: usize,
+    /// Maximum time allowed for the authentication provider.
+    pub authentication_timeout: Duration,
+    /// Whether a syntactically valid incoming `x-request-id` may be trusted.
+    ///
+    /// Leave disabled on an internet-facing listener unless a trusted ingress strips and sets it.
+    pub trust_request_id_header: bool,
 }
 
 impl AxumConfig {
@@ -483,12 +555,17 @@ impl AxumConfig {
             readiness_timeout: Duration::from_secs(2),
             drain_timeout: Duration::from_secs(30),
             retry_after_seconds: 1,
+            max_credential_bytes: 4_096,
+            authentication_timeout: Duration::from_secs(2),
+            trust_request_id_header: false,
         }
     }
 }
 
-/// Builds the Phase 1 exchange and health endpoints. The host application must add an
-/// `Extension<AuthContext>` from its JWT/session/mTLS authentication middleware.
+/// Builds the public sync, bootstrap, liveness, and readiness routes.
+///
+/// The host application must add an `Extension<AuthContext>` from trusted authentication
+/// middleware. New integrations should prefer [`router_with_authenticator`].
 pub fn router(service: Arc<dyn ExchangeService>, max_body_bytes: usize) -> Router {
     router_with_config(service, AxumConfig::new(max_body_bytes))
 }
@@ -524,6 +601,36 @@ pub fn router_with_lifecycle(
     observer: Arc<dyn Observer>,
     readiness_probe: Arc<dyn ReadinessProbe>,
 ) -> (Router, ServerLifecycle) {
+    build_router(service, config, observer, readiness_probe, None)
+}
+
+/// Builds a production authentication boundary and returns its graceful-drain handle.
+///
+/// Bearer material is bounded and consumed only by `authenticator`; route handlers and the
+/// transport-neutral service receive only [`AuthContext`].
+pub fn router_with_authenticator(
+    service: Arc<dyn ExchangeService>,
+    config: AxumConfig,
+    observer: Arc<dyn Observer>,
+    readiness_probe: Arc<dyn ReadinessProbe>,
+    authenticator: Arc<dyn HttpAuthenticator>,
+) -> (Router, ServerLifecycle) {
+    build_router(
+        service,
+        config,
+        observer,
+        readiness_probe,
+        Some(authenticator),
+    )
+}
+
+fn build_router(
+    service: Arc<dyn ExchangeService>,
+    config: AxumConfig,
+    observer: Arc<dyn Observer>,
+    readiness_probe: Arc<dyn ReadinessProbe>,
+    authenticator: Option<Arc<dyn HttpAuthenticator>>,
+) -> (Router, ServerLifecycle) {
     let lifecycle = ServerLifecycle::new(config, observer.clone());
     let state = AppState {
         service,
@@ -531,23 +638,30 @@ pub fn router_with_lifecycle(
         observer,
         readiness: readiness_probe,
         lifecycle: lifecycle.clone(),
+        authenticator,
     };
     let router = Router::new()
         .route("/sync/v1/exchange", post(exchange))
         .route("/sync/v1/bootstrap", post(bootstrap))
         .route("/sync/v1/health", get(liveness))
         .route("/sync/v1/health/live", get(liveness))
+        .route("/sync/v1/ready", get(readiness))
         .route("/sync/v1/health/ready", get(readiness))
         .layer(DefaultBodyLimit::max(config.max_body_bytes))
         .with_state(state);
     (router, lifecycle)
 }
 
-async fn liveness() -> StatusCode {
-    StatusCode::NO_CONTENT
+async fn liveness(RequestIdentity(request_id): RequestIdentity) -> Response {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    apply_public_response_headers(&mut response, request_id);
+    response
 }
 
-async fn readiness(State(state): State<AppState>) -> StatusCode {
+async fn readiness(
+    State(state): State<AppState>,
+    RequestIdentity(request_id): RequestIdentity,
+) -> Response {
     let probe_ready = if state.lifecycle.is_draining() {
         false
     } else {
@@ -559,20 +673,125 @@ async fn readiness(State(state): State<AppState>) -> StatusCode {
     state
         .observer
         .record(MetricEvent::ServerReadiness { ready });
-    if ready {
+    let mut response = if ready {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     }
+    .into_response();
+    apply_public_response_headers(&mut response, request_id);
+    response
 }
 
 struct Admission {
     _permit: LifecyclePermit,
 }
 
+struct ProtocolHeaders;
+
+struct Authentication(AuthContext);
+
+#[derive(Clone, Copy)]
+struct RequestIdentity(aequora_types::RequestId);
+
 struct SyncBody {
-    headers: HeaderMap,
     bytes: Bytes,
+}
+
+impl FromRequestParts<AppState> for ProtocolHeaders {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let request_id = request_identity(parts, state.config);
+        let content_type = parts
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        if content_type == Some(POSTCARD_CONTENT_TYPE) {
+            Ok(Self)
+        } else {
+            Err(HttpError::UnsupportedMediaType.with_request_id(request_id))
+        }
+    }
+}
+
+impl FromRequestParts<AppState> for Authentication {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let request_id = request_identity(parts, state.config);
+        if let Some(auth) = parts.extensions.get::<AuthContext>().copied() {
+            return Ok(Self(auth));
+        }
+        let authenticator = state
+            .authenticator
+            .as_ref()
+            .ok_or(HttpError::MissingAuthentication)
+            .map_err(|error| error.with_request_id(request_id))?;
+        let value = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|value| !value.is_empty() && value.len() <= state.config.max_credential_bytes)
+            .ok_or(HttpError::MissingAuthentication)
+            .map_err(|error| error.with_request_id(request_id))?;
+        let credential = PresentedCredential::new(value);
+        let auth = timeout(
+            state.config.authentication_timeout,
+            authenticator.authenticate(&credential),
+        )
+        .await
+        .map_err(|_| {
+            HttpError::AuthenticationUnavailable(state.config.retry_after_seconds)
+                .with_request_id(request_id)
+        })?
+        .map_err(|failure| match failure {
+            AuthenticationFailure::Invalid
+            | AuthenticationFailure::Expired
+            | AuthenticationFailure::Revoked => {
+                HttpError::AuthenticationRejected.with_request_id(request_id)
+            }
+            AuthenticationFailure::Unavailable => {
+                HttpError::AuthenticationUnavailable(state.config.retry_after_seconds)
+                    .with_request_id(request_id)
+            }
+        })?;
+        parts.extensions.insert(auth);
+        Ok(Self(auth))
+    }
+}
+
+impl FromRequestParts<AppState> for RequestIdentity {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self(request_identity(parts, state.config)))
+    }
+}
+
+fn request_identity(parts: &mut Parts, config: AxumConfig) -> aequora_types::RequestId {
+    if let Some(existing) = parts.extensions.get::<aequora_types::RequestId>() {
+        return *existing;
+    }
+    let trusted = config
+        .trust_request_id_header
+        .then(|| parts.headers.get(REQUEST_ID_HEADER))
+        .flatten()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| aequora_types::RequestId::from_str(value).ok());
+    let request_id = trusted.unwrap_or_default();
+    parts.extensions.insert(request_id);
+    request_id
 }
 
 impl FromRequestParts<AppState> for Admission {
@@ -587,7 +806,10 @@ impl FromRequestParts<AppState> for Admission {
             .get::<AuthContext>()
             .map(|auth| auth.tenant_id)
             .ok_or(HttpError::MissingAuthentication)?;
-        admission_permit(state, tenant_id).map(|permit| Self { _permit: permit })
+        let request_id = request_identity(parts, state.config);
+        admission_permit(state, tenant_id)
+            .map(|permit| Self { _permit: permit })
+            .map_err(|error| error.with_request_id(request_id))
     }
 }
 
@@ -596,6 +818,11 @@ impl FromRequest<AppState> for SyncBody {
 
     async fn from_request(request: Request, state: &AppState) -> Result<Self, Self::Rejection> {
         let (parts, body) = request.into_parts();
+        let request_id = parts
+            .extensions
+            .get::<aequora_types::RequestId>()
+            .copied()
+            .unwrap_or_default();
         let bytes = match timeout(
             state.config.body_read_timeout,
             read_bounded_body(body, state.config.max_body_bytes),
@@ -607,19 +834,17 @@ impl FromRequest<AppState> for SyncBody {
                 if matches!(error, HttpError::BodyTooLarge) {
                     state.observer.record(MetricEvent::ServerBodyTooLarge);
                 }
-                return Err(error);
+                return Err(error.with_request_id(request_id));
             }
             Err(_) => {
                 state.observer.record(MetricEvent::ServerBodyReadTimedOut);
-                return Err(HttpError::BodyReadTimedOut(
-                    state.config.retry_after_seconds,
-                ));
+                return Err(
+                    HttpError::BodyReadTimedOut(state.config.retry_after_seconds)
+                        .with_request_id(request_id),
+                );
             }
         };
-        Ok(Self {
-            headers: parts.headers,
-            bytes,
-        })
+        Ok(Self { bytes })
     }
 }
 
@@ -646,39 +871,28 @@ async fn read_bounded_body(mut body: Body, max_body_bytes: usize) -> Result<Byte
             )
             .map_err(|error| match error {
                 CodecError::PayloadTooLarge { .. } => HttpError::BodyTooLarge,
-                other => HttpError::Codec(other),
+                _ => HttpError::Codec,
             })?;
             expected_total = Some(HEADER_LEN.saturating_add(header.payload_len));
         }
         if expected_total.is_some_and(|expected| buffer.len() > expected) {
-            return Err(HttpError::Codec(CodecError::Length));
+            return Err(HttpError::Codec);
         }
     }
     if expected_total != Some(buffer.len()) {
-        return Err(HttpError::Codec(if buffer.len() < HEADER_LEN {
-            CodecError::Truncated
-        } else {
-            CodecError::Length
-        }));
+        return Err(HttpError::Codec);
     }
     Ok(buffer.freeze())
 }
 
 async fn exchange(
     State(state): State<AppState>,
-    Extension(auth): Extension<AuthContext>,
+    _protocol_headers: ProtocolHeaders,
+    Authentication(auth): Authentication,
     _admission: Admission,
-    SyncBody {
-        headers,
-        bytes: body,
-    }: SyncBody,
+    RequestIdentity(request_id): RequestIdentity,
+    SyncBody { bytes: body }: SyncBody,
 ) -> Result<Response, HttpError> {
-    let content_type = headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok());
-    if content_type != Some(POSTCARD_CONTENT_TYPE) {
-        return Err(HttpError::UnsupportedMediaType);
-    }
     let (frame_protocol, request) = aequora_codec::decode_with_limits::<SyncRequest>(
         &body,
         MessageKind::SyncRequest,
@@ -686,11 +900,14 @@ async fn exchange(
             max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
-    )?;
+    )
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     if frame_protocol != request.protocol {
-        return Err(HttpError::BadRequest(
-            "frame and request protocol versions differ",
-        ));
+        return Err(
+            HttpError::BadRequest("frame and request protocol versions differ")
+                .with_request_id(request_id),
+        );
     }
     let supports_zstd = request.capabilities.contains(&Capability::Zstd);
     let response = timeout(
@@ -700,32 +917,28 @@ async fn exchange(
     .await
     .map_err(|_| {
         state.observer.record(MetricEvent::ServerDeadlineExceeded);
-        HttpError::DeadlineExceeded(state.config.retry_after_seconds)
-    })??;
+        HttpError::DeadlineExceeded(state.config.retry_after_seconds).with_request_id(request_id)
+    })?
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     encode_response(
         &response,
         supports_zstd,
         state.config,
         state.observer.as_ref(),
         body.len(),
+        request_id,
     )
 }
 
 async fn bootstrap(
     State(state): State<AppState>,
-    Extension(auth): Extension<AuthContext>,
+    _protocol_headers: ProtocolHeaders,
+    Authentication(auth): Authentication,
     _admission: Admission,
-    SyncBody {
-        headers,
-        bytes: body,
-    }: SyncBody,
+    RequestIdentity(request_id): RequestIdentity,
+    SyncBody { bytes: body }: SyncBody,
 ) -> Result<Response, HttpError> {
-    let content_type = headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok());
-    if content_type != Some(POSTCARD_CONTENT_TYPE) {
-        return Err(HttpError::UnsupportedMediaType);
-    }
     let (frame_protocol, request) = aequora_codec::decode_with_limits::<BootstrapRequest>(
         &body,
         MessageKind::BootstrapRequest,
@@ -733,11 +946,14 @@ async fn bootstrap(
             max_wire_bytes: state.config.max_body_bytes.saturating_sub(HEADER_LEN),
             max_decompressed_bytes: state.config.max_decompressed_bytes,
         },
-    )?;
+    )
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     if frame_protocol != request.protocol {
-        return Err(HttpError::BadRequest(
-            "frame and request protocol versions differ",
-        ));
+        return Err(
+            HttpError::BadRequest("frame and request protocol versions differ")
+                .with_request_id(request_id),
+        );
     }
     let supports_zstd = request.capabilities.contains(&Capability::Zstd);
     let response = timeout(
@@ -747,21 +963,27 @@ async fn bootstrap(
     .await
     .map_err(|_| {
         state.observer.record(MetricEvent::ServerDeadlineExceeded);
-        HttpError::DeadlineExceeded(state.config.retry_after_seconds)
-    })??;
+        HttpError::DeadlineExceeded(state.config.retry_after_seconds).with_request_id(request_id)
+    })?
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::BootstrapResponse,
         &response,
         compression_options(supports_zstd, state.config),
-    )?;
+    )
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     record_transport_bytes(state.observer.as_ref(), body.len(), bytes.len());
     let mut response_headers = HeaderMap::new();
     response_headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static(POSTCARD_CONTENT_TYPE),
     );
-    Ok((StatusCode::OK, response_headers, bytes).into_response())
+    let mut response = (StatusCode::OK, response_headers, bytes).into_response();
+    apply_public_response_headers(&mut response, request_id);
+    Ok(response)
 }
 
 fn admission_permit(state: &AppState, tenant_id: TenantId) -> Result<LifecyclePermit, HttpError> {
@@ -791,20 +1013,41 @@ fn encode_response(
     config: AxumConfig,
     observer: &dyn Observer,
     uploaded: usize,
+    request_id: aequora_types::RequestId,
 ) -> Result<Response, HttpError> {
     let bytes = aequora_codec::encode_bytes_with_options(
         response.protocol,
         MessageKind::SyncResponse,
         response,
         compression_options(supports_zstd, config),
-    )?;
+    )
+    .map_err(HttpError::from)
+    .map_err(|error| error.with_request_id(request_id))?;
     record_transport_bytes(observer, uploaded, bytes.len());
     let mut headers = HeaderMap::new();
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static(POSTCARD_CONTENT_TYPE),
     );
-    Ok((StatusCode::OK, headers, bytes).into_response())
+    let mut response = (StatusCode::OK, headers, bytes).into_response();
+    apply_public_response_headers(&mut response, request_id);
+    Ok(response)
+}
+
+fn apply_public_response_headers(response: &mut Response, request_id: aequora_types::RequestId) {
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+        .headers_mut()
+        .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
+        response.headers_mut().insert(REQUEST_ID_HEADER, value);
+    }
 }
 
 fn record_transport_bytes(observer: &dyn Observer, uploaded: usize, downloaded: usize) {
@@ -835,24 +1078,71 @@ fn compression_options(supports_zstd: bool, config: AxumConfig) -> EncodeOptions
     }
 }
 
+/// Sanitized, stable transport error returned to an HTTP client.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ApiErrorEnvelope {
+    /// Machine-stable Aequora error category.
+    pub code: OperationalErrorCode,
+    /// Bounded retry hint for temporary failures.
+    pub retry_after_seconds: Option<u64>,
+    /// Safe public message without provider, topology, credential, or stack details.
+    pub message: &'static str,
+    /// Correlation identity shared with the response header and server telemetry.
+    pub request_id: aequora_types::RequestId,
+}
+
+impl ApiErrorEnvelope {
+    fn json(self) -> String {
+        let retry = self
+            .retry_after_seconds
+            .map_or_else(|| "null".to_owned(), |seconds| seconds.to_string());
+        format!(
+            "{{\"code\":\"{}\",\"retry_after_seconds\":{},\"message\":\"{}\",\"request_id\":\"{}\"}}",
+            self.code.as_str(),
+            retry,
+            self.message,
+            self.request_id
+        )
+    }
+}
+
 enum HttpError {
     UnsupportedMediaType,
     BadRequest(&'static str),
     BodyTooLarge,
     BodyReadTimedOut(u64),
     MissingAuthentication,
+    AuthenticationRejected,
+    AuthenticationUnavailable(u64),
     Overloaded(u64),
     TenantOverloaded(u64),
     TenantRateLimited(u64),
     Draining(u64),
     DeadlineExceeded(u64),
-    Codec(CodecError),
+    Codec,
     Server(ServerError),
+    WithRequestId(aequora_types::RequestId, Box<Self>),
+}
+
+impl HttpError {
+    fn with_request_id(self, request_id: aequora_types::RequestId) -> Self {
+        match self {
+            Self::WithRequestId(_, _) => self,
+            error => Self::WithRequestId(request_id, Box::new(error)),
+        }
+    }
+
+    fn split_request_id(self) -> (aequora_types::RequestId, Self) {
+        match self {
+            Self::WithRequestId(request_id, error) => (request_id, *error),
+            error => (aequora_types::RequestId::new(), error),
+        }
+    }
 }
 
 impl From<CodecError> for HttpError {
-    fn from(error: CodecError) -> Self {
-        Self::Codec(error)
+    fn from(_error: CodecError) -> Self {
+        Self::Codec
     }
 }
 
@@ -865,70 +1155,83 @@ impl From<ServerError> for HttpError {
 impl IntoResponse for HttpError {
     #[allow(clippy::too_many_lines)]
     fn into_response(self) -> Response {
-        let (status, message, retry_after, code) = match self {
+        let (request_id, error) = self.split_request_id();
+        let (status, message, retry_after, code) = match error {
             Self::UnsupportedMediaType => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                "unsupported sync content type".to_owned(),
+                "unsupported sync content type",
                 None,
                 OperationalErrorCode::Protocol,
             ),
             Self::BadRequest(message) => (
                 StatusCode::BAD_REQUEST,
-                message.to_owned(),
+                message,
                 None,
                 OperationalErrorCode::Validation,
             ),
             Self::BodyTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "sync request body exceeds the configured wire limit".to_owned(),
+                "sync request body exceeds the configured wire limit",
                 None,
                 OperationalErrorCode::PayloadLimit,
             ),
             Self::BodyReadTimedOut(seconds) => (
                 StatusCode::REQUEST_TIMEOUT,
-                "sync request body exceeded its receive deadline".to_owned(),
+                "sync request body exceeded its receive deadline",
                 Some(seconds),
                 OperationalErrorCode::Deadline,
             ),
             Self::MissingAuthentication => (
                 StatusCode::UNAUTHORIZED,
-                "authenticated identity is unavailable".to_owned(),
+                "authentication is required",
                 None,
+                OperationalErrorCode::Authentication,
+            ),
+            Self::AuthenticationRejected => (
+                StatusCode::UNAUTHORIZED,
+                "authentication was rejected",
+                None,
+                OperationalErrorCode::Authentication,
+            ),
+            Self::AuthenticationUnavailable(seconds) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "authentication service is temporarily unavailable",
+                Some(seconds),
                 OperationalErrorCode::Authentication,
             ),
             Self::Overloaded(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "sync server is at its in-flight request limit".to_owned(),
+                "sync server is at its in-flight request limit",
                 Some(seconds),
                 OperationalErrorCode::Overloaded,
             ),
             Self::TenantOverloaded(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
-                "tenant is at its in-flight sync request limit".to_owned(),
+                "tenant is at its in-flight sync request limit",
                 Some(seconds),
                 OperationalErrorCode::Overloaded,
             ),
             Self::TenantRateLimited(seconds) => (
                 StatusCode::TOO_MANY_REQUESTS,
-                "tenant sync request rate limit exceeded".to_owned(),
+                "tenant sync request rate limit exceeded",
                 Some(seconds),
                 OperationalErrorCode::Overloaded,
             ),
             Self::Draining(seconds) => (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "sync server is draining".to_owned(),
+                "sync server is draining",
                 Some(seconds),
                 OperationalErrorCode::Draining,
             ),
             Self::DeadlineExceeded(seconds) => (
                 StatusCode::GATEWAY_TIMEOUT,
-                "sync request exceeded its server execution deadline".to_owned(),
+                "sync request exceeded its server execution deadline",
                 Some(seconds),
                 OperationalErrorCode::Deadline,
             ),
-            Self::Codec(error) => (
+            Self::Codec => (
                 StatusCode::BAD_REQUEST,
-                error.to_string(),
+                "sync protocol frame is invalid",
                 None,
                 OperationalErrorCode::Protocol,
             ),
@@ -954,47 +1257,47 @@ impl IntoResponse for HttpError {
                 let retry_after = rejection
                     .retry_after_ms()
                     .map(|milliseconds| milliseconds.div_ceil(1_000).max(1));
-                (status, rejection.to_string(), retry_after, code)
+                (status, "sync request was not admitted", retry_after, code)
             }
-            Self::Server(ServerError::Validation(error)) => (
+            Self::Server(ServerError::Validation(_)) => (
                 StatusCode::BAD_REQUEST,
-                error.to_string(),
+                "sync request failed protocol validation",
                 None,
                 OperationalErrorCode::Protocol,
             ),
-            Self::Server(ServerError::Dependency(error)) => (
+            Self::Server(ServerError::Dependency(_)) => (
                 StatusCode::BAD_REQUEST,
-                error.to_string(),
+                "sync operation dependencies are invalid",
                 None,
                 OperationalErrorCode::Validation,
             ),
             Self::Server(ServerError::ResponseLimit) => (
                 StatusCode::BAD_REQUEST,
-                "client response limit is too small".to_owned(),
+                "client response limit is too small",
                 None,
                 OperationalErrorCode::PayloadLimit,
             ),
             Self::Server(ServerError::MemoryBudget { .. }) => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "typed sync request exceeds the configured memory budget".to_owned(),
+                "typed sync request exceeds the configured memory budget",
                 None,
                 OperationalErrorCode::PayloadLimit,
             ),
             Self::Server(ServerError::IdentityMismatch) => (
                 StatusCode::UNAUTHORIZED,
-                "authenticated identity mismatch".to_owned(),
+                "authenticated identity mismatch",
                 None,
                 OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::ScopeAuthorization(_)) => (
                 StatusCode::FORBIDDEN,
-                "sync scope is not authorized".to_owned(),
+                "sync scope is not authorized",
                 None,
                 OperationalErrorCode::Authentication,
             ),
             Self::Server(ServerError::Store(error)) if error.kind == StoreErrorKind::Transient => (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "sync storage unavailable".to_owned(),
+                "sync storage unavailable",
                 None,
                 OperationalErrorCode::Storage,
             ),
@@ -1007,13 +1310,13 @@ impl IntoResponse for HttpError {
                 | ServerError::Merge(_),
             ) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "sync processing failed".to_owned(),
+                "sync processing failed",
                 None,
                 OperationalErrorCode::Storage,
             ),
             Self::Server(ServerError::BootstrapUnavailable) => (
                 StatusCode::NOT_IMPLEMENTED,
-                "snapshot bootstrap is not available".to_owned(),
+                "snapshot bootstrap is not available",
                 None,
                 OperationalErrorCode::Protocol,
             ),
@@ -1022,18 +1325,28 @@ impl IntoResponse for HttpError {
                 ..
             }) => (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "sync is temporarily unavailable due to maintenance".to_owned(),
+                "sync is temporarily unavailable due to maintenance",
                 Some(retry_after_seconds),
                 OperationalErrorCode::Maintenance,
             ),
-            Self::Server(ServerError::Authority(error)) => (
+            Self::Server(ServerError::Authority(_)) => (
                 StatusCode::CONFLICT,
-                error.to_string(),
+                "authority state rejected the sync request",
                 None,
                 OperationalErrorCode::Authority,
             ),
+            Self::WithRequestId(_, _) => unreachable!("request identity wrapper is removed first"),
         };
-        let mut response = (status, message).into_response();
+        let envelope = ApiErrorEnvelope {
+            code,
+            retry_after_seconds: retry_after,
+            message,
+            request_id,
+        };
+        let mut response = (status, envelope.json()).into_response();
+        response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static(ERROR_CONTENT_TYPE));
         if let Some(value) =
             retry_after.and_then(|seconds| HeaderValue::from_str(&seconds.to_string()).ok())
         {
@@ -1043,6 +1356,7 @@ impl IntoResponse for HttpError {
             OPERATIONAL_ERROR_CODE_HEADER,
             HeaderValue::from_static(code.as_str()),
         );
+        apply_public_response_headers(&mut response, request_id);
         response
     }
 }
