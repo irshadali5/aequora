@@ -1,6 +1,7 @@
 use aequora_axum::{
-    AxumConfig, DrainOutcome, POSTCARD_CONTENT_TYPE, ReadinessProbe, router_with_lifecycle,
-    router_with_readiness,
+    AuthenticationFailure, AxumConfig, DrainOutcome, HttpAuthenticator, POSTCARD_CONTENT_TYPE,
+    PresentedCredential, REQUEST_ID_HEADER, ReadinessProbe, router_with_authenticator,
+    router_with_lifecycle, router_with_readiness,
 };
 use aequora_codec::{FLAG_ZSTD, MessageKind};
 use aequora_executor::AuthContext;
@@ -37,6 +38,25 @@ use tokio::{sync::Notify, time::sleep};
 use tower::ServiceExt;
 
 struct EchoService;
+
+struct StaticAuthenticator {
+    expected: &'static str,
+    auth: AuthContext,
+}
+
+#[async_trait]
+impl HttpAuthenticator for StaticAuthenticator {
+    async fn authenticate(
+        &self,
+        credential: &PresentedCredential,
+    ) -> Result<AuthContext, AuthenticationFailure> {
+        if credential.expose_for_authentication() == self.expected {
+            Ok(self.auth)
+        } else {
+            Err(AuthenticationFailure::Invalid)
+        }
+    }
+}
 
 #[async_trait]
 impl ExchangeService for EchoService {
@@ -299,6 +319,135 @@ async fn zstd_response_requires_the_client_capability() {
         aequora_codec::decode::<SyncResponse>(&body, MessageKind::SyncResponse, 1_024 * 1_024)
             .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(decoded.changes.len(), 1);
+}
+
+#[tokio::test]
+async fn bearer_authentication_precedes_decode_and_emits_sanitized_request_context() {
+    let (auth, request) = authenticated_exchange();
+    let trusted_request_id = RequestId::new();
+    let config = AxumConfig {
+        trust_request_id_header: true,
+        ..AxumConfig::new(1_024 * 1_024)
+    };
+    let (app, _) = router_with_authenticator(
+        Arc::new(EchoService),
+        config,
+        Arc::new(AtomicMetrics::default()),
+        Arc::new(StaticReadiness(true)),
+        Arc::new(StaticAuthenticator {
+            expected: "valid-secret",
+            auth,
+        }),
+    );
+    let (parts, body) = request.into_parts();
+    let valid_request = Request::from_parts(parts, body);
+    let mut valid_request = valid_request;
+    valid_request.headers_mut().insert(
+        "authorization",
+        "Bearer valid-secret"
+            .parse()
+            .unwrap_or_else(|error| panic!("valid header: {error}")),
+    );
+    valid_request.headers_mut().insert(
+        REQUEST_ID_HEADER,
+        trusted_request_id
+            .to_string()
+            .parse()
+            .unwrap_or_else(|error| panic!("valid request id: {error}")),
+    );
+    let valid = app
+        .clone()
+        .oneshot(valid_request)
+        .await
+        .unwrap_or_else(|error| match error {});
+    assert_eq!(valid.status(), StatusCode::OK);
+    let trusted_request_id_text = trusted_request_id.to_string();
+    assert_eq!(
+        valid
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(trusted_request_id_text.as_str())
+    );
+    assert_eq!(
+        valid
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(
+        valid
+            .headers()
+            .get("x-content-type-options")
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+
+    let invalid = app
+        .oneshot(
+            Request::post("/sync/v1/exchange")
+                .header(CONTENT_TYPE, POSTCARD_CONTENT_TYPE)
+                .header("authorization", "Bearer stolen-secret")
+                .body(Body::from("malformed frame that must not be decoded"))
+                .unwrap_or_else(|error| panic!("valid request: {error}")),
+        )
+        .await
+        .unwrap_or_else(|error| match error {});
+    assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
+    let body = to_bytes(invalid.into_body(), 4_096)
+        .await
+        .unwrap_or_else(|error| panic!("bounded error body: {error}"));
+    let text = String::from_utf8(body.to_vec())
+        .unwrap_or_else(|error| panic!("error envelope is JSON text: {error}"));
+    assert!(text.contains("AEQ-AUTH-001"));
+    assert!(text.contains("request_id"));
+    assert!(!text.contains("stolen-secret"));
+    assert!(!text.contains("malformed frame"));
+}
+
+#[tokio::test]
+async fn canonical_ready_route_has_request_and_security_headers() {
+    let app = router_with_readiness(
+        Arc::new(EchoService),
+        AxumConfig::new(1_024 * 1_024),
+        Arc::new(AtomicMetrics::default()),
+        Arc::new(StaticReadiness(true)),
+    );
+    let response = app
+        .oneshot(
+            Request::get("/sync/v1/ready")
+                .body(Body::empty())
+                .unwrap_or_else(|error| panic!("valid request: {error}")),
+        )
+        .await
+        .unwrap_or_else(|error| match error {});
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(response.headers().contains_key(REQUEST_ID_HEADER));
+    assert_eq!(
+        response
+            .headers()
+            .get("referrer-policy")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-referrer")
+    );
+}
+
+#[tokio::test]
+async fn unsupported_media_type_is_rejected_before_authentication_and_body_read() {
+    let app = aequora_axum::router(Arc::new(EchoService), 1_024 * 1_024);
+    let never_ending_body = Body::from_stream(stream::pending::<Result<Bytes, Infallible>>());
+    let response = app
+        .oneshot(
+            Request::post("/sync/v1/exchange")
+                .header(CONTENT_TYPE, "application/octet-stream")
+                .body(never_ending_body)
+                .unwrap_or_else(|error| panic!("valid request: {error}")),
+        )
+        .await
+        .unwrap_or_else(|error| match error {});
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert!(response.headers().contains_key(REQUEST_ID_HEADER));
 }
 
 struct SlowService {
