@@ -86,6 +86,9 @@ pub enum ConformanceProfile {
     FencingAdapter,
     PostgresAuthorityFull,
     NeonOperationalProfile,
+    StoolapLocalCore,
+    StoolapDesktopLocalFull,
+    StoolapMobileLocalFull,
 }
 
 impl ConformanceProfile {
@@ -112,6 +115,9 @@ impl ConformanceProfile {
             Self::FencingAdapter => 68,
             Self::PostgresAuthorityFull => 69,
             Self::NeonOperationalProfile => 70,
+            Self::StoolapLocalCore => 71,
+            Self::StoolapDesktopLocalFull => 72,
+            Self::StoolapMobileLocalFull => 73,
         })
     }
 
@@ -122,7 +128,8 @@ impl ConformanceProfile {
             | Self::ClientCore
             | Self::ServerCore
             | Self::ProtocolCore
-            | Self::Integration => CertificationTier::CoreTransactional,
+            | Self::Integration
+            | Self::StoolapLocalCore => CertificationTier::CoreTransactional,
             Self::StorageFullSync
             | Self::ClientFullSync
             | Self::Provider
@@ -136,7 +143,9 @@ impl ConformanceProfile {
             | Self::SnapshotAdapter
             | Self::FencingAdapter
             | Self::PostgresAuthorityFull
-            | Self::NeonOperationalProfile => CertificationTier::FullSync,
+            | Self::NeonOperationalProfile
+            | Self::StoolapDesktopLocalFull
+            | Self::StoolapMobileLocalFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -736,6 +745,13 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::NeonOperationalProfile => {
             matches!(definition.id.0, 2 | 3 | 5 | 7 | 49 | 51..=68)
         }
+        ConformanceProfile::StoolapLocalCore => {
+            matches!(definition.id.0, 1 | 4 | 39..=58 | 69..=73 | 77)
+        }
+        ConformanceProfile::StoolapDesktopLocalFull
+        | ConformanceProfile::StoolapMobileLocalFull => {
+            matches!(definition.id.0, 1 | 4 | 39..=58 | 69..=78)
+        }
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -803,7 +819,10 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::SnapshotAdapter
         | ConformanceProfile::FencingAdapter
         | ConformanceProfile::PostgresAuthorityFull
-        | ConformanceProfile::NeonOperationalProfile => false,
+        | ConformanceProfile::NeonOperationalProfile
+        | ConformanceProfile::StoolapLocalCore
+        | ConformanceProfile::StoolapDesktopLocalFull
+        | ConformanceProfile::StoolapMobileLocalFull => false,
     }
 }
 
@@ -1365,6 +1384,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-PG010",
         FullSync,
         Some("neon-operational-profile")
+    ),
+    test_definition!(
+        69,
+        "stoolap_tx_a_atomicity",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP001",
+        CoreTransactional,
+        Some("stoolap-local-core")
+    ),
+    test_definition!(
+        70,
+        "stoolap_tx_c_atomicity",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP002",
+        CoreTransactional,
+        Some("stoolap-local-core")
+    ),
+    test_definition!(
+        71,
+        "stoolap_retry_identity",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP003",
+        CoreTransactional,
+        Some("stoolap-digest-bound-outbox")
+    ),
+    test_definition!(
+        72,
+        "stoolap_pending_intent_preservation",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP004",
+        CoreTransactional,
+        Some("stoolap-pending-intent")
+    ),
+    test_definition!(
+        73,
+        "stoolap_cursor_safety",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP005",
+        CoreTransactional,
+        Some("stoolap-local-core")
+    ),
+    test_definition!(
+        74,
+        "stoolap_fenced_coordinator",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP006",
+        FullSync,
+        Some("stoolap-fencing")
+    ),
+    test_definition!(
+        75,
+        "stoolap_clone_rebinding",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP007",
+        FullSync,
+        Some("stoolap-device-binding")
+    ),
+    test_definition!(
+        76,
+        "stoolap_storage_pressure",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP008",
+        FullSync,
+        Some("stoolap-storage-preflight")
+    ),
+    test_definition!(
+        77,
+        "stoolap_type_isolation",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP009",
+        CoreTransactional,
+        Some("stoolap-adapter-boundary")
+    ),
+    test_definition!(
+        78,
+        "stoolap_platform_certification",
+        StorageAdapter,
+        "AEQ-INV-STOOLAP010",
+        FullSync,
+        Some("stoolap-platform-profile")
     ),
 ];
 
@@ -2353,5 +2452,39 @@ mod tests {
         assert!(!authority.contains(&ConformanceTestId(50)));
         assert!(local.contains(&ConformanceTestId(56)));
         assert!(authority.contains(&ConformanceTestId(56)));
+    }
+
+    #[test]
+    fn stoolap_profiles_separate_core_from_target_bound_full_evidence() {
+        let core = definitions_for(
+            ConformanceProfile::StoolapLocalCore,
+            CertificationTier::CoreTransactional,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+        let desktop = definitions_for(
+            ConformanceProfile::StoolapDesktopLocalFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+        let mobile = definitions_for(
+            ConformanceProfile::StoolapMobileLocalFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id)
+        .collect::<BTreeSet<_>>();
+
+        for id in [69, 70, 71, 72, 73, 77] {
+            assert!(core.contains(&ConformanceTestId(id)));
+        }
+        for id in [74, 75, 76, 78] {
+            assert!(!core.contains(&ConformanceTestId(id)));
+            assert!(desktop.contains(&ConformanceTestId(id)));
+            assert!(mobile.contains(&ConformanceTestId(id)));
+        }
     }
 }
