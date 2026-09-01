@@ -602,11 +602,31 @@ pub enum InvariantId {
     AdapterCriticalDurability,
     /// Official adapters publish stable manifests and explicit limitations.
     AdapterManifestTruthfulness,
+    /// `PostgreSQL` Tx B atomically commits every required authoritative effect.
+    PostgresAuthorityAtomicity,
+    /// `PostgreSQL` duplicate delivery returns the prior outcome without another effect.
+    PostgresIdempotentReplay,
+    /// `PostgreSQL` rejects `OperationId` reuse with a different canonical digest.
+    PostgresPayloadBinding,
+    /// `PostgreSQL` journal order follows a transactional committed timeline.
+    PostgresCommittedTimeline,
+    /// PostgreSQL/Neon restore opens a new authority epoch before synchronization.
+    PostgresRestoreEpoch,
+    /// `SQLx` and `PostgreSQL`-specific types remain inside the physical adapter.
+    PostgresTypeIsolation,
+    /// Unsafe `PostgreSQL` correctness settings fail authoritative readiness.
+    PostgresReadinessSafety,
+    /// External side effects exist as durable Tx B intents and execute afterward.
+    PostgresSideEffectIntent,
+    /// `PostgreSQL` retention never crosses the proven safe journal floor.
+    PostgresRetentionSafety,
+    /// Neon operational behavior never changes authority semantics.
+    PostgresNeonSemanticParity,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 296] = [
+    pub const ALL: [Self; 306] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -903,6 +923,16 @@ impl InvariantId {
         Self::AdapterEnvironmentBinding,
         Self::AdapterCriticalDurability,
         Self::AdapterManifestTruthfulness,
+        Self::PostgresAuthorityAtomicity,
+        Self::PostgresIdempotentReplay,
+        Self::PostgresPayloadBinding,
+        Self::PostgresCommittedTimeline,
+        Self::PostgresRestoreEpoch,
+        Self::PostgresTypeIsolation,
+        Self::PostgresReadinessSafety,
+        Self::PostgresSideEffectIntent,
+        Self::PostgresRetentionSafety,
+        Self::PostgresNeonSemanticParity,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1206,6 +1236,16 @@ impl InvariantId {
             Self::AdapterEnvironmentBinding => "AEQ-INV-ADAPTER008",
             Self::AdapterCriticalDurability => "AEQ-INV-ADAPTER009",
             Self::AdapterManifestTruthfulness => "AEQ-INV-ADAPTER010",
+            Self::PostgresAuthorityAtomicity => "AEQ-INV-PG001",
+            Self::PostgresIdempotentReplay => "AEQ-INV-PG002",
+            Self::PostgresPayloadBinding => "AEQ-INV-PG003",
+            Self::PostgresCommittedTimeline => "AEQ-INV-PG004",
+            Self::PostgresRestoreEpoch => "AEQ-INV-PG005",
+            Self::PostgresTypeIsolation => "AEQ-INV-PG006",
+            Self::PostgresReadinessSafety => "AEQ-INV-PG007",
+            Self::PostgresSideEffectIntent => "AEQ-INV-PG008",
+            Self::PostgresRetentionSafety => "AEQ-INV-PG009",
+            Self::PostgresNeonSemanticParity => "AEQ-INV-PG010",
         }
     }
 
@@ -2088,6 +2128,36 @@ impl InvariantId {
             Self::AdapterManifestTruthfulness => {
                 "official adapters publish stable capability manifests and explicit known limitations"
             }
+            Self::PostgresAuthorityAtomicity => {
+                "PostgreSQL business mutation version journal ledger audit and intents commit atomically"
+            }
+            Self::PostgresIdempotentReplay => {
+                "an identical PostgreSQL OperationId retry returns its prior outcome without another effect"
+            }
+            Self::PostgresPayloadBinding => {
+                "PostgreSQL rejects an OperationId retry with a different canonical payload digest"
+            }
+            Self::PostgresCommittedTimeline => {
+                "PostgreSQL journal cursors follow transactional committed timeline allocation"
+            }
+            Self::PostgresRestoreEpoch => {
+                "a PostgreSQL or Neon restore opens a newer authority epoch before synchronization resumes"
+            }
+            Self::PostgresTypeIsolation => {
+                "SQLx and PostgreSQL-specific types remain inside the physical adapter boundary"
+            }
+            Self::PostgresReadinessSafety => {
+                "unsafe correctness-critical PostgreSQL settings prevent authoritative readiness"
+            }
+            Self::PostgresSideEffectIntent => {
+                "external side effects are durable transaction intents executed only after commit"
+            }
+            Self::PostgresRetentionSafety => {
+                "PostgreSQL compaction never crosses active consumer policy or bootstrap safety floors"
+            }
+            Self::PostgresNeonSemanticParity => {
+                "Neon autosuspend scaling branching and pooling never redefine authority semantics"
+            }
         }
     }
 
@@ -2396,6 +2466,16 @@ impl InvariantId {
             Self::AdapterEnvironmentBinding => 293,
             Self::AdapterCriticalDurability => 294,
             Self::AdapterManifestTruthfulness => 295,
+            Self::PostgresAuthorityAtomicity => 296,
+            Self::PostgresIdempotentReplay => 297,
+            Self::PostgresPayloadBinding => 298,
+            Self::PostgresCommittedTimeline => 299,
+            Self::PostgresRestoreEpoch => 300,
+            Self::PostgresTypeIsolation => 301,
+            Self::PostgresReadinessSafety => 302,
+            Self::PostgresSideEffectIntent => 303,
+            Self::PostgresRetentionSafety => 304,
+            Self::PostgresNeonSemanticParity => 305,
         }
     }
 }
@@ -2447,7 +2527,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 296] = [
+pub static REGISTRY: [InvariantEntry; 306] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -4519,6 +4599,76 @@ pub static REGISTRY: [InvariantEntry; 296] = [
         "adapter_support_matrix_review",
         "adapter_manifest_and_limitations",
         "adapter_manifest_drift_total",
+    ),
+    entry(
+        InvariantId::PostgresAuthorityAtomicity,
+        "postgres_tx_b_atomicity",
+        "postgres_failpoint_atomicity_matrix",
+        "postgres_authority_full_atomicity",
+        "postgres_partial_commit_total",
+    ),
+    entry(
+        InvariantId::PostgresIdempotentReplay,
+        "postgres_duplicate_single_effect",
+        "postgres_duplicate_race_matrix",
+        "postgres_operation_ledger_replay",
+        "postgres_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::PostgresPayloadBinding,
+        "postgres_operation_payload_binding",
+        "postgres_payload_misuse_matrix",
+        "postgres_payload_digest_rejection",
+        "postgres_payload_mismatch_total",
+    ),
+    entry(
+        InvariantId::PostgresCommittedTimeline,
+        "postgres_committed_timeline",
+        "postgres_concurrent_commit_order_matrix",
+        "postgres_transactional_timeline_allocator",
+        "postgres_timeline_order_failure_total",
+    ),
+    entry(
+        InvariantId::PostgresRestoreEpoch,
+        "postgres_restore_epoch_transition",
+        "postgres_restore_transition_matrix",
+        "postgres_pitr_epoch_procedure",
+        "postgres_restore_epoch_violation_total",
+    ),
+    entry(
+        InvariantId::PostgresTypeIsolation,
+        "postgres_physical_type_isolation",
+        "postgres_public_surface_scan",
+        "postgres_adapter_boundary_gate",
+        "postgres_type_leak_total",
+    ),
+    entry(
+        InvariantId::PostgresReadinessSafety,
+        "postgres_readiness_fail_closed",
+        "postgres_setting_drift_matrix",
+        "postgres_correctness_setting_validation",
+        "postgres_unsafe_readiness_total",
+    ),
+    entry(
+        InvariantId::PostgresSideEffectIntent,
+        "postgres_durable_side_effect_intent",
+        "postgres_side_effect_failpoint_matrix",
+        "postgres_tx_b_side_effect_outbox",
+        "postgres_missing_intent_total",
+    ),
+    entry(
+        InvariantId::PostgresRetentionSafety,
+        "postgres_retention_safe_floor",
+        "postgres_lease_snapshot_floor_matrix",
+        "postgres_safe_journal_compaction",
+        "postgres_unsafe_compaction_total",
+    ),
+    entry(
+        InvariantId::PostgresNeonSemanticParity,
+        "postgres_neon_semantic_parity",
+        "neon_operational_profile_matrix",
+        "neon_authority_semantic_conformance",
+        "neon_semantic_drift_total",
     ),
 ];
 
