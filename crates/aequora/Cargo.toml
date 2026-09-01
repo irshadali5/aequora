@@ -27,6 +27,7 @@ testkit = ["dep:aequora-testkit"]
 aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
+aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 
