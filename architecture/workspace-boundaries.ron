@@ -94,6 +94,7 @@
             name: "physical-adapters",
             crates: [
                 "aequora-store-postgres",
+                "aequora-store-sqlite",
                 "aequora-store-stoolap",
             ],
         ),
@@ -153,6 +154,7 @@
     exclusive_dependencies: [
         (dependency: "sqlx", owners: ["aequora-store-postgres"]),
         (dependency: "stoolap", owners: ["aequora-store-stoolap"]),
+        (dependency: "rusqlite", owners: ["aequora-store-sqlite"]),
         (dependency: "quinn", owners: ["aequora-quic"]),
         (dependency: "reqwest", owners: ["aequora", "aequora-http"]),
         (dependency: "axum", owners: ["aequora", "aequora-axum", "aequora-http"]),
