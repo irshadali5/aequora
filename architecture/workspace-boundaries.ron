@@ -104,6 +104,7 @@
                 "aequora-axum",
                 "aequora-config",
                 "aequora-desktop-runtime",
+                "aequora-dioxus",
                 "aequora-http",
                 "aequora-legacy-api",
                 "aequora-mobile-bindings",
@@ -144,6 +145,7 @@
         (crate_name: "aequora-client", max_workspace: 18, max_external: 3),
         (crate_name: "aequora-server", max_workspace: 26, max_external: 4),
         (crate_name: "aequora-axum", max_workspace: 10, max_external: 6),
+        (crate_name: "aequora-dioxus", max_workspace: 4, max_external: 2),
     ],
     exclusive_dependencies: [
         (dependency: "sqlx", owners: ["aequora-store-postgres"]),
@@ -152,6 +154,7 @@
         (dependency: "reqwest", owners: ["aequora", "aequora-http"]),
         (dependency: "axum", owners: ["aequora", "aequora-axum", "aequora-http"]),
         (dependency: "tower", owners: ["aequora-axum"]),
+        (dependency: "dioxus", owners: ["aequora-dioxus"]),
         (dependency: "jni", owners: ["aequora-platform-android"]),
         (dependency: "windows-sys", owners: ["aequora-platform-windows"]),
         (dependency: "objc2", owners: ["aequora-platform-ios", "aequora-platform-macos"]),
