@@ -3,6 +3,37 @@
 //! The backend contract is deliberately transaction-oriented. A `SQLx` implementation can
 //! satisfy it without exposing `sqlx::Transaction` to the rest of Aequora.
 
+pub mod audit;
+pub mod capabilities;
+pub mod config;
+pub mod device;
+pub mod errors;
+pub mod governance;
+pub mod health;
+pub mod jobs;
+pub mod journal;
+pub mod ledger;
+pub mod migration;
+pub mod neon;
+pub mod observability;
+pub mod pool;
+pub mod retention;
+pub mod scope;
+pub mod snapshot;
+pub mod tx;
+pub mod version;
+
+pub use capabilities::{
+    NEON_OPERATIONAL_PROFILE, POSTGRES_ADAPTER_IDENTITY, POSTGRES_AUTHORITY_FULL_PROFILE,
+};
+pub use config::{PostgresAdapterConfig, PostgresJournalConfig, PostgresTransactionConfig};
+pub use device::{PostgresDeviceRecord, PostgresDeviceStatus};
+pub use governance::PostgresRetentionPolicy;
+pub use health::{PostgresReadiness, ReadinessCheck};
+pub use jobs::{PostgresSideEffectIntent, PostgresSideEffectStatus};
+pub use observability::{PostgresMetrics, PostgresMetricsSnapshot};
+pub use retention::{PostgresRetentionDecision, PostgresRetentionLease};
+
 use aequora_adapter_sdk as adapter_sdk;
 use aequora_authority::{
     AuthorityRole, AuthorityRuntimeMode, AuthorityState, AuthorityTransitionManifest,
@@ -36,6 +67,7 @@ use sqlx::{
     PgPool, Postgres, Row, Transaction,
     postgres::{PgConnectOptions, PgListener, PgPoolOptions, PgSslMode},
 };
+use std::time::Instant;
 use std::{fmt, str::FromStr, sync::Arc, time::Duration};
 
 /// `PostgreSQL` `LISTEN/NOTIFY` adapter for ephemeral, post-commit live hints.
@@ -323,6 +355,112 @@ ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS authority_id UUID;
 ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS authority_epoch BIGINT CHECK (authority_epoch > 0);
 ";
 
+/// Adds the detailed Part 37 ledger binding, durable intents, devices, retention, and metadata.
+pub const MIGRATION_0004: &str = r"
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS payload_digest BYTEA;
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS operation_kind INTEGER;
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'committed';
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS outcome_bytes BYTEA;
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS handler_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE aequora_applied_operations
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+UPDATE aequora_applied_operations ledger
+   SET payload_digest = audit.command_digest,
+       operation_kind = audit.operation_kind
+  FROM aequora_audit_log audit
+ WHERE ledger.tenant_id = audit.tenant_id
+   AND ledger.operation_id = audit.operation_id
+   AND (ledger.payload_digest IS NULL OR ledger.operation_kind IS NULL);
+ALTER TABLE aequora_applied_operations
+    ADD CONSTRAINT aequora_operation_payload_digest_size
+    CHECK (octet_length(payload_digest) = 32) NOT VALID;
+ALTER TABLE aequora_applied_operations
+    VALIDATE CONSTRAINT aequora_operation_payload_digest_size;
+ALTER TABLE aequora_applied_operations ALTER COLUMN payload_digest SET NOT NULL;
+ALTER TABLE aequora_applied_operations ALTER COLUMN operation_kind SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS aequora_side_effect_jobs (
+    tenant_id UUID NOT NULL,
+    job_id UUID NOT NULL,
+    operation_id UUID NOT NULL,
+    kind INTEGER NOT NULL CHECK (kind BETWEEN 0 AND 65535),
+    payload BYTEA NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','in_flight','completed','failed')),
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, job_id),
+    CONSTRAINT aequora_side_effect_operation_fk
+        FOREIGN KEY (tenant_id, operation_id)
+        REFERENCES aequora_applied_operations (tenant_id, operation_id)
+        ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS aequora_side_effect_claim_idx
+    ON aequora_side_effect_jobs (status, available_at, tenant_id);
+
+CREATE TABLE IF NOT EXISTS aequora_devices (
+    tenant_id UUID NOT NULL,
+    device_id UUID NOT NULL,
+    actor_id UUID NOT NULL,
+    public_key BYTEA NOT NULL,
+    binding_generation BIGINT NOT NULL CHECK (binding_generation > 0),
+    status TEXT NOT NULL CHECK (status IN ('active','revoked','retired')),
+    last_seen_unix_ms BIGINT NOT NULL CHECK (last_seen_unix_ms >= 0),
+    last_ack_sequence BIGINT NOT NULL CHECK (last_ack_sequence >= 0),
+    PRIMARY KEY (tenant_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS aequora_retention_leases (
+    tenant_id UUID NOT NULL,
+    device_id UUID NOT NULL,
+    scope_id UUID NOT NULL,
+    ack_sequence BIGINT NOT NULL CHECK (ack_sequence >= 0),
+    last_active_unix_ms BIGINT NOT NULL CHECK (last_active_unix_ms >= 0),
+    lease_expiry_unix_ms BIGINT NOT NULL CHECK (lease_expiry_unix_ms >= last_active_unix_ms),
+    PRIMARY KEY (tenant_id, device_id, scope_id),
+    CONSTRAINT aequora_retention_device_fk
+        FOREIGN KEY (tenant_id, device_id)
+        REFERENCES aequora_devices (tenant_id, device_id)
+        ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS aequora_retention_floor_idx
+    ON aequora_retention_leases (tenant_id, scope_id, ack_sequence);
+
+CREATE TABLE IF NOT EXISTS aequora_retention_policies (
+    tenant_id UUID NOT NULL,
+    scope_id UUID NOT NULL,
+    retain_from_sequence BIGINT NOT NULL CHECK (retain_from_sequence >= 0),
+    legal_hold BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at_unix_ms BIGINT NOT NULL CHECK (updated_at_unix_ms >= 0),
+    PRIMARY KEY (tenant_id, scope_id)
+);
+
+ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS manifest_digest BYTEA;
+ALTER TABLE aequora_snapshots ADD COLUMN IF NOT EXISTS object_keys BYTEA;
+ALTER TABLE aequora_snapshots
+    ADD COLUMN IF NOT EXISTS publication_status TEXT NOT NULL DEFAULT 'published'
+    CHECK (publication_status IN ('staged','verified','published','retired'));
+
+CREATE TABLE IF NOT EXISTS aequora_archive_ranges (
+    tenant_id UUID NOT NULL,
+    scope_id UUID NOT NULL,
+    authority_epoch BIGINT NOT NULL CHECK (authority_epoch > 0),
+    start_sequence BIGINT NOT NULL CHECK (start_sequence >= 0),
+    end_sequence BIGINT NOT NULL CHECK (end_sequence >= start_sequence),
+    object_key TEXT NOT NULL,
+    digest BYTEA NOT NULL CHECK (octet_length(digest) = 32),
+    PRIMARY KEY (tenant_id, scope_id, authority_epoch, start_sequence)
+);
+";
+
 const MIGRATION_LEDGER_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
     version INTEGER PRIMARY KEY CHECK (version > 0),
@@ -333,7 +471,7 @@ CREATE TABLE IF NOT EXISTS aequora_schema_migrations (
 ";
 
 /// Latest `PostgreSQL` schema revision understood by this Aequora release.
-pub const POSTGRES_SCHEMA_VERSION: u32 = 3;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 4;
 
 /// Versioned role and capability declaration for the built-in `PostgreSQL` authority adapter.
 pub const POSTGRES_ADAPTER_MANIFEST: AdapterManifest = AdapterManifest {
@@ -430,6 +568,11 @@ const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
         name: "authority_failover_and_epoch_binding",
         sql: MIGRATION_0003,
     },
+    PostgresMigration {
+        version: 4,
+        name: "postgres_authority_full_profile",
+        sql: MIGRATION_0004,
+    },
 ];
 
 /// Applied and expected `PostgreSQL` schema revisions.
@@ -453,6 +596,7 @@ impl PostgresSchemaStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostgresCommitHookOutcome {
     authoritative_payload: Vec<u8>,
+    side_effect_intents: Vec<PostgresSideEffectIntent>,
 }
 
 /// Failure returned by an application-owned commit hook.
@@ -477,11 +621,22 @@ impl PostgresCommitHookOutcome {
     pub fn new(authoritative_payload: Vec<u8>) -> Self {
         Self {
             authoritative_payload,
+            side_effect_intents: Vec::new(),
         }
     }
 
-    fn into_authoritative_payload(self) -> Vec<u8> {
-        self.authoritative_payload
+    /// Adds retry-stable external side-effect intents that must commit with Tx B.
+    #[must_use]
+    pub fn with_side_effect_intents(
+        mut self,
+        side_effect_intents: Vec<PostgresSideEffectIntent>,
+    ) -> Self {
+        self.side_effect_intents = side_effect_intents;
+        self
+    }
+
+    fn into_parts(self) -> (Vec<u8>, Vec<PostgresSideEffectIntent>) {
+        (self.authoritative_payload, self.side_effect_intents)
     }
 }
 
@@ -569,6 +724,9 @@ pub struct SqlxPostgresBackend {
     pool: PgPool,
     commit_hook: Arc<dyn PostgresCommitHook>,
     snapshot_hook: Arc<dyn PostgresSnapshotHook>,
+    transaction_config: PostgresTransactionConfig,
+    journal_config: PostgresJournalConfig,
+    metrics: PostgresMetrics,
 }
 
 impl fmt::Debug for SqlxPostgresBackend {
@@ -578,6 +736,9 @@ impl fmt::Debug for SqlxPostgresBackend {
             .field("pool", &self.pool)
             .field("commit_hook", &"application-owned")
             .field("snapshot_hook", &"application-owned")
+            .field("transaction_config", &self.transaction_config)
+            .field("journal_config", &self.journal_config)
+            .field("metrics", &self.metrics.snapshot())
             .finish()
     }
 }
@@ -672,7 +833,16 @@ impl SqlxPostgresBackend {
         database_url: &str,
         config: PostgresPoolConfig,
     ) -> Result<Self, StoreError> {
-        Self::connect_with_migration_url(database_url, database_url, config).await
+        Self::connect_with_adapter_config(
+            database_url,
+            database_url,
+            PostgresAdapterConfig {
+                pool: config,
+                ..PostgresAdapterConfig::default()
+            },
+            false,
+        )
+        .await
     }
 
     /// Migrates through a direct/admin URL, closes it, then opens the runtime pool separately.
@@ -689,9 +859,16 @@ impl SqlxPostgresBackend {
         migration_database_url: &str,
         config: PostgresPoolConfig,
     ) -> Result<Self, StoreError> {
-        let runtime = parse_connect_options(runtime_database_url, false)?;
-        let migration = parse_connect_options(migration_database_url, false)?;
-        connect_separate(runtime, migration, config).await
+        Self::connect_with_adapter_config(
+            runtime_database_url,
+            migration_database_url,
+            PostgresAdapterConfig {
+                pool: config,
+                ..PostgresAdapterConfig::default()
+            },
+            false,
+        )
+        .await
     }
 
     /// Connects to Neon using a pooled runtime URL and a direct migration URL.
@@ -732,8 +909,37 @@ impl SqlxPostgresBackend {
         direct_database_url: &str,
         config: PostgresPoolConfig,
     ) -> Result<Self, StoreError> {
-        let runtime = parse_connect_options(pooled_database_url, true)?;
-        let migration = parse_connect_options(direct_database_url, true)?;
+        Self::connect_with_adapter_config(
+            pooled_database_url,
+            direct_database_url,
+            PostgresAdapterConfig {
+                pool: config,
+                ..PostgresAdapterConfig::default()
+            },
+            true,
+        )
+        .await
+    }
+
+    /// Connects with the complete typed Part 37 configuration.
+    ///
+    /// The DSNs remain separate secret inputs and are never stored in the configuration value or
+    /// emitted through `Debug`. Neon callers set `verify_full` so both endpoints require verified
+    /// TLS.
+    ///
+    /// # Errors
+    ///
+    /// Returns a permanent error for unsafe bounds or a typed storage error for connection and
+    /// migration failures.
+    pub async fn connect_with_adapter_config(
+        runtime_database_url: &str,
+        migration_database_url: &str,
+        config: PostgresAdapterConfig,
+        verify_full: bool,
+    ) -> Result<Self, StoreError> {
+        config.validate().map_err(corrupt)?;
+        let runtime = parse_connect_options(runtime_database_url, verify_full)?;
+        let migration = parse_connect_options(migration_database_url, verify_full)?;
         connect_separate(runtime, migration, config).await
     }
 
@@ -744,6 +950,9 @@ impl SqlxPostgresBackend {
             pool,
             commit_hook: Arc::new(NoopPostgresCommitHook),
             snapshot_hook: Arc::new(NoopPostgresSnapshotHook),
+            transaction_config: PostgresTransactionConfig::default(),
+            journal_config: PostgresJournalConfig::default(),
+            metrics: PostgresMetrics::default(),
         }
     }
 
@@ -771,6 +980,12 @@ impl SqlxPostgresBackend {
     #[must_use]
     pub const fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// Borrows the payload-free adapter metric recorder.
+    #[must_use]
+    pub const fn metrics(&self) -> &PostgresMetrics {
+        &self.metrics
     }
 
     /// Initializes the singleton authority metadata row or verifies the existing identity.
@@ -946,15 +1161,11 @@ impl SqlxPostgresBackend {
         commit: &CommitOperation,
         authoritative_payload: &[u8],
     ) -> Result<CommitOutcome, StoreError> {
-        if !commit.has_valid_version_transition() {
-            return Err(corrupt(
-                "authoritative entity version must advance by exactly one",
-            ));
-        }
+        validate_commit(commit)?;
         if let Some(outcome) = prepare_commit_in_transaction(transaction, commit).await? {
             return Ok(outcome);
         }
-        persist_commit_in_transaction(transaction, commit, authoritative_payload)
+        persist_commit_in_transaction(transaction, commit, authoritative_payload, &[])
             .await
             .map(CommitOutcome::Applied)
     }
@@ -1001,6 +1212,201 @@ impl SqlxPostgresBackend {
             }
         }
         Ok(outcome)
+    }
+
+    /// Records a tenant-bound device and advances only monotonic binding/acknowledgement state.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty public keys, zero generations, decreasing generations/cursors, and database
+    /// failures.
+    pub async fn upsert_device(&self, device: &PostgresDeviceRecord) -> Result<(), StoreError> {
+        if device.public_key.is_empty() || device.binding_generation == 0 {
+            return Err(corrupt(
+                "PostgreSQL device binding requires a public key and non-zero generation",
+            ));
+        }
+        let changed = sqlx::query(
+            "INSERT INTO aequora_devices
+                (tenant_id,device_id,actor_id,public_key,binding_generation,status,
+                 last_seen_unix_ms,last_ack_sequence)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             ON CONFLICT (tenant_id,device_id) DO UPDATE SET
+                actor_id=EXCLUDED.actor_id,
+                public_key=EXCLUDED.public_key,
+                binding_generation=EXCLUDED.binding_generation,
+                status=EXCLUDED.status,
+                last_seen_unix_ms=GREATEST(aequora_devices.last_seen_unix_ms,
+                                           EXCLUDED.last_seen_unix_ms),
+                last_ack_sequence=GREATEST(aequora_devices.last_ack_sequence,
+                                           EXCLUDED.last_ack_sequence)
+             WHERE aequora_devices.binding_generation <= EXCLUDED.binding_generation",
+        )
+        .bind(device.tenant_id.as_uuid())
+        .bind(device.device_id.as_uuid())
+        .bind(device.actor_id.as_uuid())
+        .bind(&device.public_key)
+        .bind(to_i64(
+            device.binding_generation,
+            "device binding generation",
+        )?)
+        .bind(device.status.as_str())
+        .bind(to_i64(device.last_seen_unix_ms, "device last-seen time")?)
+        .bind(to_i64(
+            device.last_ack_sequence.0,
+            "device acknowledgement",
+        )?)
+        .execute(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        if changed.rows_affected() != 1 {
+            return Err(corrupt("device binding generation cannot move backward"));
+        }
+        Ok(())
+    }
+
+    /// Creates or renews an active-consumer retention lease.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid time ordering, cursor regression, an unknown device, or database failure.
+    pub async fn upsert_retention_lease(
+        &self,
+        lease: PostgresRetentionLease,
+    ) -> Result<(), StoreError> {
+        if lease.lease_expiry_unix_ms < lease.last_active_unix_ms {
+            return Err(corrupt("retention lease expires before its last activity"));
+        }
+        let changed = sqlx::query(
+            "INSERT INTO aequora_retention_leases
+                (tenant_id,device_id,scope_id,ack_sequence,last_active_unix_ms,
+                 lease_expiry_unix_ms)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             ON CONFLICT (tenant_id,device_id,scope_id) DO UPDATE SET
+                ack_sequence=EXCLUDED.ack_sequence,
+                last_active_unix_ms=EXCLUDED.last_active_unix_ms,
+                lease_expiry_unix_ms=EXCLUDED.lease_expiry_unix_ms
+             WHERE aequora_retention_leases.ack_sequence <= EXCLUDED.ack_sequence
+               AND aequora_retention_leases.last_active_unix_ms <= EXCLUDED.last_active_unix_ms",
+        )
+        .bind(lease.tenant_id.as_uuid())
+        .bind(lease.device_id.as_uuid())
+        .bind(lease.scope_id.as_uuid())
+        .bind(to_i64(lease.ack_sequence.0, "retention acknowledgement")?)
+        .bind(to_i64(
+            lease.last_active_unix_ms,
+            "retention last-active time",
+        )?)
+        .bind(to_i64(
+            lease.lease_expiry_unix_ms,
+            "retention lease expiry",
+        )?)
+        .execute(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        if changed.rows_affected() != 1 {
+            return Err(corrupt("retention lease cursor or activity cannot regress"));
+        }
+        Ok(())
+    }
+
+    /// Persists a monotonic governance retention policy for one tenant/scope.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an older policy update or a database failure.
+    pub async fn upsert_retention_policy(
+        &self,
+        policy: PostgresRetentionPolicy,
+    ) -> Result<(), StoreError> {
+        let changed = sqlx::query(
+            "INSERT INTO aequora_retention_policies
+                (tenant_id,scope_id,retain_from_sequence,legal_hold,updated_at_unix_ms)
+             VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (tenant_id,scope_id) DO UPDATE SET
+                retain_from_sequence=EXCLUDED.retain_from_sequence,
+                legal_hold=EXCLUDED.legal_hold,
+                updated_at_unix_ms=EXCLUDED.updated_at_unix_ms
+             WHERE aequora_retention_policies.updated_at_unix_ms
+                   <= EXCLUDED.updated_at_unix_ms",
+        )
+        .bind(policy.tenant_id.as_uuid())
+        .bind(policy.scope_id.as_uuid())
+        .bind(to_i64(
+            policy.retain_from_sequence.0,
+            "policy retention floor",
+        )?)
+        .bind(policy.legal_hold)
+        .bind(to_i64(policy.updated_at_unix_ms, "policy update time")?)
+        .execute(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        if changed.rows_affected() != 1 {
+            return Err(corrupt("retention policy update time cannot regress"));
+        }
+        Ok(())
+    }
+
+    /// Returns structured readiness without logging credentials or customer payloads.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed storage error when the database cannot answer the readiness query.
+    pub async fn readiness(&self) -> Result<PostgresReadiness, StoreError> {
+        let row = sqlx::query(
+            "SELECT
+                NOT pg_is_in_recovery()
+                    AND current_setting('transaction_read_only') = 'off' AS writer_available,
+                current_setting('statement_timeout') <> '0'
+                    AND current_setting('lock_timeout') <> '0'
+                    AND current_setting('idle_in_transaction_session_timeout') <> '0'
+                    AS settings_safe,
+                EXISTS(SELECT 1 FROM aequora_authority_state WHERE singleton=TRUE)
+                    AS authority_initialized",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(postgres_error)?;
+        Ok(PostgresReadiness {
+            reachable: true.into(),
+            writer_available: row
+                .try_get::<bool, _>("writer_available")
+                .map_err(postgres_error)?
+                .into(),
+            schema_current: self.schema_status().await?.is_current().into(),
+            settings_safe: row
+                .try_get::<bool, _>("settings_safe")
+                .map_err(postgres_error)?
+                .into(),
+            authority_initialized: row
+                .try_get::<bool, _>("authority_initialized")
+                .map_err(postgres_error)?
+                .into(),
+        })
+    }
+
+    /// Persists a restore transition that must open a strictly newer authority epoch.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-restore promotions, non-increasing epochs, inconsistent manifests, or a stale
+    /// authority fence.
+    pub async fn record_restore_epoch_transition(
+        &self,
+        expected: AuthorityState,
+        replacement: AuthorityState,
+        manifest: AuthorityTransitionManifest,
+    ) -> Result<(), StoreError> {
+        if !matches!(manifest.promotion_class, PromotionClass::RestoredTimeline)
+            || manifest.new_epoch <= manifest.old_epoch
+            || replacement.epoch <= expected.epoch
+        {
+            return Err(corrupt(
+                "PITR/restore must create a strictly newer restored authority epoch",
+            ));
+        }
+        self.persist_authority_transition(expected, replacement, manifest)
+            .await
     }
 
     /// Verifies that the runtime pool can acquire a healthy connection, the schema is current,
@@ -1086,25 +1492,50 @@ fn parse_connect_options(
     })
 }
 
-fn pool_options(config: PostgresPoolConfig) -> PgPoolOptions {
+fn pool_options(config: PostgresAdapterConfig) -> PgPoolOptions {
+    let pool = config.pool;
+    let transaction = config.transaction;
     PgPoolOptions::new()
-        .max_connections(config.max_connections.max(1))
-        .min_connections(config.min_connections.min(config.max_connections.max(1)))
-        .acquire_timeout(config.acquire_timeout)
-        .idle_timeout(config.idle_timeout)
-        .max_lifetime(config.max_lifetime)
+        .max_connections(pool.max_connections)
+        .min_connections(pool.min_connections)
+        .acquire_timeout(pool.acquire_timeout)
+        .idle_timeout(pool.idle_timeout)
+        .max_lifetime(pool.max_lifetime)
         .test_before_acquire(true)
+        .after_connect(move |connection, _metadata| {
+            Box::pin(async move {
+                let statement_ms = i64::try_from(transaction.statement_timeout.as_millis())
+                    .map_err(|_| sqlx::Error::Protocol("statement timeout overflow".into()))?;
+                let lock_ms = i64::try_from(transaction.lock_timeout.as_millis())
+                    .map_err(|_| sqlx::Error::Protocol("lock timeout overflow".into()))?;
+                let idle_ms = i64::try_from(transaction.idle_in_transaction_timeout.as_millis())
+                    .map_err(|_| {
+                        sqlx::Error::Protocol("idle transaction timeout overflow".into())
+                    })?;
+                sqlx::query(
+                    "SELECT set_config('statement_timeout', $1, false),
+                            set_config('lock_timeout', $2, false),
+                            set_config('idle_in_transaction_session_timeout', $3, false)",
+                )
+                .bind(format!("{statement_ms}ms"))
+                .bind(format!("{lock_ms}ms"))
+                .bind(format!("{idle_ms}ms"))
+                .execute(connection)
+                .await?;
+                Ok(())
+            })
+        })
 }
 
 async fn connect_separate(
     runtime: PgConnectOptions,
     migration: PgConnectOptions,
-    config: PostgresPoolConfig,
+    config: PostgresAdapterConfig,
 ) -> Result<SqlxPostgresBackend, StoreError> {
     let migration_pool = PgPoolOptions::new()
         .max_connections(1)
         .min_connections(0)
-        .acquire_timeout(config.acquire_timeout)
+        .acquire_timeout(config.pool.acquire_timeout)
         .connect_with(migration)
         .await
         .map_err(postgres_error)?;
@@ -1116,7 +1547,14 @@ async fn connect_separate(
         .connect_with(runtime)
         .await
         .map_err(postgres_error)?;
-    Ok(SqlxPostgresBackend::from_pool(pool))
+    Ok(SqlxPostgresBackend {
+        pool,
+        commit_hook: Arc::new(NoopPostgresCommitHook),
+        snapshot_hook: Arc::new(NoopPostgresSnapshotHook),
+        transaction_config: config.transaction,
+        journal_config: config.journal,
+        metrics: PostgresMetrics::default(),
+    })
 }
 
 async fn migrate_pool(pool: &PgPool) -> Result<(), StoreError> {
@@ -1350,19 +1788,31 @@ fn authority_state_from_row(row: &sqlx::postgres::PgRow) -> Result<AuthorityStat
 
 #[allow(clippy::needless_pass_by_value)]
 fn postgres_error(error: sqlx::Error) -> StoreError {
-    let reason = error
+    let code = error
         .as_database_error()
         .and_then(sqlx::error::DatabaseError::code)
-        .and_then(|code| postgres_transaction_retry_reason(code.as_ref()));
-    reason.map_or_else(
-        || StoreError::transient(format!("PostgreSQL operation failed: {error}")),
-        |reason| {
+        .map(std::borrow::Cow::into_owned);
+    match code.as_deref().map(errors::classify_sqlstate) {
+        Some(errors::PostgresErrorClass::RetryTransaction) => {
+            let reason = code
+                .as_deref()
+                .and_then(postgres_transaction_retry_reason)
+                .unwrap_or(StoreErrorReason::Unspecified);
             StoreError::transient_with_reason(
                 reason,
                 format!("PostgreSQL transaction aborted: {error}"),
             )
-        },
-    )
+        }
+        Some(errors::PostgresErrorClass::Permanent) => StoreError::permanent(format!(
+            "PostgreSQL constraint rejected the operation: {error}"
+        )),
+        Some(errors::PostgresErrorClass::ResolveAmbiguousCommit) => StoreError::transient(
+            "PostgreSQL connection failed around transaction completion; retry the same OperationId to resolve the ledger outcome",
+        ),
+        Some(errors::PostgresErrorClass::Transient) | None => {
+            StoreError::transient(format!("PostgreSQL operation failed: {error}"))
+        }
+    }
 }
 
 fn postgres_transaction_retry_reason(code: &str) -> Option<StoreErrorReason> {
@@ -1375,6 +1825,15 @@ fn postgres_transaction_retry_reason(code: &str) -> Option<StoreErrorReason> {
 
 fn corrupt(message: impl Into<String>) -> StoreError {
     StoreError::permanent(message)
+}
+
+fn validate_commit(commit: &CommitOperation) -> Result<(), StoreError> {
+    if !commit.has_valid_version_transition() {
+        return Err(corrupt(
+            "authoritative entity version must advance by exactly one",
+        ));
+    }
+    Ok(())
 }
 
 fn to_i64(value: u64, field: &str) -> Result<i64, StoreError> {
@@ -1467,6 +1926,7 @@ pub async fn materialize_snapshot_entity(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 async fn prepare_commit_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     commit: &CommitOperation,
@@ -1515,7 +1975,7 @@ async fn prepare_commit_in_transaction(
         .map_err(postgres_error)?;
     if let Some(row) = sqlx::query(
         "SELECT entity_version, server_sequence, event_id, correlation_id,
-                caused_by_kind, caused_by_id
+                caused_by_kind, caused_by_id, payload_digest, operation_kind
            FROM aequora_applied_operations
           WHERE tenant_id = $1 AND operation_id = $2",
     )
@@ -1534,6 +1994,19 @@ async fn prepare_commit_in_transaction(
         if stored_lineage != commit.operation_lineage {
             return Err(StoreError::permanent(
                 "retry changed operation lineage for an existing OperationId",
+            ));
+        }
+        let payload_digest = row
+            .try_get::<Vec<u8>, _>("payload_digest")
+            .map_err(postgres_error)?;
+        let operation_kind = row
+            .try_get::<i32, _>("operation_kind")
+            .map_err(postgres_error)?;
+        if !ledger::same_payload(&payload_digest, &commit.command_digest)
+            || operation_kind != i32::from(commit.operation_kind)
+        {
+            return Err(StoreError::permanent(
+                "OperationId reuse changed the canonical payload digest or operation kind",
             ));
         }
         return Ok(Some(CommitOutcome::Duplicate(ack_from_row(
@@ -1570,6 +2043,7 @@ async fn persist_commit_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     commit: &CommitOperation,
     authoritative_payload: &[u8],
+    side_effect_intents: &[PostgresSideEffectIntent],
 ) -> Result<OperationAck, StoreError> {
     let next_version = to_i64(commit.next_version.get(), "next entity version")?;
     let (operation_cause_kind, operation_cause_id) = lineage_ref_columns(commit.operation_lineage);
@@ -1640,7 +2114,12 @@ async fn persist_commit_in_transaction(
     .await
     .map_err(postgres_error)?;
     sqlx::query(
-        "INSERT INTO aequora_applied_operations (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_version, scope_id, server_sequence, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "INSERT INTO aequora_applied_operations
+            (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id,
+             entity_version, scope_id, server_sequence, authority_id, authority_epoch,
+             payload_digest, operation_kind, schema_version, status, outcome_bytes,
+             handler_version)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,'committed',$14,1)",
     )
     .bind(commit.tenant_id.as_uuid())
     .bind(commit.operation_id.as_uuid())
@@ -1653,9 +2132,33 @@ async fn persist_commit_in_transaction(
     .bind(sequence)
     .bind(authority_id)
     .bind(authority_epoch)
+    .bind(commit.command_digest.as_slice())
+    .bind(i32::from(commit.operation_kind))
+    .bind(authoritative_payload)
     .execute(&mut **transaction)
     .await
     .map_err(postgres_error)?;
+    let mut unique_jobs = std::collections::BTreeSet::new();
+    for intent in side_effect_intents {
+        if !unique_jobs.insert(intent.job_id) {
+            return Err(corrupt(
+                "side-effect intent job IDs must be unique within one operation",
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO aequora_side_effect_jobs
+                (tenant_id,job_id,operation_id,kind,payload,status)
+             VALUES ($1,$2,$3,$4,$5,'pending')",
+        )
+        .bind(commit.tenant_id.as_uuid())
+        .bind(intent.job_id.as_uuid())
+        .bind(commit.operation_id.as_uuid())
+        .bind(i32::from(intent.kind))
+        .bind(&intent.payload)
+        .execute(&mut **transaction)
+        .await
+        .map_err(postgres_error)?;
+    }
     sqlx::query(
         "INSERT INTO aequora_audit_log (tenant_id, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, actor_id, device_id, operation_kind, entity_type, entity_id, entity_version, command_digest, physical_ms, logical_clock, clock_node, authority_id, authority_epoch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
     )
@@ -1950,25 +2453,23 @@ impl PostgresBackend for SqlxPostgresBackend {
 
     #[allow(clippy::too_many_lines)]
     async fn commit_operation(&self, commit: CommitOperation) -> Result<CommitOutcome, StoreError> {
-        const MAX_TRANSACTION_ATTEMPTS: u32 = 3;
-        if !commit.has_valid_version_transition() {
-            return Err(corrupt(
-                "authoritative entity version must advance by exactly one",
-            ));
-        }
+        validate_commit(&commit)?;
+        let transaction_started = Instant::now();
         let mut attempt = 1_u32;
         loop {
             let result: Result<CommitOutcome, StoreError> = async {
+                let acquire_started = Instant::now();
                 let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+                self.metrics.record_pool_wait(acquire_started.elapsed());
                 if let Some(outcome) =
                     prepare_commit_in_transaction(&mut transaction, &commit).await?
                 {
                     transaction.commit().await.map_err(postgres_error)?;
                     return Ok(outcome);
                 }
-                let authoritative_payload =
+                let (authoritative_payload, side_effect_intents) =
                     match self.commit_hook.apply(&mut transaction, &commit).await {
-                        Ok(outcome) => outcome.into_authoritative_payload(),
+                        Ok(outcome) => outcome.into_parts(),
                         Err(PostgresCommitHookError::Rejected(rejection)) => {
                             transaction.rollback().await.map_err(postgres_error)?;
                             return Ok(CommitOutcome::Rejected(rejection));
@@ -1979,6 +2480,7 @@ impl PostgresBackend for SqlxPostgresBackend {
                     &mut transaction,
                     &commit,
                     &authoritative_payload,
+                    &side_effect_intents,
                 )
                 .await?;
                 transaction.commit().await.map_err(postgres_error)?;
@@ -1987,11 +2489,24 @@ impl PostgresBackend for SqlxPostgresBackend {
             .await;
             match result {
                 Err(error)
-                    if attempt < MAX_TRANSACTION_ATTEMPTS && error.requires_transaction_retry() =>
+                    if attempt < self.transaction_config.retry_limit
+                        && error.requires_transaction_retry() =>
                 {
+                    self.metrics.retry(error.reason);
                     attempt = attempt.saturating_add(1);
                 }
-                result => return result,
+                result => {
+                    self.metrics
+                        .record_transaction(transaction_started.elapsed());
+                    if let Ok(outcome) = &result {
+                        match outcome {
+                            CommitOutcome::Applied(_) => self.metrics.committed(),
+                            CommitOutcome::Duplicate(_) => self.metrics.duplicate(),
+                            CommitOutcome::VersionChanged { .. } | CommitOutcome::Rejected(_) => {}
+                        }
+                    }
+                    return result;
+                }
             }
         }
     }
@@ -2021,6 +2536,9 @@ impl PostgresBackend for SqlxPostgresBackend {
         limit: usize,
         max_payload_bytes: usize,
     ) -> Result<ChangePage, StoreError> {
+        let scan_started = Instant::now();
+        let limit = limit.min(self.journal_config.pull_batch_limit);
+        let max_payload_bytes = max_payload_bytes.min(self.journal_config.pull_payload_bytes);
         let query_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
         let rows = sqlx::query(
             "SELECT sequence, operation_id, event_id, correlation_id, caused_by_kind, caused_by_id, entity_type, entity_id, entity_version, change_kind, payload, physical_ms, logical_clock, clock_node, MAX(sequence) OVER () AS journal_head FROM aequora_sync_events WHERE tenant_id = $1 AND scope_id = $2 AND sequence > $3 ORDER BY sequence LIMIT $4",
@@ -2058,12 +2576,14 @@ impl PostgresBackend for SqlxPostgresBackend {
             changes.push(remote_change_from_row(tenant, scope, &row, payload)?);
         }
         let next_sequence = changes.last().map_or(sequence, |change| change.sequence);
-        Ok(ChangePage {
+        let page = ChangePage {
             changes,
             next_sequence,
             journal_head,
             has_more,
-        })
+        };
+        self.metrics.record_cursor_scan(scan_started.elapsed());
+        Ok(page)
     }
 
     async fn create_snapshot(
@@ -2226,14 +2746,72 @@ impl PostgresBackend for SqlxPostgresBackend {
         scope: SyncScopeId,
         through: Sequence,
     ) -> Result<u64, StoreError> {
-        let through = to_i64(through.0, "compaction cursor")?;
         let mut transaction = self.pool.begin().await.map_err(postgres_error)?;
+        let requested = to_i64(through.0, "compaction cursor")?;
+        let now_unix_ms: i64 =
+            sqlx::query_scalar("SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT")
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(postgres_error)?;
+        let active_floor = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MIN(ack_sequence) FROM aequora_retention_leases
+              WHERE tenant_id=$1 AND scope_id=$2 AND lease_expiry_unix_ms>$3",
+        )
+        .bind(tenant.as_uuid())
+        .bind(scope.as_uuid())
+        .bind(now_unix_ms)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        let policy = sqlx::query(
+            "SELECT retain_from_sequence,legal_hold FROM aequora_retention_policies
+              WHERE tenant_id=$1 AND scope_id=$2 FOR UPDATE",
+        )
+        .bind(tenant.as_uuid())
+        .bind(scope.as_uuid())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(postgres_error)?;
+        let mut safe_through = active_floor.map_or(requested, |floor| requested.min(floor));
+        if let Some(policy) = policy {
+            if policy
+                .try_get::<bool, _>("legal_hold")
+                .map_err(postgres_error)?
+            {
+                safe_through = 0;
+            } else {
+                let retain_from = policy
+                    .try_get::<i64, _>("retain_from_sequence")
+                    .map_err(postgres_error)?;
+                safe_through = safe_through.min(retain_from.saturating_sub(1).max(0));
+            }
+        }
+        if safe_through > 0 {
+            let bootstrap_available: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM aequora_snapshots
+                     WHERE tenant_id=$1 AND scope_id=$2
+                       AND publication_status='published' AND cursor_sequence >= $3
+                 )",
+            )
+            .bind(tenant.as_uuid())
+            .bind(scope.as_uuid())
+            .bind(safe_through)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(postgres_error)?;
+            if !bootstrap_available {
+                return Err(StoreError::permanent(
+                    "journal compaction requires a published bootstrap path at the safe floor",
+                ));
+            }
+        }
         sqlx::query(
             "INSERT INTO aequora_journal_floors (tenant_id, scope_id, minimum_cursor) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, scope_id) DO UPDATE SET minimum_cursor = GREATEST(aequora_journal_floors.minimum_cursor, EXCLUDED.minimum_cursor)",
         )
         .bind(tenant.as_uuid())
         .bind(scope.as_uuid())
-        .bind(through)
+        .bind(safe_through)
         .execute(&mut *transaction)
         .await
         .map_err(postgres_error)?;
@@ -2242,7 +2820,7 @@ impl PostgresBackend for SqlxPostgresBackend {
         )
         .bind(tenant.as_uuid())
         .bind(scope.as_uuid())
-        .bind(through)
+        .bind(safe_through)
         .execute(&mut *transaction)
         .await
         .map_err(postgres_error)?
@@ -2633,6 +3211,9 @@ pub struct PostgresStore<B> {
     backend: B,
 }
 
+/// Official Part 37 authoritative PostgreSQL/Neon adapter composition.
+pub type PostgresAuthorityStore = PostgresStore<SqlxPostgresBackend>;
+
 impl<B> PostgresStore<B> {
     /// Wraps a `PostgreSQL` backend without leaking its connection types.
     #[must_use]
@@ -2826,7 +3407,8 @@ impl<B: PostgresBackend> AuthoritativeIntegritySource for PostgresStore<B> {
 #[cfg(test)]
 mod tests {
     use super::{
-        POSTGRES_MIGRATIONS, POSTGRES_STORAGE_ADAPTER_MANIFEST, PgSslMode,
+        NEON_OPERATIONAL_PROFILE, POSTGRES_AUTHORITY_FULL_PROFILE, POSTGRES_MIGRATIONS,
+        POSTGRES_STORAGE_ADAPTER_MANIFEST, PgSslMode, PostgresAdapterConfig,
         PostgresNotifyHintBroker, PostgresPoolConfig, adapter_sdk, migration_checksum,
         parse_connect_options, postgres_transaction_retry_reason, verify_migration_record,
     };
@@ -2848,6 +3430,17 @@ mod tests {
                 .known_limitations
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn part_37_profiles_and_default_configuration_are_safe() {
+        assert_eq!(POSTGRES_AUTHORITY_FULL_PROFILE, "PostgresAuthorityFull");
+        assert_eq!(NEON_OPERATIONAL_PROFILE, "NeonOperationalProfile");
+        assert!(PostgresAdapterConfig::default().validate().is_ok());
+
+        let mut invalid = PostgresAdapterConfig::default();
+        invalid.pool.max_connections = 0;
+        assert!(invalid.validate().is_err());
     }
 
     #[test]
