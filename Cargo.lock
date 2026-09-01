@@ -184,10 +184,13 @@ dependencies = [
  "aequora-admin",
  "aequora-authority",
  "aequora-bootstrap",
+ "aequora-cli-core",
  "aequora-compat",
  "aequora-conformance",
+ "aequora-devtools",
  "aequora-diagnostics",
  "aequora-feed",
+ "aequora-inspect",
  "aequora-integrity",
  "aequora-legacy",
  "aequora-migration",
@@ -204,6 +207,16 @@ dependencies = [
  "ron",
  "serde",
  "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "aequora-cli-core"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -400,6 +413,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-devtools"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -487,6 +508,14 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "aequora-inspect"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
