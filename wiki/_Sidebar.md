@@ -57,3 +57,39 @@
 * [[28: Change Feeds|28-multi-consumer-change-feed-architecture]]
 * [[29: Developer Governance|29-schema-operation-registry-developer-governance]]
 * [[30: Certification Suites|30-certification-conformance-ecosystem-architecture]]
+
+---
+
+### 🧩 Platform & Adapters
+* [[31: Mobile Runtime|31-android-ios-mobile-runtime-platform-architecture]]
+* [[32: Desktop Runtime|32-linux-windows-macos-desktop-runtime-architecture]]
+* [[33: Local Storage|33-cross-platform-local-storage-mobile-desktop-architecture]]
+* [[34: Workspace Boundaries|34-reference-implementation-workspace-crate-boundary-architecture]]
+* [[35: Public Rust SDK|35-public-rust-api-sdk-stability-architecture]]
+* [[36: Storage Adapter SDK|36-storage-adapter-sdk-official-adapter-architecture]]
+* [[37: PostgreSQL & Neon|37-postgresql-neon-authoritative-adapter-detailed-architecture]]
+* [[38: Stoolap Persistence|38-stoolap-embedded-local-replica-client-persistence-architecture]]
+* [[39: Axum Server|39-axum-server-integration-middleware-architecture]]
+* [[40: Dioxus Client|40-dioxus-client-integration-reactive-state-architecture]]
+
+---
+
+### 🛠️ Developer Toolchain & Config
+* [[41: Developer CLI|41-cli-developer-toolchain-architecture]]
+* [[42: SQLite Adapter|42-sqlite-embedded-local-adapter-architecture]]
+* [[43: Config & Feature Flags|43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture]]
+
+---
+
+### 🌐 Operations & Telemetry
+* [[44: Packaging & Release|44-packaging-distribution-release-engineering-artifact-signing-update-channels-cross-platform-delivery-architecture]]
+* [[45: Deployment Topologies|45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture]]
+* [[46: Observability & SLOs|46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture]]
+* [[47: Benchmarking & Capacity|47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture]]
+
+---
+
+### 🏆 Verification & Productization
+* [[48: Testkit & Quality Gates|48-testkit-verification-fault-injection-property-model-integration-e2e-release-quality-gates-architecture]]
+* [[49: Supply Chain & SBOM|49-licensing-dependency-policy-supply-chain-security-crate-governance-sbom-reproducible-builds-third-party-risk-architecture]]
+* [[50: GA Scope & Evolution|50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture]]
