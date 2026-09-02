@@ -1,2 +1,2 @@
 ---
-*Aequora Distributed Synchronization Engine — Architectural Specification Series (Parts 01–30)*
+*Aequora Distributed Synchronization Engine — Architectural Specification Series (Parts 01–50)*
