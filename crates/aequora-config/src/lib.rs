@@ -1,5 +1,9 @@
 //! Validated, secret-free RON configuration for Aequora runtime components.
 
+mod part43;
+
+pub use part43::*;
+
 use aequora_admission::AdmissionPolicy;
 use aequora_client::{
     AdaptiveBatchConfig, ClientConfig, MultiProcessCoordinatorConfig, RetryConfig,
