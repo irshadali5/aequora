@@ -712,11 +712,31 @@ pub enum InvariantId {
     SqliteOutboxPreservation,
     /// `SQLite` and Stoolap expose identical neutral adapter behavior.
     SqliteAdapterParity,
+    /// Configuration cannot disable correctness, authority, isolation, or idempotency.
+    ConfigCorrectnessPreservation,
+    /// Secret values remain behind redacting secret-aware abstractions.
+    ConfigSecretRedaction,
+    /// Only fully validated snapshots become effective configuration.
+    ConfigValidatedPublication,
+    /// Runtime reload publishes one coherent generation atomically.
+    ConfigAtomicReload,
+    /// Durable identities remain state rather than editable configuration.
+    ConfigDurableIdentityIsolation,
+    /// Feature flags cannot silently redefine durable semantics.
+    ConfigFeatureSemanticSafety,
+    /// Production rejects development-only unsafe facilities.
+    ConfigProductionSafety,
+    /// Adapter settings require declared certified capabilities.
+    ConfigAdapterCapabilitySafety,
+    /// Failed reload preserves the previous valid generation.
+    ConfigFailedReloadPreservation,
+    /// Client flags cannot grant entitlement or weaken server security policy.
+    ConfigAuthoritativePolicy,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 351] = [
+    pub const ALL: [Self; 361] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1068,6 +1088,16 @@ impl InvariantId {
         Self::SqliteCursorAtomicity,
         Self::SqliteOutboxPreservation,
         Self::SqliteAdapterParity,
+        Self::ConfigCorrectnessPreservation,
+        Self::ConfigSecretRedaction,
+        Self::ConfigValidatedPublication,
+        Self::ConfigAtomicReload,
+        Self::ConfigDurableIdentityIsolation,
+        Self::ConfigFeatureSemanticSafety,
+        Self::ConfigProductionSafety,
+        Self::ConfigAdapterCapabilitySafety,
+        Self::ConfigFailedReloadPreservation,
+        Self::ConfigAuthoritativePolicy,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1426,6 +1456,16 @@ impl InvariantId {
             Self::SqliteCursorAtomicity => "AEQ-INV-SQLITE003",
             Self::SqliteOutboxPreservation => "AEQ-INV-SQLITE004",
             Self::SqliteAdapterParity => "AEQ-INV-SQLITE005",
+            Self::ConfigCorrectnessPreservation => "AEQ-INV-CONFIG001",
+            Self::ConfigSecretRedaction => "AEQ-INV-CONFIG002",
+            Self::ConfigValidatedPublication => "AEQ-INV-CONFIG003",
+            Self::ConfigAtomicReload => "AEQ-INV-CONFIG004",
+            Self::ConfigDurableIdentityIsolation => "AEQ-INV-CONFIG005",
+            Self::ConfigFeatureSemanticSafety => "AEQ-INV-CONFIG006",
+            Self::ConfigProductionSafety => "AEQ-INV-CONFIG007",
+            Self::ConfigAdapterCapabilitySafety => "AEQ-INV-CONFIG008",
+            Self::ConfigFailedReloadPreservation => "AEQ-INV-CONFIG009",
+            Self::ConfigAuthoritativePolicy => "AEQ-INV-CONFIG010",
         }
     }
 
@@ -2473,6 +2513,36 @@ impl InvariantId {
             Self::SqliteAdapterParity => {
                 "SQLite and Stoolap expose identical synchronization behavior through neutral adapter contracts"
             }
+            Self::ConfigCorrectnessPreservation => {
+                "configuration cannot disable correctness authority tenant isolation or idempotency invariants"
+            }
+            Self::ConfigSecretRedaction => {
+                "secrets use secret-aware resolution and remain redacted from ordinary diagnostics and CLI output"
+            }
+            Self::ConfigValidatedPublication => {
+                "only fully parsed and validated configuration snapshots become effective"
+            }
+            Self::ConfigAtomicReload => {
+                "runtime configuration publication exposes one complete generation to every consumer"
+            }
+            Self::ConfigDurableIdentityIsolation => {
+                "authority device store and generation identities remain durable state rather than editable deployment configuration"
+            }
+            Self::ConfigFeatureSemanticSafety => {
+                "feature flags cannot silently redefine durable operation semantics"
+            }
+            Self::ConfigProductionSafety => {
+                "production rejects authentication bypass destructive reset fault injection and unsafe TLS modes"
+            }
+            Self::ConfigAdapterCapabilitySafety => {
+                "adapter-specific configuration activates only against declared certified capabilities"
+            }
+            Self::ConfigFailedReloadPreservation => {
+                "a failed runtime reload leaves the previous valid configuration generation active"
+            }
+            Self::ConfigAuthoritativePolicy => {
+                "client feature flags cannot grant business entitlement or weaken authoritative server security policy"
+            }
         }
     }
 
@@ -2836,6 +2906,16 @@ impl InvariantId {
             Self::SqliteCursorAtomicity => 348,
             Self::SqliteOutboxPreservation => 349,
             Self::SqliteAdapterParity => 350,
+            Self::ConfigCorrectnessPreservation => 351,
+            Self::ConfigSecretRedaction => 352,
+            Self::ConfigValidatedPublication => 353,
+            Self::ConfigAtomicReload => 354,
+            Self::ConfigDurableIdentityIsolation => 355,
+            Self::ConfigFeatureSemanticSafety => 356,
+            Self::ConfigProductionSafety => 357,
+            Self::ConfigAdapterCapabilitySafety => 358,
+            Self::ConfigFailedReloadPreservation => 359,
+            Self::ConfigAuthoritativePolicy => 360,
         }
     }
 }
@@ -2887,7 +2967,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 351] = [
+pub static REGISTRY: [InvariantEntry; 361] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5344,6 +5424,76 @@ pub static REGISTRY: [InvariantEntry; 351] = [
         "sqlite_reference_differential_matrix",
         "sqlite_local_adapter_conformance",
         "sqlite_semantic_drift_total",
+    ),
+    entry(
+        InvariantId::ConfigCorrectnessPreservation,
+        "config_correctness_preservation",
+        "unsafe_switch_absence_matrix",
+        "configuration_correctness_gate",
+        "config_correctness_rejection_total",
+    ),
+    entry(
+        InvariantId::ConfigSecretRedaction,
+        "config_secret_redaction",
+        "secret_marker_leak_matrix",
+        "secret_provider_redaction_contract",
+        "config_secret_leak_total",
+    ),
+    entry(
+        InvariantId::ConfigValidatedPublication,
+        "config_validated_publication",
+        "invalid_bounds_never_effective",
+        "configuration_typestate_contract",
+        "config_invalid_publication_total",
+    ),
+    entry(
+        InvariantId::ConfigAtomicReload,
+        "config_atomic_reload",
+        "concurrent_generation_observation",
+        "runtime_snapshot_publication_contract",
+        "config_mixed_generation_total",
+    ),
+    entry(
+        InvariantId::ConfigDurableIdentityIsolation,
+        "config_durable_identity_isolation",
+        "editable_identity_absence_matrix",
+        "configuration_schema_identity_gate",
+        "config_identity_override_total",
+    ),
+    entry(
+        InvariantId::ConfigFeatureSemanticSafety,
+        "config_feature_semantic_safety",
+        "semantic_rollout_rejection_matrix",
+        "feature_definition_safety_contract",
+        "feature_semantic_drift_total",
+    ),
+    entry(
+        InvariantId::ConfigProductionSafety,
+        "config_production_safety",
+        "production_unsafe_facility_matrix",
+        "production_profile_validation_contract",
+        "config_production_bypass_total",
+    ),
+    entry(
+        InvariantId::ConfigAdapterCapabilitySafety,
+        "config_adapter_capability_safety",
+        "unsupported_capability_matrix",
+        "adapter_configuration_validation_contract",
+        "config_adapter_downgrade_total",
+    ),
+    entry(
+        InvariantId::ConfigFailedReloadPreservation,
+        "config_failed_reload_preservation",
+        "invalid_reload_generation_matrix",
+        "runtime_reload_rollback_contract",
+        "config_failed_reload_activation_total",
+    ),
+    entry(
+        InvariantId::ConfigAuthoritativePolicy,
+        "config_authoritative_policy",
+        "flag_entitlement_intersection_matrix",
+        "feature_entitlement_separation_contract",
+        "config_client_policy_grant_total",
     ),
 ];
 
