@@ -60,10 +60,18 @@ part-specific completion reports.
 | 40 | [Dioxus client integration](sys-arch/40-dioxus-client-integration-reactive-state-architecture.md) |
 | 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
 | 42 | [SQLite embedded local adapter](sys-arch/42-sqlite-embedded-local-adapter-architecture.md) |
+| 43 | [Configuration, secrets, runtime policy, and feature flags](sys-arch/43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture.md) |
+| 44 | [Packaging, distribution, and release engineering](sys-arch/44-packaging-distribution-release-engineering-artifact-signing-update-channels-cross-platform-delivery-architecture.md) |
+| 45 | [Deployment topologies and operational environments](sys-arch/45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture.md) |
+| 46 | [Observability, metrics, distributed tracing, and SLOs](sys-arch/46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture.md) |
+| 47 | [Benchmarking, performance regression, and capacity planning](sys-arch/47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture.md) |
+| 48 | [Testkit, verification, fault injection, and quality gates](sys-arch/48-testkit-verification-fault-injection-property-model-integration-e2e-release-quality-gates-architecture.md) |
+| 49 | [Licensing, dependency policy, and supply-chain security](sys-arch/49-licensing-dependency-policy-supply-chain-security-crate-governance-sbom-reproducible-builds-third-party-risk-architecture.md) |
+| 50 | [Aequora v1 scope, productization milestones, and GA](sys-arch/50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture.md) |
 
 ## Repository status
 
-The reusable implementation is complete through Part 42. See the [implementation plan](plan.md)
+The reusable implementation is complete through Part 43. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
 evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
 each built binary and environment and is not inferred from repository ownership.
