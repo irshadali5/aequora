@@ -96,6 +96,7 @@ pub enum ConformanceProfile {
     SQLiteLocalCore,
     SQLiteDesktopLocalFull,
     SQLiteMobileLocalFull,
+    ConfigurationRuntimeFull,
 }
 
 impl ConformanceProfile {
@@ -131,6 +132,7 @@ impl ConformanceProfile {
             Self::SQLiteLocalCore => 77,
             Self::SQLiteDesktopLocalFull => 78,
             Self::SQLiteMobileLocalFull => 79,
+            Self::ConfigurationRuntimeFull => 80,
         })
     }
 
@@ -162,10 +164,10 @@ impl ConformanceProfile {
             | Self::StoolapMobileLocalFull
             | Self::AxumServerFull
             | Self::DioxusClientFull
-            | Self::CliToolchainFull => CertificationTier::FullSync,
-            Self::SQLiteDesktopLocalFull | Self::SQLiteMobileLocalFull => {
-                CertificationTier::FullSync
-            }
+            | Self::CliToolchainFull
+            | Self::SQLiteDesktopLocalFull
+            | Self::SQLiteMobileLocalFull
+            | Self::ConfigurationRuntimeFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -779,6 +781,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::SQLiteDesktopLocalFull | ConformanceProfile::SQLiteMobileLocalFull => {
             matches!(definition.id.0, 109..=113)
         }
+        ConformanceProfile::ConfigurationRuntimeFull => matches!(definition.id.0, 114..=123),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -855,7 +858,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::CliToolchainFull
         | ConformanceProfile::SQLiteLocalCore
         | ConformanceProfile::SQLiteDesktopLocalFull
-        | ConformanceProfile::SQLiteMobileLocalFull => false,
+        | ConformanceProfile::SQLiteMobileLocalFull
+        | ConformanceProfile::ConfigurationRuntimeFull => false,
     }
 }
 
@@ -1777,6 +1781,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-SQLITE005",
         FullSync,
         Some("sqlite-local-full")
+    ),
+    test_definition!(
+        114,
+        "config_correctness_preservation",
+        ServerRuntime,
+        "AEQ-INV-CONFIG001",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        115,
+        "config_secret_redaction",
+        ServerRuntime,
+        "AEQ-INV-CONFIG002",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        116,
+        "config_validated_publication",
+        ServerRuntime,
+        "AEQ-INV-CONFIG003",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        117,
+        "config_atomic_reload",
+        ServerRuntime,
+        "AEQ-INV-CONFIG004",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        118,
+        "config_durable_identity_isolation",
+        ServerRuntime,
+        "AEQ-INV-CONFIG005",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        119,
+        "config_feature_semantic_safety",
+        ServerRuntime,
+        "AEQ-INV-CONFIG006",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        120,
+        "config_production_safety",
+        ServerRuntime,
+        "AEQ-INV-CONFIG007",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        121,
+        "config_adapter_capability_safety",
+        StorageAdapter,
+        "AEQ-INV-CONFIG008",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        122,
+        "config_failed_reload_preservation",
+        ServerRuntime,
+        "AEQ-INV-CONFIG009",
+        FullSync,
+        Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        123,
+        "config_authoritative_policy",
+        ServerRuntime,
+        "AEQ-INV-CONFIG010",
+        FullSync,
+        Some("configuration-runtime-full")
     ),
 ];
 
