@@ -1,0 +1,26 @@
+(
+    schema_version: 1,
+    environment: Production,
+    http: (
+        bind: "0.0.0.0:8443",
+        trusted_proxies: [],
+        tls: DirectTls(
+            certificate: Environment("AEQUORA_TLS_CERT"),
+            private_key: Environment("AEQUORA_TLS_PRIVATE_KEY"),
+        ),
+    ),
+    authority: Postgres(
+        maximum_connections: 32,
+        credential: Environment("AEQUORA_DATABASE_URL"),
+    ),
+    local_store: Sqlite,
+    runtime: (
+        batch_size: 256,
+        request_timeout: 15000,
+        worker_limit: 8,
+        log_level: Info,
+    ),
+    development: [],
+    require_snapshot_generation_swap: false,
+    features: [],
+)
