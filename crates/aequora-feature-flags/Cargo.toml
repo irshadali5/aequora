@@ -1,0 +1,16 @@
+[package]
+name = "aequora-feature-flags"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic, semantics-preserving runtime feature rollout for Aequora"
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
