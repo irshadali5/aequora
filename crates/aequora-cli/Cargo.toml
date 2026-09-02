@@ -26,6 +26,7 @@ aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-cli-core = { version = "0.1.0", path = "../aequora-cli-core" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
+aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
@@ -43,6 +44,7 @@ aequora-schema = { version = "0.1.0", path = "../aequora-schema" }
 aequora-security = { version = "0.1.0", path = "../aequora-security" }
 aequora-devtools = { version = "0.1.0", path = "../aequora-devtools" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
 hex.workspace = true
 ron.workspace = true
 serde.workspace = true
