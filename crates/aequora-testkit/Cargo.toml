@@ -17,6 +17,7 @@ aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-client = { version = "0.1.0", path = "../aequora-client" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
 aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
 aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
@@ -33,6 +34,7 @@ aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
 aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
+aequora-feature-flags = { version = "0.1.0", path = "../aequora-feature-flags" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
 aequora-live = { version = "0.1.0", path = "../aequora-live" }
@@ -45,6 +47,7 @@ aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime"
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
+aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
@@ -52,6 +55,7 @@ aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-security = { version = "0.1.0", path = "../aequora-security" }
+aequora-secrets = { version = "0.1.0", path = "../aequora-secrets" }
 aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
