@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  push:
+  # push:
   pull_request:
   schedule:
     - cron: "17 2 * * *"
@@ -153,6 +153,8 @@ jobs:
         run: bash scripts/check-dioxus-client-architecture.sh
       - name: Enforce CLI and developer toolchain contracts
         run: bash scripts/check-cli-toolchain-architecture.sh
+      - name: Enforce configuration, secrets, runtime policy, and feature rollout contracts
+        run: bash scripts/check-configuration-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
