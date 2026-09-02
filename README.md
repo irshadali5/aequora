@@ -4,8 +4,8 @@
 [![Rust 1.87+](https://img.shields.io/badge/MSRV-1.87.0-blue.svg)](https://www.rust-lang.org)
 [![Edition 2024](https://img.shields.io/badge/edition-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
-[![Workspace](https://img.shields.io/badge/workspace-66%20crates-purple.svg)](crates/)
-[![Architecture Wiki](https://img.shields.io/badge/architecture-30%20part%20wiki-brightgreen.svg)](wiki/Home.md)
+[![Workspace](https://img.shields.io/badge/workspace-94%20crates-purple.svg)](crates/)
+[![Architecture Wiki](https://img.shields.io/badge/architecture-50%20part%20wiki-brightgreen.svg)](wiki/Home.md)
 
 Aequora is a database-neutral, server-authoritative, local-first synchronization engine written in
 Rust. It synchronizes typed domain operations and authoritative state transitions—not SQL,
@@ -57,8 +57,9 @@ authorization, formal data consistency, or database portability.
 
 `rust` · `distributed-systems` · `local-first` · `offline-first` · `sync-engine` ·
 `server-authoritative` · `crdt` · `event-sourcing` · `anti-entropy` · `merkle-tree` ·
-`database-agnostic` · `postgresql` · `neon` · `stoolap` · `quic` · `axum` · `formal-verification` ·
-`audit-logging` · `zero-knowledge-encryption` · `resumable-streaming` · `multi-region`
+`database-agnostic` · `postgresql` · `neon` · `stoolap` · `sqlite` · `quic` · `axum` ·
+`formal-verification` · `audit-logging` · `zero-knowledge-encryption` · `resumable-streaming` ·
+`multi-region` · `mobile-runtime` · `desktop-runtime` · `developer-toolchain` · `feature-flags`
 
 ### Core Subject Areas
 
@@ -66,10 +67,13 @@ authorization, formal data consistency, or database portability.
   Lamport clocks, hybrid logical timestamps (HLC), dependency DAGs, and causal cut consistency.
 - **Anti-Entropy & Self-Repair**: Range-based Merkle tree exchange, state fingerprinting, divergence
   detection, and automatic self-repair protocols.
-- **Local Coordination & Storage**: Multi-process lock election across browser tabs/processes,
-  offline operation queue compaction, timeline rebasing, and Stoolap embedded storage.
+- **Local Coordination & Unified Storage**: Multi-process lock election across browser tabs/processes,
+  offline operation queue compaction, timeline rebasing, Stoolap embedded storage, SQLite local replicas,
+  and storage adapter SDK contracts with pluggable encryption and backup suites.
+- **Platform Runtimes & OS Integration**: Native mobile runtimes for Android and iOS, desktop runtimes
+  for Linux, Windows, and macOS, reactive Dioxus UI state integration, and background sync agents via IPC.
 - **Transport & Networking**: AEQ1 binary framed Postcard codec over HTTPS (Axum) and multiplexed
-  QUIC streams (Quinn), with adaptive rate limiting and pre-body admission control.
+  QUIC streams (Quinn), with adaptive rate limiting, token-bucket admission, and pre-body admission control.
 - **Snapshot & Bulk Interoperability**: Resumable streaming snapshots, cold-replica bootstrap,
   out-of-band artifact transfer, and canonical schema migration mappings.
 - **Audit, Governance & Security**: Tamper-evident cryptographic audit logs, envelope encryption,
@@ -78,6 +82,12 @@ authorization, formal data consistency, or database portability.
   protocol framing, multi-region single-writer topologies, and resource-constrained client profiles.
 - **Protocol Governance & Workflows**: Runtime protocol negotiation, schema registries, transactional
   outbox patterns, and durable distributed sagas.
+- **Developer Toolchain & Configuration**: Unified developer CLI (`aequora-cli`), trace verification,
+  database adapter inspection, and strict secret-free RON configuration with out-of-band secrets,
+  runtime policy engines, and dynamic feature flags.
+- **Operations, Telemetry & Quality Gates**: Hermetic packaging, cryptographic artifact signing,
+  production topologies (HA, multi-region, air-gapped), distributed tracing, Prometheus metrics,
+  and fault-injection verification gates.
 
 ---
 
@@ -278,31 +288,34 @@ This demonstrates assembly. The runnable examples also create and synchronize a 
 
 Select each deployment axis independently:
 
-| Feature | Integration | Primary types |
+| Feature / Crate | Integration | Primary types |
 |---|---|---|
-| default `postcard` | AEQ1 framed binary protocol | codec and wire DTOs |
+| `aequora` (core) | Stable public client/server facade | `AequoraClient`, `AequoraServer`, `DomainRegistry` |
 | `stoolap` | Embedded local/client persistence | `StoolapDatabase`, `StoolapStore` |
 | `sqlite` | Portable embedded local/client persistence | `SQLiteDatabase`, `SQLiteConfig` |
 | `postgres` | PostgreSQL or Neon authority | `SqlxPostgresBackend`, `PostgresStore` |
 | `axum` | HTTP server gateway | `router_with_lifecycle`, `ServerLifecycle` |
 | `http-client` | Bounded Reqwest transport | `HttpTransport`, `RequestHeaders` |
-| `quic` | Quinn request/snapshot/hint transport | `QuicTransport`, `QuicServer` |
+| `macros` | Derive macros for aggregates & operations | `#[derive(AequoraAggregate)]`, `#[derive(AequoraOperation)]` |
 | `testkit` | Deterministic reference components | in-memory stores and adapter contracts |
-| `ron` / `json` | Diagnostic codecs | optional human-readable encodings |
-| `tracing` | Structured payload-free tracing | `TracingObserver` |
-| `record-sync` | Optional canonical record mapping/migration | `SchemaRegistry`, `SchemaMap`, `CanonicalExport` |
+| `aequora-quic` | Quinn request/snapshot/hint transport | `QuicTransport`, `QuicServer` |
+| `aequora-dioxus` | Reactive local-first state for Dioxus UI | `SyncProvider`, `use_durable_query` |
+| `aequora-mobile-runtime` | Android & iOS platform bridges | `MobileSyncEngine`, `MobilePlatformLifecycle` |
+| `aequora-desktop-runtime` | Desktop OS runtime & IPC agent mode | `DesktopHost`, `IpcClientSession` |
+| `aequora-config` | Strict validated RON configuration | `AequoraConfig`, `RuntimePolicy` |
+| `aequora-observability` | Structured payload-free tracing & metrics | `TracingObserver`, `MetricRegistry` |
 
 Recommended dependencies:
 
 ```toml
-# Native client
-aequora = { version = "0.1", features = ["stoolap", "http-client", "tracing"] }
+# Native desktop client (Stoolap)
+aequora = { version = "0.1", features = ["stoolap", "http-client"] }
 
-# Portable SQLite client
-aequora = { version = "0.1", features = ["sqlite", "http-client", "tracing"] }
+# Portable mobile/desktop client (SQLite)
+aequora = { version = "0.1", features = ["sqlite", "http-client"] }
 
-# Authority server
-aequora = { version = "0.1", features = ["postgres", "axum", "tracing"] }
+# Authority server (PostgreSQL/Neon)
+aequora = { version = "0.1", features = ["postgres", "axum"] }
 
 # End-to-end integration tests
 aequora = { version = "0.1", features = ["stoolap", "postgres", "axum", "http-client", "testkit"] }
@@ -449,24 +462,38 @@ settings.
 
 Database URLs, access tokens, and TLS keys do not belong in this object.
 
+### Storage Adapter SDK & Cross-Platform Engine
+
+Aequora decouples storage engines through `aequora-adapter-sdk` and `aequora-storage-core`. Local persistence engines (Stoolap, SQLite, or custom adapters) share capability manifests, transactional outbox semantics, background storage maintenance (`aequora-storage-maintenance`), encrypted staging directories (`aequora-storage-encryption`), and point-in-time snapshot backup contracts (`aequora-storage-backup`).
+
+### Mobile & Desktop Runtimes
+
+- **Mobile Runtime (`aequora-mobile-runtime`)**: Provides lifecycle-aware, battery-conscious background scheduling for Android (`aequora-platform-android` via JNI) and iOS (`aequora-platform-ios` via Objective-C runtime bridges).
+- **Desktop Runtime (`aequora-desktop-runtime`)**: Supports embedded in-process execution as well as multi-process daemon mode (`aequora-agent`) coordinating across UI windows via local socket IPC (`aequora-ipc-protocol`).
+- **Reactive UI State (`aequora-dioxus`)**: High-performance local-first state hooks (`SyncProvider`, `use_durable_query`) providing optimistic UI updates with bounded cache invalidation.
+
+### Configuration, Secrets, Policy & Feature Flags
+
+`aequora-config` pairs with `aequora-secrets`, `aequora-policy`, and `aequora-feature-flags` to enforce:
+- Secret-free RON configuration schemas validated at compile/boot time.
+- Isolated out-of-band secret resolution (environment, file, or cloud secret managers).
+- Dynamic tenant admission policies and feature flag evaluations without modifying application code.
+
 ## Workspace map
 
-The workspace contains 66 crates managed via `aequora-dev`. The functional areas are:
+The workspace contains 94 crates strictly bounded into 9 architectural layers managed via `aequora-dev`. The functional architecture layers are:
 
-| Functional Area | Crates |
-|---|---|
-| **Facade** | `aequora` |
-| **Core Values, Clocks & Protocol** | `aequora-types`, `aequora-clock`, `aequora-protocol`, `aequora-codec`, `aequora-compat`, `aequora-scope`, `aequora-live`, `aequora-bootstrap`, `aequora-metadata` |
-| **Client & Server Kernel** | `aequora-client`, `aequora-server`, `aequora-authority`, `aequora-executor`, `aequora-validator`, `aequora-admission` |
-| **Storage Contracts & Adapters** | `aequora-store`, `aequora-store-stoolap`, `aequora-store-postgres` |
-| **Network Boundaries & Transport** | `aequora-transport`, `aequora-http`, `aequora-axum`, `aequora-quic`, `aequora-feed` |
-| **Domain Policies & Consensus** | `aequora-crypto`, `aequora-security`, `aequora-profile`, `aequora-replay`, `aequora-audit`, `aequora-governance`, `aequora-conflict`, `aequora-crdt`, `aequora-partition`, `aequora-journal`, `aequora-queue` |
-| **Workflows, Jobs & Side Effects** | `aequora-jobs`, `aequora-workflow`, `aequora-side-effects` |
-| **Record Interoperability & Schema** | `aequora-schema`, `aequora-mapping`, `aequora-migration`, `aequora-registry-types`, `aequora-registry-codegen`, `aequora-registry-generated`, `aequora-registry-cli` |
-| **Topology, Regions & Routing** | `aequora-region`, `aequora-routing`, `aequora-blob`, `aequora-admin` |
-| **Performance, Diagnostics & Control** | `aequora-compute`, `aequora-performance`, `aequora-config`, `aequora-observability`, `aequora-coordination`, `aequora-integrity`, `aequora-scheduler`, `aequora-diagnostics` |
-| **Legacy Interoperability** | `aequora-legacy`, `aequora-legacy-api` |
-| **Verification, Conformance & Tooling** | `aequora-invariants`, `aequora-model`, `aequora-testkit`, `aequora-conformance`, `aequora-macros`, `aequora-cli`, `aequora-dev` |
+| Layer | Crates | Count | Description |
+|---|---|:---:|---|
+| **Foundation** | `aequora-types`, `aequora-schema`, `aequora-invariants`, `aequora-macros`, `aequora-registry-types`, `aequora-scheduler`, `aequora-coordination`, `aequora-compute`, `aequora-storage-core`, `aequora-ipc-protocol`, `aequora-blob`, `aequora-update`, `aequora-secrets`, `aequora-policy`, `aequora-feature-flags` | 15 | Core domain identifiers, schema definitions, formal invariant registries, platform-neutral IPC framing, secrets, runtime policies, and feature flags. |
+| **Protocol Contracts** | `aequora-protocol`, `aequora-codec`, `aequora-transport`, `aequora-clock`, `aequora-scope`, `aequora-operation`, `aequora-compat`, `aequora-authority`, `aequora-security`, `aequora-routing`, `aequora-region`, `aequora-admin`, `aequora-observability`, `aequora-audit`, `aequora-governance`, `aequora-integrity`, `aequora-legacy`, `aequora-conformance`, `aequora-registry-codegen`, `aequora-registry-generated`, `aequora-storage-profile`, `aequora-storage-maintenance`, `aequora-storage-backup`, `aequora-storage-encryption`, `aequora-storage-conformance` | 25 | AEQ1 binary protocol framing, Lamport/HLC clocks, session authorization, audit chains, storage profiles, maintenance routines, and encryption contracts. |
+| **Domain Execution** | `aequora-conflict`, `aequora-crypto`, `aequora-diagnostics`, `aequora-executor`, `aequora-feed`, `aequora-jobs`, `aequora-journal`, `aequora-mapping`, `aequora-metadata`, `aequora-migration`, `aequora-partition`, `aequora-performance`, `aequora-queue`, `aequora-replay`, `aequora-side-effects`, `aequora-validator`, `aequora-workflow` | 17 | Deterministic state execution, conflict resolution policies, journal ledgers, change feeds, saga workflows, outboxes, and record migration. |
+| **Storage Contracts** | `aequora-adapter-sdk`, `aequora-store`, `aequora-blob-store`, `aequora-profile` | 4 | Unified client and authoritative storage contracts, capability manifests, zero-copy blob streaming, and storage profiles. |
+| **Sync Engines** | `aequora-admission`, `aequora-bootstrap`, `aequora-client`, `aequora-crdt`, `aequora-live`, `aequora-server` | 6 | Local-first client sync engine, authoritative exchange server, resumable snapshot streaming, live push hints, and admission control. |
+| **Physical Adapters** | `aequora-store-postgres`, `aequora-store-sqlite`, `aequora-store-stoolap` | 3 | Official persistence implementations: embedded Stoolap replica, portable SQLite replica, and enterprise PostgreSQL/Neon authority. |
+| **Integration Platform** | `aequora-agent`, `aequora-axum`, `aequora-config`, `aequora-desktop-runtime`, `aequora-dioxus`, `aequora-http`, `aequora-legacy-api`, `aequora-mobile-bindings`, `aequora-mobile-runtime`, `aequora-platform-android`, `aequora-platform-ios`, `aequora-platform-linux`, `aequora-platform-macos`, `aequora-platform-windows`, `aequora-quic` | 15 | Axum HTTP server gateway, Reqwest client, Quinn QUIC transport, Dioxus reactive UI state, OS bridges (Android JNI, iOS/macOS Objective-C, Windows, Linux), and background sync agent. |
+| **Applications** | `aequora`, `aequora-cli`, `aequora-cli-core`, `aequora-devtools`, `aequora-inspect`, `aequora-registry-cli` | 6 | Public Rust SDK facade, unified developer CLI toolchain, inspection tools, schema registry CLI, and diagnostics binaries. |
+| **Tooling & Verification** | `aequora-dev`, `aequora-model`, `aequora-testkit` | 3 | Workspace boundary checker and dependency graph governance (`aequora-dev`), state machine model testing (`aequora-model`), and end-to-end simulation testkit (`aequora-testkit`). |
 
 Run `cargo run -q -p aequora-dev -- summary` for the live workspace graph or
 `cargo run -q -p aequora-dev -- graph aequora-client` for one crate's dependency direction.
@@ -498,7 +525,9 @@ Payload-free built-in adapter diagnostics are available without database credent
 cargo run -q -p aequora-cli -- doctor adapters
 cargo run -q -p aequora-cli -- inspect adapters
 cargo run -q -p aequora-cli -- inspect adapter stoolap
+cargo run -q -p aequora-cli -- inspect adapter sqlite
 cargo run -q -p aequora-cli -- verify pair stoolap postgresql
+cargo run -q -p aequora-cli -- verify pair sqlite postgresql
 cargo run -q -p aequora-cli -- verify export ./export.postcard ./schema.ron
 cargo run -q -p aequora-cli -- verify model
 cargo run -q -p aequora-cli -- verify trace ./failure.ron
@@ -570,7 +599,7 @@ versioned.
 
 ## Documentation & Architecture Specifications
 
-- [Architecture Wiki (30-Part System Specification)](wiki/Home.md)
+- [Architecture Wiki (50-Part System Specification)](wiki/Home.md)
 - [Complete developer tutorial](TUTORIAL.md)
 - [Governing implementation plan](plan.md)
 - [Architecture specification index](next.md) ([authoritative `sys-arch/` specifications](sys-arch/))
@@ -579,7 +608,7 @@ versioned.
 - [Enterprise implementation evidence](docs/enterprise-completion.md)
 - [Database interoperability implementation evidence](docs/database-interoperability-completion.md)
 - [Plug-and-play implementation evidence](docs/plug-and-play-completion.md)
-- [System Architecture Specifications (Parts 01–36)](sys-arch/):
+- [System Architecture Specifications (Parts 01–50)](wiki/Home.md):
   - [Part 01: Formal Correctness, Invariants & Simulation](wiki/01-formal-correctness.md)
   - [Part 02: Causality, Dependency & Event Lineage](wiki/02-causality-provenance-lineage.md)
   - [Part 03: Anti-Entropy, Divergence Detection & Self-Repair](wiki/03-anti-entropy-self-repair.md)
@@ -610,12 +639,26 @@ versioned.
   - [Part 28: Multi-Consumer Change Feed Architecture](wiki/28-multi-consumer-change-feed-architecture.md)
   - [Part 29: Schema & Operation Registry Governance](wiki/29-schema-operation-registry-developer-governance.md)
   - [Part 30: Certification, Conformance & Ecosystem Architecture](wiki/30-certification-conformance-ecosystem-architecture.md)
-  - [Part 31: Android & iOS Mobile Runtime Platform Architecture](sys-arch/31-android-ios-mobile-runtime-platform-architecture.md)
-  - [Part 32: Linux, Windows & macOS Desktop Runtime Architecture](sys-arch/32-linux-windows-macos-desktop-runtime-architecture.md)
-  - [Part 33: Cross-Platform Local Storage for Mobile & Desktop](sys-arch/33-cross-platform-local-storage-mobile-desktop-architecture.md)
-  - [Part 34: Reference Implementation & Workspace Crate Boundary Architecture](sys-arch/34-reference-implementation-workspace-crate-boundary-architecture.md)
-  - [Part 35: Public Rust API & SDK Stability Architecture](sys-arch/35-public-rust-api-sdk-stability-architecture.md)
-  - [Part 36: Storage Adapter SDK & Official Adapter Architecture](sys-arch/36-storage-adapter-sdk-official-adapter-architecture.md)
+  - [Part 31: Android & iOS Mobile Runtime Platform Architecture](wiki/31-android-ios-mobile-runtime-platform-architecture.md)
+  - [Part 32: Linux, Windows & macOS Desktop Runtime Architecture](wiki/32-linux-windows-macos-desktop-runtime-architecture.md)
+  - [Part 33: Cross-Platform Local Storage for Mobile & Desktop](wiki/33-cross-platform-local-storage-mobile-desktop-architecture.md)
+  - [Part 34: Reference Implementation & Workspace Crate Boundary Architecture](wiki/34-reference-implementation-workspace-crate-boundary-architecture.md)
+  - [Part 35: Public Rust API & SDK Stability Architecture](wiki/35-public-rust-api-sdk-stability-architecture.md)
+  - [Part 36: Storage Adapter SDK & Official Adapter Architecture](wiki/36-storage-adapter-sdk-official-adapter-architecture.md)
+  - [Part 37: PostgreSQL & Neon Authoritative Adapter Architecture](wiki/37-postgresql-neon-authoritative-adapter-detailed-architecture.md)
+  - [Part 38: Stoolap Embedded Local Persistence Architecture](wiki/38-stoolap-embedded-local-replica-client-persistence-architecture.md)
+  - [Part 39: Axum Server Integration & Middleware Architecture](wiki/39-axum-server-integration-middleware-architecture.md)
+  - [Part 40: Dioxus Client Integration & Reactive State Architecture](wiki/40-dioxus-client-integration-reactive-state-architecture.md)
+  - [Part 41: CLI, Developer Toolchain, Inspection & Verification](wiki/41-cli-developer-toolchain-architecture.md)
+  - [Part 42: SQLite Embedded Local Replica Adapter Architecture](wiki/42-sqlite-embedded-local-adapter-architecture.md)
+  - [Part 43: Configuration, Secrets, Environment Profiles & Feature Flags](wiki/43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture.md)
+  - [Part 44: Packaging, Distribution, Release Engineering & Artifact Signing](wiki/44-packaging-distribution-release-engineering-artifact-signing-update-channels-cross-platform-delivery-architecture.md)
+  - [Part 45: Deployment Topologies, Single-Node, HA & Multi-Region Environments](wiki/45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture.md)
+  - [Part 46: Observability, Distributed Tracing, Metrics, SLOs & Alerting](wiki/46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture.md)
+  - [Part 47: Benchmarking, Capacity Planning & Workload Sizing](wiki/47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture.md)
+  - [Part 48: Testkit, Fault Injection & Release Quality Gates](wiki/48-testkit-verification-fault-injection-property-model-integration-e2e-release-quality-gates-architecture.md)
+  - [Part 49: Licensing, Dependency Policy, Supply Chain Security & SBOM](wiki/49-licensing-dependency-policy-supply-chain-security-crate-governance-sbom-reproducible-builds-third-party-risk-architecture.md)
+  - [Part 50: Aequora v1 Scope, Milestones, GA Exit Criteria & Evolution](wiki/50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture.md)
 - [Custom database adapter guide](docs/custom-database-adapters.md)
 - [Local retrieval and tooling guide](docs/local-ai-context.md)
 
