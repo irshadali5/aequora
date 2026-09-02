@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `195b13d940bcaa7267dd03a18048741909445b52b0ff9e103722b5ebfa3f4d05`
+Digest: `3d840a1df9d058916f4feea80d6e6158d70b8f2fe199e12570af6e1824c7d5c5`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -166,6 +166,7 @@ Digest: `195b13d940bcaa7267dd03a18048741909445b52b0ff9e103722b5ebfa3f4d05`
 | conformance-profile | 77 | SQLiteLocalCore | Current | storage | - | Portable SQLite WAL, Tx A, Tx C, outbox, cursor, backup, and crash-reopen semantics. |
 | conformance-profile | 78 | SQLiteDesktopLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Linux, Windows, or macOS. |
 | conformance-profile | 79 | SQLiteMobileLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Android or iOS. |
+| conformance-profile | 80 | ConfigurationRuntimeFull | Current | runtime | - | Typed, validated, redacted, atomic, capability-aware configuration and feature policy. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -279,6 +280,16 @@ Digest: `195b13d940bcaa7267dd03a18048741909445b52b0ff9e103722b5ebfa3f4d05`
 | conformance-test | 111 | SQLiteCursorAtomicity | Current | storage | - | Authoritative apply, operation outcomes, conflicts, and cursor advancement commit atomically. |
 | conformance-test | 112 | SQLiteOutboxPreservation | Current | storage | - | Outbox identity and canonical digest survive retry, crash, backup, and lifecycle completion. |
 | conformance-test | 113 | SQLiteAdapterParity | Current | storage | - | Reference, SQLite, and Stoolap local stores expose the same neutral synchronization semantics. |
+| conformance-test | 114 | ConfigCorrectnessPreservation | Current | runtime | - | Configuration exposes no switch that disables correctness, authority, isolation, or idempotency. |
+| conformance-test | 115 | ConfigSecretRedaction | Current | security | - | Secret values remain behind redacting wrappers and provider-aware resolution. |
+| conformance-test | 116 | ConfigValidatedPublication | Current | runtime | - | Only parsed, schema-checked, cross-field validated configuration becomes effective. |
+| conformance-test | 117 | ConfigAtomicReload | Current | runtime | - | Readers observe one complete immutable configuration generation. |
+| conformance-test | 118 | ConfigDurableIdentityIsolation | Current | runtime | - | Authority, device, store, and generation identities are absent from editable deployment configuration. |
+| conformance-test | 119 | ConfigFeatureSemanticSafety | Current | runtime | - | Runtime flags cannot silently redefine durable operation semantics. |
+| conformance-test | 120 | ConfigProductionSafety | Current | security | - | Production and staging reject development authentication, reset, fault, logging, and TLS bypasses. |
+| conformance-test | 121 | ConfigAdapterCapabilitySafety | Current | storage | - | Adapter settings activate only when declared certified capabilities satisfy them. |
+| conformance-test | 122 | ConfigFailedReloadPreservation | Current | runtime | - | Rejected reloads leave the previous valid generation fully active. |
+| conformance-test | 123 | ConfigAuthoritativePolicy | Current | security | - | Client feature decisions cannot grant business entitlement or weaken server policy. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
