@@ -2635,22 +2635,22 @@ clients rebootstrap safely
 Part 16 is complete when:
 
 ```text
-[ ] AuthorityId defined
-[ ] AuthorityEpoch defined
-[ ] authority roles defined
-[ ] single-writer fencing defined
-[ ] promotion classes defined
-[ ] cursor epoch binding defined
-[ ] restore/PITR epoch rules defined
-[ ] client epoch-transition state machine defined
-[ ] ambiguous operation recovery policy defined
-[ ] fork checkpoint/detection defined
-[ ] old-primary rejoin policy defined
-[ ] snapshot/audit/integrity epoch integration defined
-[ ] external epoch rollback protection defined
-[ ] promotion/readiness CLI defined
-[ ] DR verification workflow defined
-[ ] formal/fault tests defined
+[x] AuthorityId defined
+[x] AuthorityEpoch defined
+[x] authority roles defined
+[x] single-writer fencing defined
+[x] promotion classes defined
+[x] cursor epoch binding defined
+[x] restore/PITR epoch rules defined
+[x] client epoch-transition state machine defined
+[x] ambiguous operation recovery policy defined
+[x] fork checkpoint/detection defined
+[x] old-primary rejoin policy defined
+[x] snapshot/audit/integrity epoch integration defined
+[x] external epoch rollback protection defined
+[x] promotion/readiness CLI defined
+[x] DR verification workflow defined
+[x] formal/fault tests defined
 ```
 
 ---
