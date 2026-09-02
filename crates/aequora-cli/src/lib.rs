@@ -15,6 +15,9 @@ use aequora_compat::{
     ClientHello, CompatibilityError, CompatibilityPolicy, CompatibilityRegistry,
     CompatibilityResult, ServerAuthorityContext, SupportStatus, canonical_registry, negotiate,
 };
+use aequora_config::{
+    AdapterCapabilities, ConfigSource, RawDeploymentConfig, diff_effective, explain_setting,
+};
 use aequora_conformance::{
     CertificationArtifact, CertificationRequest, ConformanceDomain, ConformanceError,
     REFERENCE_TESTS, markdown_report,
@@ -40,6 +43,7 @@ use aequora_model::{
     ClientId, ExploreError, FailureTrace, Model, ModelAction, ModelCorrelationId, ModelEntityId,
     ModelError, ModelOperation, ModelOperationId, ReplayError, SearchBounds, explore,
 };
+use aequora_policy::ConfigGeneration;
 use aequora_queue::{
     CompactionPlan as QueueCompactionPlan, MutationMutability, OptimizationRegistry, QueueEntry,
     QueueError, plan_compaction,
@@ -59,6 +63,7 @@ use aequora_store::{
 use aequora_store_postgres::POSTGRES_ADAPTER_MANIFEST;
 use aequora_store_stoolap::STOOLAP_ADAPTER_MANIFEST;
 use std::{
+    collections::BTreeMap,
     env,
     fs::{self, File},
     io::{self, Read},
@@ -243,6 +248,11 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
         }
         Some("feed") => feed_command(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("legacy") => legacy_command(arguments.next().as_deref(), arguments.next().as_deref()),
+        Some("config") => config_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -251,6 +261,100 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> &'static str {
     "global: --output human|json|ron --color auto|always|never --log-format human|json --log-level <level> --trace-id <id>\naequora version\naequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora conform run <request.ron>\naequora conform storage|protocol|client|server\naequora conform report <artifact.ron>\naequora conform verify <artifact.ron>\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+}
+
+fn config_capabilities() -> AdapterCapabilities {
+    AdapterCapabilities {
+        authoritative_transactions: true,
+        local_atomicity: true,
+        snapshot_generation_swap: true,
+    }
+}
+
+fn load_effective_config(path: &str) -> Result<aequora_config::EffectiveConfig, CliError> {
+    let bytes = read_bounded(Path::new(path), 8 * 1024 * 1024)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| CliError::ConfigEncoding)?;
+    RawDeploymentConfig::from_ron(text, config_capabilities())?
+        .effective(
+            ConfigGeneration(1),
+            BTreeMap::from([(
+                "document".to_owned(),
+                ConfigSource::BaseRon(path.to_owned()),
+            )]),
+        )
+        .map_err(Into::into)
+}
+
+fn config_command(
+    action: Option<&str>,
+    first: Option<&str>,
+    second: Option<&str>,
+) -> Result<String, CliError> {
+    match action {
+        Some("check") if second.is_none() => {
+            let path = first.ok_or_else(|| {
+                CliError::Usage("usage: aequora config check <config.ron>".to_owned())
+            })?;
+            let config = load_effective_config(path)?;
+            Ok(format!(
+                "config: ok schema=1 generation={} digest={} environment={:?}",
+                config.generation.0, config.digest, config.environment
+            ))
+        }
+        Some("effective") if second.is_none() => {
+            let path = first.ok_or_else(|| {
+                CliError::Usage("usage: aequora config effective <config.ron>".to_owned())
+            })?;
+            load_effective_config(path)?
+                .sanitized_ron()
+                .map_err(Into::into)
+        }
+        Some("explain") if second.is_none() => {
+            let key = first.ok_or_else(|| {
+                CliError::Usage("usage: aequora config explain <setting>".to_owned())
+            })?;
+            let setting = explain_setting(key)
+                .ok_or_else(|| CliError::Usage(format!("unknown configuration setting {key:?}")))?;
+            Ok(format!(
+                "{}: {} default={} allowed={} mutability={:?} sensitive={} safety={}",
+                setting.key,
+                setting.meaning,
+                setting.default,
+                setting.allowed,
+                setting.mutability,
+                setting.sensitive,
+                setting.safety
+            ))
+        }
+        Some("diff") => {
+            let current = first.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora config diff <current.ron> <candidate.ron>".to_owned(),
+                )
+            })?;
+            let candidate = second.ok_or_else(|| {
+                CliError::Usage(
+                    "usage: aequora config diff <current.ron> <candidate.ron>".to_owned(),
+                )
+            })?;
+            let changes = diff_effective(
+                &load_effective_config(current)?,
+                &load_effective_config(candidate)?,
+            );
+            if changes.is_empty() {
+                Ok("config diff: no semantic changes".to_owned())
+            } else {
+                Ok(changes
+                    .into_iter()
+                    .map(|change| format!("{}={:?}", change.key, change.class))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora config <check|effective|explain|diff> ...".to_owned(),
+        )),
+    }
 }
 
 fn version(extra: Option<&str>) -> Result<String, CliError> {
@@ -1438,6 +1542,10 @@ enum CliError {
     Authority(#[from] AuthorityError),
     #[error(transparent)]
     Region(#[from] RegionError),
+    #[error(transparent)]
+    Configuration(#[from] aequora_config::ConfigurationError),
+    #[error("configuration file must contain UTF-8 RON")]
+    ConfigEncoding,
     #[error("starter target already exists: {0}")]
     TargetExists(String),
     #[error("starter parent directory does not exist: {0}")]
@@ -1515,6 +1623,25 @@ mod tests {
             .unwrap_or_else(|error| panic!("compatibility registry failed: {error}"));
         assert!(output.contains("compat registry: ok generation=1"));
         assert!(output.contains("writes=0"));
+    }
+
+    #[test]
+    fn configuration_commands_validate_explain_and_redact() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../config/production.ron")
+            .to_string_lossy()
+            .into_owned();
+        let checked = command(vec!["config".to_owned(), "check".to_owned(), path.clone()])
+            .unwrap_or_else(|error| panic!("configuration check failed: {error}"));
+        assert!(checked.contains("config: ok schema=1"));
+        let effective = command(vec!["config".to_owned(), "effective".to_owned(), path])
+            .unwrap_or_else(|error| panic!("effective configuration failed: {error}"));
+        assert!(effective.contains("<redacted>"));
+        assert!(!effective.contains("AEQUORA_DATABASE_URL"));
+        let explanation = command(args(&["config", "explain", "runtime.batch_size"]))
+            .unwrap_or_else(|error| panic!("configuration explanation failed: {error}"));
+        assert!(explanation.contains("mutability=Reloadable"));
+        assert!(explanation.contains("1..=4096"));
     }
 
     #[test]
