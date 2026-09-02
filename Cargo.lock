@@ -187,6 +187,7 @@ dependencies = [
  "aequora-bootstrap",
  "aequora-cli-core",
  "aequora-compat",
+ "aequora-config",
  "aequora-conformance",
  "aequora-devtools",
  "aequora-diagnostics",
@@ -196,6 +197,7 @@ dependencies = [
  "aequora-legacy",
  "aequora-migration",
  "aequora-model",
+ "aequora-policy",
  "aequora-queue",
  "aequora-region",
  "aequora-schema",
@@ -301,14 +303,19 @@ dependencies = [
  "aequora-conformance",
  "aequora-coordination",
  "aequora-crypto",
+ "aequora-feature-flags",
  "aequora-http",
  "aequora-performance",
+ "aequora-policy",
  "aequora-protocol",
  "aequora-quic",
  "aequora-scheduler",
+ "aequora-secrets",
  "aequora-server",
  "aequora-types",
  "aequora-validator",
+ "blake3",
+ "postcard",
  "ron",
  "serde",
  "thiserror",
@@ -459,6 +466,15 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "aequora-feature-flags"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -773,6 +789,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-policy"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "postcard",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-profile"
 version = "0.1.0"
 dependencies = [
@@ -927,6 +953,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "aequora-secrets"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror",
+ "zeroize",
 ]
 
 [[package]]
@@ -1135,6 +1171,7 @@ dependencies = [
  "aequora-codec",
  "aequora-compat",
  "aequora-compute",
+ "aequora-config",
  "aequora-conflict",
  "aequora-conformance",
  "aequora-coordination",
@@ -1142,6 +1179,7 @@ dependencies = [
  "aequora-desktop-runtime",
  "aequora-diagnostics",
  "aequora-executor",
+ "aequora-feature-flags",
  "aequora-feed",
  "aequora-governance",
  "aequora-integrity",
@@ -1161,6 +1199,7 @@ dependencies = [
  "aequora-platform-linux",
  "aequora-platform-macos",
  "aequora-platform-windows",
+ "aequora-policy",
  "aequora-profile",
  "aequora-protocol",
  "aequora-queue",
@@ -1170,6 +1209,7 @@ dependencies = [
  "aequora-scheduler",
  "aequora-schema",
  "aequora-scope",
+ "aequora-secrets",
  "aequora-security",
  "aequora-server",
  "aequora-side-effects",
