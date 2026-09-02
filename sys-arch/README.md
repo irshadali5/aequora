@@ -1,6 +1,6 @@
 # Aequora System Architecture Wiki
 
-Welcome to the **Aequora System Architecture Wiki**. This repository contains the complete 30-part architecture specification for the Aequora distributed synchronization engine.
+Welcome to the **Aequora System Architecture Wiki**. This repository contains the complete 50-part architecture specification for the Aequora distributed synchronization engine across 11 architectural tiers.
 
 ---
 
@@ -131,3 +131,41 @@ Welcome to the **Aequora System Architecture Wiki**. This repository contains th
   Routes, authentication, bounded request processing, admission, errors, health, and graceful shutdown.
 - **[Part 40: Dioxus Client Integration and Reactive State Architecture](40-dioxus-client-integration-reactive-state-architecture.md)**
   Provider context, durable-derived queries, local-first mutations, bounded invalidation, lifecycle hints, and tenant isolation.
+
+---
+
+### 🛠️ Tier 9: Developer Experience, Toolchain & Configuration Governance
+*Developer CLI, local replica adapters, and strict runtime configuration.*
+
+- **[Part 41: CLI, Developer Toolchain, Inspection, Verification, and Migration](41-cli-developer-toolchain-architecture.md)**  
+  Developer toolchain, adapter inspection, schema verification, trace replay, and operational dev diagnostics.
+- **[Part 42: SQLite Embedded Local Replica Adapter Architecture](42-sqlite-embedded-local-adapter-architecture.md)**  
+  Official portable embedded replica for desktop, Android, and iOS implementing the unified storage contract.
+- **[Part 43: Configuration, Secrets, Environment Profiles, Runtime Policy, and Feature-Flag Architecture](43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture.md)**  
+  Strict secret-free RON configuration, out-of-band secret resolution, runtime policy engine, and feature flags.
+
+---
+
+### 🌐 Tier 10: Production Operations, Delivery & Observability
+*Release packaging, production deployment topologies, comprehensive telemetry, and capacity planning.*
+
+- **[Part 44: Packaging, Distribution, Release Engineering, Artifact Signing, and Update Channels](44-packaging-distribution-release-engineering-artifact-signing-update-channels-cross-platform-delivery-architecture.md)**  
+  Hermetic packaging, cryptographic artifact signing, update channels, reproducible builds, and cross-platform delivery.
+- **[Part 45: Deployment Topologies, Single-Node, HA, Multi-Region, Edge, and Air-Gapped Environments](45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture.md)**  
+  Single-node, high-availability, multi-region edge, enterprise, and air-gapped environment topologies.
+- **[Part 46: Observability Implementation, Metrics, Distributed Tracing, Logging, SLOs, and Alerting](46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture.md)**  
+  Payload-free distributed tracing, Prometheus metrics, structured logging, service level objectives, and alerting.
+- **[Part 47: Benchmarking, Performance Regression, Capacity Planning, and Workload Modeling](47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture.md)**  
+  Standard workload modeling, performance regression suites, throughput sizing, and scalability boundaries.
+
+---
+
+### 🏆 Tier 11: Release Verification, Supply Chain & Productization
+*Quality verification infrastructure, dependency risk governance, and GA production readiness.*
+
+- **[Part 48: Testkit, Verification Infrastructure, Fault Injection, and Release Quality Gates](48-testkit-verification-fault-injection-property-model-integration-e2e-release-quality-gates-architecture.md)**  
+  Verification infrastructure, fault injection harnesses, property and model checking, and release quality gates.
+- **[Part 49: Licensing, Dependency Policy, Supply-Chain Security, Crate Governance, and SBOM](49-licensing-dependency-policy-supply-chain-security-crate-governance-sbom-reproducible-builds-third-party-risk-architecture.md)**  
+  Third-party risk management, crate governance, license compliance, Software Bill of Materials, and reproducible builds.
+- **[Part 50: Aequora v1 Scope, Productization Plan, Milestones, and GA Exit Criteria](50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture.md)**  
+  Productization roadmap, milestone gates, release candidate checklist, GA criteria, and long-term evolution.
