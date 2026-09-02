@@ -14,6 +14,7 @@ http-client = ["dep:aequora-http"]
 quic = ["dep:aequora-quic"]
 
 [dependencies]
+blake3.workspace = true
 aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
 aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
@@ -29,6 +30,10 @@ aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
+aequora-feature-flags = { version = "0.1.0", path = "../aequora-feature-flags" }
+aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
+aequora-secrets = { version = "0.1.0", path = "../aequora-secrets" }
+postcard.workspace = true
 ron.workspace = true
 serde.workspace = true
 thiserror.workspace = true
