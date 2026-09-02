@@ -60,6 +60,7 @@ outside the reusable core.
 | 40 | [Dioxus client integration](sys-arch/40-dioxus-client-integration-reactive-state-architecture.md) |
 | 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
 | 42 | [SQLite embedded local adapter](sys-arch/42-sqlite-embedded-local-adapter-architecture.md) |
+| 43 | [Configuration, secrets, runtime policy, and feature flags](sys-arch/43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture.md) |
 
 ## Implementation status
 
@@ -96,6 +97,7 @@ implicitly claim completion of an earlier part.
 | Part 40: Dioxus client integration and reactive state | Implemented | [Part 40 report](docs/dioxus-client-integration-completion.md) |
 | Part 41: CLI and developer toolchain | Implemented | [Part 41 report](docs/cli-developer-toolchain-completion.md) |
 | Part 42: SQLite embedded local adapter | Implemented | [Part 42 report](docs/sqlite-local-adapter-completion.md) |
+| Part 43: Configuration, secrets, runtime policy, and feature flags | Implemented | [Part 43 report](docs/configuration-secrets-runtime-policy-feature-flags-completion.md) |
 
 ## Implementation workflow
 
@@ -134,6 +136,7 @@ bash scripts/check-axum-server-architecture.sh
 bash scripts/check-dioxus-client-architecture.sh
 bash scripts/check-cli-toolchain-architecture.sh
 bash scripts/check-sqlite-local-adapter-architecture.sh
+bash scripts/check-configuration-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
