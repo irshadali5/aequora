@@ -1,0 +1,17 @@
+[package]
+name = "aequora-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Validated runtime policy snapshots and safe policy merge rules for Aequora"
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
