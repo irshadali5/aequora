@@ -189,6 +189,7 @@ dependencies = [
  "aequora-compat",
  "aequora-config",
  "aequora-conformance",
+ "aequora-deployment",
  "aequora-devtools",
  "aequora-diagnostics",
  "aequora-feed",
@@ -387,6 +388,20 @@ dependencies = [
  "thiserror",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "aequora-deployment"
+version = "0.1.0"
+dependencies = [
+ "aequora-config",
+ "aequora-policy",
+ "aequora-types",
+ "ron",
+ "semver",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -1191,6 +1206,7 @@ dependencies = [
  "aequora-conformance",
  "aequora-coordination",
  "aequora-crypto",
+ "aequora-deployment",
  "aequora-desktop-runtime",
  "aequora-diagnostics",
  "aequora-executor",
