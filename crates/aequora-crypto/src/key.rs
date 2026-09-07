@@ -49,6 +49,18 @@ pub enum KeyPurpose {
     AuditArchiveEncryption,
     AuditCheckpointSigning,
     RegistrySigning,
+    /// Signs final packaged bytes for release distribution.
+    ReleaseArtifactSigning,
+    /// Signs the coordinated release manifest after artifact assembly.
+    ReleaseManifestSigning,
+    /// Signs replay-resistant desktop update metadata.
+    UpdateMetadataSigning,
+    /// Signs OCI images or their provenance independently of native packages.
+    ContainerSigning,
+    /// Represents native platform signing identities held outside ordinary build jobs.
+    PlatformApplicationSigning,
+    /// Signs immutable source tags independently from artifact identities.
+    GitTagSigning,
 }
 
 impl KeyPurpose {
@@ -60,6 +72,12 @@ impl KeyPurpose {
                 | Self::DeviceOperationSigning
                 | Self::AuditCheckpointSigning
                 | Self::RegistrySigning
+                | Self::ReleaseArtifactSigning
+                | Self::ReleaseManifestSigning
+                | Self::UpdateMetadataSigning
+                | Self::ContainerSigning
+                | Self::PlatformApplicationSigning
+                | Self::GitTagSigning
         )
     }
 
