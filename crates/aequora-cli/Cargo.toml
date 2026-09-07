@@ -22,6 +22,7 @@ path = "templates/server.rs"
 
 [dependencies]
 aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
+aequora-benchkit = { version = "0.1.0", path = "../aequora-benchkit" }
 aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
 aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
 aequora-cli-core = { version = "0.1.0", path = "../aequora-cli-core" }
@@ -34,11 +35,13 @@ aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-inspect = { version = "0.1.0", path = "../aequora-inspect" }
 aequora-legacy = { version = "0.1.0", path = "../aequora-legacy" }
+aequora-loadgen = { version = "0.1.0", path = "../aequora-loadgen" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap" }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
 aequora-model = { version = "0.1.0", path = "../aequora-model" }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
 aequora-release = { version = "0.1.0", path = "../aequora-release" }
@@ -47,6 +50,7 @@ aequora-security = { version = "0.1.0", path = "../aequora-security" }
 aequora-devtools = { version = "0.1.0", path = "../aequora-devtools" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
+aequora-workload = { version = "0.1.0", path = "../aequora-workload" }
 hex.workspace = true
 ron.workspace = true
 serde.workspace = true
