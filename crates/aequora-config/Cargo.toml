@@ -12,6 +12,7 @@ default = []
 axum = ["dep:aequora-axum"]
 http-client = ["dep:aequora-http"]
 quic = ["dep:aequora-quic"]
+test-facilities = []
 
 [dependencies]
 blake3.workspace = true

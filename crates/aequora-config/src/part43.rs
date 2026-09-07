@@ -311,6 +311,12 @@ impl RawDeploymentConfig {
                 return Err(ConfigurationError::ProductionSafety);
             }
         }
+        if self.environment == Environment::Test
+            && self.development.any_enabled()
+            && !cfg!(feature = "test-facilities")
+        {
+            return Err(ConfigurationError::TestFacilitiesNotCompiled);
+        }
         let maximum_connections = match &self.authority {
             AuthorityAdapterConfig::Postgres {
                 maximum_connections,
@@ -404,7 +410,7 @@ pub struct ConfigLoader {
     defaults: RawDeploymentConfig,
     base: Option<(String, ConfigPatch)>,
     environment_file: Option<(String, ConfigPatch)>,
-    environment: Option<ConfigPatch>,
+    environment: Option<EnvironmentOverrides>,
     cli: Option<ConfigPatch>,
     runtime: Option<RuntimePolicy>,
 }
@@ -511,11 +517,19 @@ impl ConfigLoader {
             );
         }
         if let Some(patch) = self.environment {
-            patch.apply(
-                &mut raw,
-                &ConfigSource::EnvironmentVariable("AEQUORA_*".to_owned()),
-                &mut provenance,
-            );
+            let source = ConfigSource::EnvironmentVariable("AEQUORA_*".to_owned());
+            if let Some(environment) = patch.environment {
+                raw.environment = environment;
+                provenance.insert("environment".to_owned(), source.clone());
+            }
+            if let Some(batch_size) = patch.batch_size {
+                raw.runtime.batch_size = batch_size;
+                provenance.insert("runtime.batch_size".to_owned(), source.clone());
+            }
+            if let Some(request_timeout) = patch.request_timeout {
+                raw.runtime.request_timeout = request_timeout;
+                provenance.insert("runtime.request_timeout_ms".to_owned(), source);
+            }
         }
         if let Some(patch) = self.cli {
             patch.apply(&mut raw, &ConfigSource::CommandLine, &mut provenance);
@@ -536,36 +550,37 @@ fn parse_patch(input: &str) -> Result<ConfigPatch, ConfigurationError> {
     ron::from_str(input).map_err(|error| ConfigurationError::Ron(error.to_string()))
 }
 
-fn environment_patch(values: &BTreeMap<String, String>) -> Result<ConfigPatch, ConfigurationError> {
-    let mut patch = ConfigPatch::default();
-    let mut runtime = RuntimePolicy::default();
-    let mut runtime_changed = false;
+#[derive(Default)]
+struct EnvironmentOverrides {
+    environment: Option<Environment>,
+    batch_size: Option<aequora_policy::BatchSize>,
+    request_timeout: Option<aequora_policy::TimeoutMillis>,
+}
+
+fn environment_patch(
+    values: &BTreeMap<String, String>,
+) -> Result<EnvironmentOverrides, ConfigurationError> {
+    let mut patch = EnvironmentOverrides::default();
     for (key, value) in values {
         match key.as_str() {
             "AEQUORA_ENVIRONMENT" => patch.environment = Some(value.parse()?),
             "AEQUORA_BATCH_SIZE" => {
-                runtime.batch_size = aequora_policy::BatchSize::new(
-                    value
-                        .parse()
-                        .map_err(|_| ConfigurationError::InvalidValue("AEQUORA_BATCH_SIZE"))?,
-                )?;
-                runtime_changed = true;
+                patch.batch_size =
+                    Some(aequora_policy::BatchSize::new(value.parse().map_err(
+                        |_| ConfigurationError::InvalidValue("AEQUORA_BATCH_SIZE"),
+                    )?)?);
             }
             "AEQUORA_REQUEST_TIMEOUT_MS" => {
-                runtime.request_timeout =
-                    aequora_policy::TimeoutMillis::new(value.parse().map_err(|_| {
-                        ConfigurationError::InvalidValue("AEQUORA_REQUEST_TIMEOUT_MS")
-                    })?)?;
-                runtime_changed = true;
+                patch.request_timeout =
+                    Some(aequora_policy::TimeoutMillis::new(value.parse().map_err(
+                        |_| ConfigurationError::InvalidValue("AEQUORA_REQUEST_TIMEOUT_MS"),
+                    )?)?);
             }
             key if key.starts_with("AEQUORA_") => {
                 return Err(ConfigurationError::UnknownEnvironmentKey(key.to_owned()));
             }
             _ => {}
         }
-    }
-    if runtime_changed {
-        patch.runtime = Some(runtime);
     }
     Ok(patch)
 }
@@ -754,6 +769,8 @@ pub enum ConfigurationError {
     UnknownEnvironmentKey(String),
     #[error("production or staging profile rejected a development-only facility")]
     ProductionSafety,
+    #[error("test-only facilities were requested but not compiled")]
+    TestFacilitiesNotCompiled,
     #[error("selected adapter does not declare a required certified capability")]
     UnsupportedAdapterCapability,
     #[error("configuration encoding failed: {0}")]
@@ -778,10 +795,11 @@ mod tests {
 
     #[test]
     fn precedence_is_fixed_and_provenance_names_the_winner() {
-        let base = "(environment: Some(Development))";
+        let base = "(environment: Some(Development), runtime: Some((batch_size: 128, request_timeout: 9000, worker_limit: 12, log_level: Warn)))";
         let environment = "(environment: Some(Staging))";
         let mut variables = BTreeMap::new();
         variables.insert("AEQUORA_ENVIRONMENT".to_owned(), "production".to_owned());
+        variables.insert("AEQUORA_BATCH_SIZE".to_owned(), "64".to_owned());
         let effective = ConfigLoader::new(RawDeploymentConfig::default())
             .environment_ron("staging.ron", environment)
             .and_then(|loader| loader.base_ron("base.ron", base))
@@ -795,9 +813,15 @@ mod tests {
             .and_then(|loader| loader.load(ConfigGeneration(4), capabilities()))
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(effective.environment, Environment::Test);
+        assert_eq!(effective.runtime.batch_size.get(), 64);
+        assert_eq!(effective.runtime.worker_limit.get(), 12);
         assert_eq!(
             effective.provenance.get("environment"),
             Some(&ConfigSource::CommandLine)
+        );
+        assert_eq!(
+            effective.provenance.get("runtime.batch_size"),
+            Some(&ConfigSource::EnvironmentVariable("AEQUORA_*".to_owned()))
         );
     }
 
