@@ -83,6 +83,7 @@ members = [
     "crates/aequora-platform-android",
     "crates/aequora-platform-ios",
     "crates/aequora-desktop-runtime",
+    "crates/aequora-deployment",
     "crates/aequora-ipc-protocol",
     "crates/aequora-agent",
     "crates/aequora-platform-linux",
