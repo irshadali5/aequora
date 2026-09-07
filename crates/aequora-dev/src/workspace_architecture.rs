@@ -257,7 +257,7 @@ mod tests {
     fn embedded_policy_is_well_formed_and_unique() -> Result<(), Box<dyn Error>> {
         let policy = parse_policy()?;
         let assignments = assignments(&policy)?;
-        assert_eq!(assignments.len(), 94);
+        assert_eq!(assignments.len(), 95);
         assert_eq!(
             policy.layers.first().map(|layer| layer.name.as_str()),
             Some("foundation")
