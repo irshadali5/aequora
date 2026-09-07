@@ -71,7 +71,7 @@ part-specific completion reports.
 
 ## Repository status
 
-The reusable implementation is complete through Part 43. See the [implementation plan](plan.md)
+The reusable implementation is complete through Part 47. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
 evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
 each built binary and environment and is not inferred from repository ownership.

@@ -61,6 +61,10 @@ outside the reusable core.
 | 41 | [CLI and developer toolchain](sys-arch/41-cli-developer-toolchain-architecture.md) |
 | 42 | [SQLite embedded local adapter](sys-arch/42-sqlite-embedded-local-adapter-architecture.md) |
 | 43 | [Configuration, secrets, runtime policy, and feature flags](sys-arch/43-configuration-secrets-environment-profiles-runtime-policy-feature-flags-architecture.md) |
+| 44 | [Packaging, distribution, and release engineering](sys-arch/44-packaging-distribution-release-engineering-artifact-signing-update-channels-cross-platform-delivery-architecture.md) |
+| 45 | [Deployment topologies and operational environments](sys-arch/45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture.md) |
+| 46 | [Observability, metrics, tracing, logging, SLOs, and alerts](sys-arch/46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture.md) |
+| 47 | [Benchmarking, regression, capacity planning, and sizing](sys-arch/47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture.md) |
 
 ## Implementation status
 
@@ -99,6 +103,9 @@ implicitly claim completion of an earlier part.
 | Part 42: SQLite embedded local adapter | Implemented | [Part 42 report](docs/sqlite-local-adapter-completion.md) |
 | Part 43: Configuration, secrets, runtime policy, and feature flags | Implemented | [Part 43 report](docs/configuration-secrets-runtime-policy-feature-flags-completion.md) |
 | Part 44: Packaging, distribution, release engineering, signing, and update channels | Implemented | [Part 44 report](docs/packaging-distribution-release-engineering-completion.md) |
+| Part 45: Deployment topologies and operational environments | Implemented | [Part 45 report](docs/deployment-topologies-completion.md) |
+| Part 46: Observability, metrics, tracing, logging, SLOs, and alerts | Implemented | [Part 46 report](docs/observability-production-telemetry-completion.md) |
+| Part 47: Benchmarking, regression, capacity planning, and production sizing | Implemented | [Part 47 report](docs/benchmarking-capacity-planning-completion.md) |
 
 ## Implementation workflow
 
@@ -139,6 +146,9 @@ bash scripts/check-cli-toolchain-architecture.sh
 bash scripts/check-sqlite-local-adapter-architecture.sh
 bash scripts/check-configuration-architecture.sh
 bash scripts/check-release-architecture.sh
+bash scripts/check-deployment-architecture.sh
+bash scripts/check-observability-architecture.sh
+bash scripts/check-benchmarking-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
