@@ -18,7 +18,6 @@
                 "aequora-secrets",
                 "aequora-storage-core",
                 "aequora-types",
-                "aequora-update",
             ],
         ),
         (
@@ -56,6 +55,8 @@
             crates: [
                 "aequora-conflict",
                 "aequora-crypto",
+                "aequora-release",
+                "aequora-update",
                 "aequora-diagnostics",
                 "aequora-executor",
                 "aequora-feed",
