@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aequora-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: aequora, role: api}
+  template:
+    metadata:
+      labels: {app: aequora, role: api}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: api
+          image: registry.example.invalid/aequora-server@sha256:PIN_REQUIRED
+          args: ["--config", "/etc/aequora/server.ron"]
+          ports: [{name: https, containerPort: 8443}]
+          readinessProbe:
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
+          livenessProbe:
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aequora, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: aequora-config}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aequora-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: aequora, role: worker}
+  template:
+    metadata:
+      labels: {app: aequora, role: worker}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: registry.example.invalid/aequora-server@sha256:PIN_REQUIRED
+          args: ["worker", "--config", "/etc/aequora/server.ron"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aequora, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: aequora-config}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aequora-api
+spec:
+  selector: {app: aequora, role: api}
+  ports: [{name: https, port: 443, targetPort: https}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aequora-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: aequora, role: api}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aequora-default-deny
+spec:
+  podSelector: {matchLabels: {app: aequora}}
+  policyTypes: [Ingress, Egress]

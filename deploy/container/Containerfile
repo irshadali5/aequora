@@ -1,0 +1,6 @@
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --chown=nonroot:nonroot aequora-server /usr/local/bin/aequora-server
+USER nonroot:nonroot
+EXPOSE 8443
+ENTRYPOINT ["/usr/local/bin/aequora-server"]
+
