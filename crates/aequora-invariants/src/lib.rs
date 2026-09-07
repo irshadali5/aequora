@@ -752,11 +752,31 @@ pub enum InvariantId {
     ReleaseUpdateFailClosed,
     /// Product `SemVer` never substitutes for protocol, store, config, or registry versions.
     ReleaseVersionDimensionSeparation,
+    /// Every active authority scope has exactly one current authoritative writer timeline.
+    DeploymentSingleWriter,
+    /// Infrastructure topology never changes synchronization durability or ordering semantics.
+    DeploymentSemanticPreservation,
+    /// Ordinary process replacement never changes the authority epoch.
+    DeploymentNodeEpochIndependence,
+    /// Clients never receive direct authoritative database access.
+    DeploymentDatabaseCredentialIsolation,
+    /// Regional reads cannot accept writes and obey explicit consistency semantics.
+    DeploymentRegionalReadSafety,
+    /// Air-gapped operation preserves trust without public services.
+    DeploymentAirGapIndependence,
+    /// Infrastructure retries and duplicate workers retain operation idempotency.
+    DeploymentRetrySafety,
+    /// Uncertain continuity requires a new authority epoch before resuming.
+    DeploymentRestoreEpoch,
+    /// Correctness-critical state never exists only in process-local storage.
+    DeploymentDurableStateOwnership,
+    /// Core correctness is independent of optional infrastructure products.
+    DeploymentInfrastructureIndependence,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 371] = [
+    pub const ALL: [Self; 381] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1128,6 +1148,16 @@ impl InvariantId {
         Self::ReleaseCredentialIsolation,
         Self::ReleaseUpdateFailClosed,
         Self::ReleaseVersionDimensionSeparation,
+        Self::DeploymentSingleWriter,
+        Self::DeploymentSemanticPreservation,
+        Self::DeploymentNodeEpochIndependence,
+        Self::DeploymentDatabaseCredentialIsolation,
+        Self::DeploymentRegionalReadSafety,
+        Self::DeploymentAirGapIndependence,
+        Self::DeploymentRetrySafety,
+        Self::DeploymentRestoreEpoch,
+        Self::DeploymentDurableStateOwnership,
+        Self::DeploymentInfrastructureIndependence,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1506,6 +1536,16 @@ impl InvariantId {
             Self::ReleaseCredentialIsolation => "AEQ-INV-RELEASE008",
             Self::ReleaseUpdateFailClosed => "AEQ-INV-RELEASE009",
             Self::ReleaseVersionDimensionSeparation => "AEQ-INV-RELEASE010",
+            Self::DeploymentSingleWriter => "AEQ-INV-DEPLOY001",
+            Self::DeploymentSemanticPreservation => "AEQ-INV-DEPLOY002",
+            Self::DeploymentNodeEpochIndependence => "AEQ-INV-DEPLOY003",
+            Self::DeploymentDatabaseCredentialIsolation => "AEQ-INV-DEPLOY004",
+            Self::DeploymentRegionalReadSafety => "AEQ-INV-DEPLOY005",
+            Self::DeploymentAirGapIndependence => "AEQ-INV-DEPLOY006",
+            Self::DeploymentRetrySafety => "AEQ-INV-DEPLOY007",
+            Self::DeploymentRestoreEpoch => "AEQ-INV-DEPLOY008",
+            Self::DeploymentDurableStateOwnership => "AEQ-INV-DEPLOY009",
+            Self::DeploymentInfrastructureIndependence => "AEQ-INV-DEPLOY010",
         }
     }
 
@@ -2613,6 +2653,36 @@ impl InvariantId {
             Self::ReleaseVersionDimensionSeparation => {
                 "product SemVer remains independent from protocol store operation config snapshot and registry versions"
             }
+            Self::DeploymentSingleWriter => {
+                "every active authority scope has exactly one current authoritative writer timeline"
+            }
+            Self::DeploymentSemanticPreservation => {
+                "nodes load balancers regions proxies and workers cannot change idempotency ordering cursor or transaction durability"
+            }
+            Self::DeploymentNodeEpochIndependence => {
+                "ordinary server restart or horizontal replacement does not create a new authority epoch"
+            }
+            Self::DeploymentDatabaseCredentialIsolation => {
+                "clients never connect directly to or receive credentials for the authoritative database"
+            }
+            Self::DeploymentRegionalReadSafety => {
+                "regional reads use explicit consistency and cannot accept authoritative writes without promotion"
+            }
+            Self::DeploymentAirGapIndependence => {
+                "air-gapped deployments preserve verification compatibility authority audit and upgrade semantics without public services"
+            }
+            Self::DeploymentRetrySafety => {
+                "infrastructure retries failover balancing and duplicate workers cannot create duplicate logical effects"
+            }
+            Self::DeploymentRestoreEpoch => {
+                "restore or failover with uncertain timeline continuity establishes a new epoch before synchronization resumes"
+            }
+            Self::DeploymentDurableStateOwnership => {
+                "correctness-critical state exists in certified durable storage and never solely in process-local caches"
+            }
+            Self::DeploymentInfrastructureIndependence => {
+                "core correctness requires no orchestrator broker cache service mesh or public cloud"
+            }
         }
     }
 
@@ -2996,6 +3066,16 @@ impl InvariantId {
             Self::ReleaseCredentialIsolation => 368,
             Self::ReleaseUpdateFailClosed => 369,
             Self::ReleaseVersionDimensionSeparation => 370,
+            Self::DeploymentSingleWriter => 371,
+            Self::DeploymentSemanticPreservation => 372,
+            Self::DeploymentNodeEpochIndependence => 373,
+            Self::DeploymentDatabaseCredentialIsolation => 374,
+            Self::DeploymentRegionalReadSafety => 375,
+            Self::DeploymentAirGapIndependence => 376,
+            Self::DeploymentRetrySafety => 377,
+            Self::DeploymentRestoreEpoch => 378,
+            Self::DeploymentDurableStateOwnership => 379,
+            Self::DeploymentInfrastructureIndependence => 380,
         }
     }
 }
@@ -3047,7 +3127,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 371] = [
+pub static REGISTRY: [InvariantEntry; 381] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5644,6 +5724,76 @@ pub static REGISTRY: [InvariantEntry; 371] = [
         "independent_version_dimension_matrix",
         "release_compatibility_dimension_contract",
         "release_version_conflation_total",
+    ),
+    entry(
+        InvariantId::DeploymentSingleWriter,
+        "deployment_single_writer",
+        "authority_scope_writer_uniqueness_matrix",
+        "deployment_descriptor_authority_contract",
+        "deployment_multiple_writer_total",
+    ),
+    entry(
+        InvariantId::DeploymentSemanticPreservation,
+        "deployment_semantic_preservation",
+        "topology_semantic_equivalence_matrix",
+        "deployment_topology_contract",
+        "deployment_semantic_drift_total",
+    ),
+    entry(
+        InvariantId::DeploymentNodeEpochIndependence,
+        "deployment_node_epoch_independence",
+        "node_restart_epoch_matrix",
+        "deployment_epoch_lifecycle_contract",
+        "deployment_node_epoch_change_total",
+    ),
+    entry(
+        InvariantId::DeploymentDatabaseCredentialIsolation,
+        "deployment_database_credential_isolation",
+        "client_database_access_matrix",
+        "deployment_secret_boundary_contract",
+        "deployment_client_database_access_total",
+    ),
+    entry(
+        InvariantId::DeploymentRegionalReadSafety,
+        "deployment_regional_read_safety",
+        "regional_cursor_consistency_matrix",
+        "deployment_regional_routing_contract",
+        "deployment_regional_write_attempt_total",
+    ),
+    entry(
+        InvariantId::DeploymentAirGapIndependence,
+        "deployment_air_gap_independence",
+        "air_gap_public_dependency_matrix",
+        "deployment_air_gap_contract",
+        "deployment_public_dependency_total",
+    ),
+    entry(
+        InvariantId::DeploymentRetrySafety,
+        "deployment_retry_safety",
+        "infrastructure_retry_idempotency_matrix",
+        "deployment_retry_contract",
+        "deployment_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::DeploymentRestoreEpoch,
+        "deployment_restore_epoch",
+        "restore_continuity_matrix",
+        "deployment_promotion_contract",
+        "deployment_uncertain_epoch_resume_total",
+    ),
+    entry(
+        InvariantId::DeploymentDurableStateOwnership,
+        "deployment_durable_state_ownership",
+        "process_loss_state_matrix",
+        "deployment_durable_ownership_contract",
+        "deployment_process_only_state_total",
+    ),
+    entry(
+        InvariantId::DeploymentInfrastructureIndependence,
+        "deployment_infrastructure_independence",
+        "optional_infrastructure_absence_matrix",
+        "deployment_minimal_profile_contract",
+        "deployment_required_optional_service_total",
     ),
 ];
 
