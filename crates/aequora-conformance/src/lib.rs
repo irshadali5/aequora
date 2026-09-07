@@ -41,6 +41,7 @@ pub enum ConformanceDomain {
     MobileRuntime,
     DesktopRuntime,
     DeveloperTooling,
+    ReleaseEngineering,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -97,6 +98,7 @@ pub enum ConformanceProfile {
     SQLiteDesktopLocalFull,
     SQLiteMobileLocalFull,
     ConfigurationRuntimeFull,
+    ReleaseEngineeringFull,
 }
 
 impl ConformanceProfile {
@@ -133,6 +135,7 @@ impl ConformanceProfile {
             Self::SQLiteDesktopLocalFull => 78,
             Self::SQLiteMobileLocalFull => 79,
             Self::ConfigurationRuntimeFull => 80,
+            Self::ReleaseEngineeringFull => 81,
         })
     }
 
@@ -167,7 +170,8 @@ impl ConformanceProfile {
             | Self::CliToolchainFull
             | Self::SQLiteDesktopLocalFull
             | Self::SQLiteMobileLocalFull
-            | Self::ConfigurationRuntimeFull => CertificationTier::FullSync,
+            | Self::ConfigurationRuntimeFull
+            | Self::ReleaseEngineeringFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -782,6 +786,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
             matches!(definition.id.0, 109..=113)
         }
         ConformanceProfile::ConfigurationRuntimeFull => matches!(definition.id.0, 114..=123),
+        ConformanceProfile::ReleaseEngineeringFull => matches!(definition.id.0, 124..=133),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -859,7 +864,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::SQLiteLocalCore
         | ConformanceProfile::SQLiteDesktopLocalFull
         | ConformanceProfile::SQLiteMobileLocalFull
-        | ConformanceProfile::ConfigurationRuntimeFull => false,
+        | ConformanceProfile::ConfigurationRuntimeFull
+        | ConformanceProfile::ReleaseEngineeringFull => false,
     }
 }
 
@@ -1861,6 +1867,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         "AEQ-INV-CONFIG010",
         FullSync,
         Some("configuration-runtime-full")
+    ),
+    test_definition!(
+        124,
+        "release_traceability",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE001",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        125,
+        "release_artifact_immutability",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE002",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        126,
+        "release_signature_integrity",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE003",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        127,
+        "release_compatibility_gate",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE004",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        128,
+        "release_client_intent_preservation",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE005",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        129,
+        "release_rollback_safety",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE006",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        130,
+        "release_immutable_promotion",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE007",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        131,
+        "release_credential_isolation",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE008",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        132,
+        "release_update_fail_closed",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE009",
+        FullSync,
+        Some("release-engineering-full")
+    ),
+    test_definition!(
+        133,
+        "release_version_dimension_separation",
+        ReleaseEngineering,
+        "AEQ-INV-RELEASE010",
+        FullSync,
+        Some("release-engineering-full")
     ),
 ];
 
@@ -2917,6 +3003,30 @@ mod tests {
         assert!(!core.contains(&ConformanceTestId(113)));
         assert!(desktop.contains(&ConformanceTestId(113)));
         assert!(mobile.contains(&ConformanceTestId(113)));
+    }
+
+    #[test]
+    fn configuration_profile_selects_only_part_43_policy_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::ConfigurationRuntimeFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (114..=123).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn release_profile_selects_only_part_44_delivery_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::ReleaseEngineeringFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (124..=133).collect::<Vec<_>>());
     }
 
     #[test]
