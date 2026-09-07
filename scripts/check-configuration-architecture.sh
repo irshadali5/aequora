@@ -33,7 +33,9 @@ for symbol in \
     Environment ConfigSource AdapterCapabilities CONFIGURATION_REFERENCE; do
     rg -q "\b${symbol}\b" crates/aequora-config/src/part43.rs
 done
-for symbol in SecretRef SecretBytes SecretString SecretProvider SecretResolver RotationClass; do
+for symbol in \
+    SecretRef SecretBytes SecretString SecretProvider EnvironmentSecretProvider SecretResolver \
+    RotationClass; do
     rg -q "\b${symbol}\b" crates/aequora-secrets/src/lib.rs
 done
 for symbol in \
