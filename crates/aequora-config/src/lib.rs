@@ -17,6 +17,7 @@ use aequora_conformance::{
 };
 use aequora_coordination::{LocalProcessMode, ProcessInstanceId};
 use aequora_crypto::CryptoPolicy;
+use aequora_observability::ObservabilityConfig;
 use aequora_performance::{PerformancePolicy, PerformanceProfile};
 use aequora_protocol::{Capability, ClientLimits, SessionMetadata, SnapshotLimits};
 use aequora_scheduler::{SchedulerPolicy, SyncProfile};
@@ -67,6 +68,8 @@ pub struct AequoraConfig {
     pub integrity: IntegrityConfig,
     /// Secret-free cryptographic algorithms and required-feature policy.
     pub crypto: CryptoPolicy,
+    /// Vendor-neutral telemetry export, cardinality, sampling, and client-disk budgets.
+    pub observability: ObservabilityConfig,
     /// Production server admission, deadline, and readiness controls.
     pub operational: OperationalConfig,
     /// Exact certification requirements evaluated during deployment preflight and startup.
@@ -743,6 +746,11 @@ impl AequoraConfig {
         if self.crypto.validate().is_err() {
             return Err(ConfigError::Invalid("cryptographic policy is inconsistent"));
         }
+        if self.observability.validate().is_err() {
+            return Err(ConfigError::Invalid(
+                "observability budgets are inconsistent",
+            ));
+        }
         if let Some(reason) = self.operational.invalid_reason() {
             return Err(ConfigError::Invalid(reason));
         }
@@ -963,6 +971,7 @@ mod tests {
             config
                 .validate()
                 .unwrap_or_else(|error| panic!("unsafe built-in profile: {error}"));
+            assert_eq!(config.observability, ObservabilityConfig::PRODUCTION);
         }
         assert!(
             development.operational.max_in_flight_requests
@@ -1070,6 +1079,9 @@ mod tests {
         assert!(config.validate().is_err());
         config = AequoraConfig::default();
         config.admission.retry_after_ms = 0;
+        assert!(config.validate().is_err());
+        config = AequoraConfig::default();
+        config.observability.queue_capacity = 0;
         assert!(config.validate().is_err());
         assert!(AequoraConfig::from_ron("(admission: (unknown: 1))").is_err());
     }

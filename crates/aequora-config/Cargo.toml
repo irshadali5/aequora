@@ -25,6 +25,7 @@ aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
 aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
 aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
