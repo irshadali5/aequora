@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `3d840a1df9d058916f4feea80d6e6158d70b8f2fe199e12570af6e1824c7d5c5`
+Digest: `59a6078d50ac62889e49b96904d7ebec33614baa162eba0368e13d6e30b0966e`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -167,6 +167,7 @@ Digest: `3d840a1df9d058916f4feea80d6e6158d70b8f2fe199e12570af6e1824c7d5c5`
 | conformance-profile | 78 | SQLiteDesktopLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Linux, Windows, or macOS. |
 | conformance-profile | 79 | SQLiteMobileLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Android or iOS. |
 | conformance-profile | 80 | ConfigurationRuntimeFull | Current | runtime | - | Typed, validated, redacted, atomic, capability-aware configuration and feature policy. |
+| conformance-profile | 81 | ReleaseEngineeringFull | Current | release | - | Signed immutable artifacts, compatibility-gated updates, rollback safety, and traceable release provenance. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -290,6 +291,16 @@ Digest: `3d840a1df9d058916f4feea80d6e6158d70b8f2fe199e12570af6e1824c7d5c5`
 | conformance-test | 121 | ConfigAdapterCapabilitySafety | Current | storage | - | Adapter settings activate only when declared certified capabilities satisfy them. |
 | conformance-test | 122 | ConfigFailedReloadPreservation | Current | runtime | - | Rejected reloads leave the previous valid generation fully active. |
 | conformance-test | 123 | ConfigAuthoritativePolicy | Current | security | - | Client feature decisions cannot grant business entitlement or weaken server policy. |
+| conformance-test | 124 | ReleaseTraceability | Current | release | - | Every artifact binds immutable source, build configuration, target, and release identity. |
+| conformance-test | 125 | ReleaseArtifactImmutability | Current | release | - | A semantic version cannot be rebound to different bytes. |
+| conformance-test | 126 | ReleaseSignatureIntegrity | Current | security | - | Final bytes, hashes, signatures, key purpose, and lifecycle are verified together. |
+| conformance-test | 127 | ReleaseCompatibilityGate | Current | release | - | Upgrade checks protocol, store, operation, config, snapshot, registry, and migration dimensions. |
+| conformance-test | 128 | ReleaseClientIntentPreservation | Current | desktop | - | Atomic updates preserve pending operations, cursor, conflicts, store identity, and durable intent. |
+| conformance-test | 129 | ReleaseRollbackSafety | Current | release | - | Rollback requires compatible state or a verified reversible migration. |
+| conformance-test | 130 | ReleaseImmutablePromotion | Current | release | - | Channel promotion retains the exact candidate artifact bytes. |
+| conformance-test | 131 | ReleaseCredentialIsolation | Current | security | - | Production signing and publishing credentials are absent from ordinary build jobs. |
+| conformance-test | 132 | ReleaseUpdateFailClosed | Current | security | - | Unsigned, changed, expired, incompatible, halted, and revoked updates fail closed. |
+| conformance-test | 133 | ReleaseVersionDimensionSeparation | Current | release | - | Product SemVer remains separate from every semantic compatibility dimension. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
