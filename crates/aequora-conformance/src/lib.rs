@@ -43,6 +43,8 @@ pub enum ConformanceDomain {
     DeveloperTooling,
     ReleaseEngineering,
     DeploymentOperations,
+    Observability,
+    PerformanceEngineering,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -101,6 +103,8 @@ pub enum ConformanceProfile {
     ConfigurationRuntimeFull,
     ReleaseEngineeringFull,
     DeploymentTopologyFull,
+    ObservabilityFull,
+    BenchmarkingFull,
 }
 
 impl ConformanceProfile {
@@ -139,6 +143,8 @@ impl ConformanceProfile {
             Self::ConfigurationRuntimeFull => 80,
             Self::ReleaseEngineeringFull => 81,
             Self::DeploymentTopologyFull => 82,
+            Self::ObservabilityFull => 83,
+            Self::BenchmarkingFull => 84,
         })
     }
 
@@ -175,7 +181,9 @@ impl ConformanceProfile {
             | Self::SQLiteMobileLocalFull
             | Self::ConfigurationRuntimeFull
             | Self::ReleaseEngineeringFull
-            | Self::DeploymentTopologyFull => CertificationTier::FullSync,
+            | Self::DeploymentTopologyFull
+            | Self::ObservabilityFull
+            | Self::BenchmarkingFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -792,6 +800,8 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::ConfigurationRuntimeFull => matches!(definition.id.0, 114..=123),
         ConformanceProfile::ReleaseEngineeringFull => matches!(definition.id.0, 124..=133),
         ConformanceProfile::DeploymentTopologyFull => matches!(definition.id.0, 134..=143),
+        ConformanceProfile::ObservabilityFull => matches!(definition.id.0, 144..=153),
+        ConformanceProfile::BenchmarkingFull => matches!(definition.id.0, 154..=163),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -871,7 +881,9 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::SQLiteMobileLocalFull
         | ConformanceProfile::ConfigurationRuntimeFull
         | ConformanceProfile::ReleaseEngineeringFull
-        | ConformanceProfile::DeploymentTopologyFull => false,
+        | ConformanceProfile::DeploymentTopologyFull
+        | ConformanceProfile::ObservabilityFull
+        | ConformanceProfile::BenchmarkingFull => false,
     }
 }
 
@@ -2034,6 +2046,166 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         FullSync,
         Some("deployment-topology-full")
     ),
+    test_definition!(
+        144,
+        "observability_failure_isolation",
+        Observability,
+        "AEQ-INV-OBS001",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        145,
+        "observability_cardinality_safety",
+        Observability,
+        "AEQ-INV-OBS002",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        146,
+        "observability_secret_redaction",
+        Observability,
+        "AEQ-INV-OBS003",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        147,
+        "observability_non_authority",
+        Observability,
+        "AEQ-INV-OBS004",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        148,
+        "observability_resource_bounds",
+        Observability,
+        "AEQ-INV-OBS005",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        149,
+        "observability_identity_separation",
+        Observability,
+        "AEQ-INV-OBS006",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        150,
+        "observability_monotonic_timing",
+        Observability,
+        "AEQ-INV-OBS007",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        151,
+        "observability_slo_classification",
+        Observability,
+        "AEQ-INV-OBS008",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        152,
+        "observability_client_priority",
+        Observability,
+        "AEQ-INV-OBS009",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        153,
+        "observability_alert_actionability",
+        Observability,
+        "AEQ-INV-OBS010",
+        FullSync,
+        Some("observability-full")
+    ),
+    test_definition!(
+        154,
+        "benchmark_semantic_integrity",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH001",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        155,
+        "benchmark_evidence_binding",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH002",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        156,
+        "benchmark_correctness_under_load",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH003",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        157,
+        "benchmark_resource_bounds",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH004",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        158,
+        "benchmark_capacity_headroom",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH005",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        159,
+        "benchmark_compatible_regression",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH006",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        160,
+        "benchmark_adapter_parity",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH007",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        161,
+        "benchmark_representative_workload",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH008",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        162,
+        "benchmark_evidence_classification",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH009",
+        FullSync,
+        Some("benchmarking-full")
+    ),
+    test_definition!(
+        163,
+        "benchmark_measured_optimization",
+        PerformanceEngineering,
+        "AEQ-INV-BENCH010",
+        FullSync,
+        Some("benchmarking-full")
+    ),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3125,6 +3297,30 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<Vec<_>>();
         assert_eq!(ids, (134..=143).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn observability_profile_selects_only_part_46_telemetry_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::ObservabilityFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (144..=153).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn benchmarking_profile_selects_only_part_47_performance_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::BenchmarkingFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (154..=163).collect::<Vec<_>>());
     }
 
     #[test]
