@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `59a6078d50ac62889e49b96904d7ebec33614baa162eba0368e13d6e30b0966e`
+Digest: `dc0b82fcffb3ed97854b3d5b8fbc876d15fc595c74d8fa4fcf9939d277c58fac`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -168,6 +168,7 @@ Digest: `59a6078d50ac62889e49b96904d7ebec33614baa162eba0368e13d6e30b0966e`
 | conformance-profile | 79 | SQLiteMobileLocalFull | Current | storage | - | Full target-bound SQLite local persistence on Android or iOS. |
 | conformance-profile | 80 | ConfigurationRuntimeFull | Current | runtime | - | Typed, validated, redacted, atomic, capability-aware configuration and feature policy. |
 | conformance-profile | 81 | ReleaseEngineeringFull | Current | release | - | Signed immutable artifacts, compatibility-gated updates, rollback safety, and traceable release provenance. |
+| conformance-profile | 82 | DeploymentTopologyFull | Current | runtime | - | Single-writer topology, regional-read, air-gap, recovery, and operational readiness semantics. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -301,6 +302,16 @@ Digest: `59a6078d50ac62889e49b96904d7ebec33614baa162eba0368e13d6e30b0966e`
 | conformance-test | 131 | ReleaseCredentialIsolation | Current | security | - | Production signing and publishing credentials are absent from ordinary build jobs. |
 | conformance-test | 132 | ReleaseUpdateFailClosed | Current | security | - | Unsigned, changed, expired, incompatible, halted, and revoked updates fail closed. |
 | conformance-test | 133 | ReleaseVersionDimensionSeparation | Current | release | - | Product SemVer remains separate from every semantic compatibility dimension. |
+| conformance-test | 134 | DeploymentSingleWriter | Current | runtime | - | Every active scope has exactly one current writer binding. |
+| conformance-test | 135 | DeploymentSemanticPreservation | Current | runtime | - | Topology changes do not redefine synchronization semantics. |
+| conformance-test | 136 | DeploymentNodeEpochIndependence | Current | runtime | - | Node lifecycle remains independent of authority epoch. |
+| conformance-test | 137 | DeploymentDatabaseCredentialIsolation | Current | security | - | Clients cannot bypass server execution using database credentials. |
+| conformance-test | 138 | DeploymentRegionalReadSafety | Current | runtime | - | Regional reads obey explicit cursor consistency and cannot write. |
+| conformance-test | 139 | DeploymentAirGapIndependence | Current | runtime | - | Air-gapped profiles require no public service. |
+| conformance-test | 140 | DeploymentRetrySafety | Current | runtime | - | Infrastructure retries preserve operation idempotency. |
+| conformance-test | 141 | DeploymentRestoreEpoch | Current | runtime | - | Uncertain restored continuity requires a new authority epoch. |
+| conformance-test | 142 | DeploymentDurableStateOwnership | Current | runtime | - | Correctness state survives process and node loss. |
+| conformance-test | 143 | DeploymentInfrastructureIndependence | Current | runtime | - | Core correctness has no optional infrastructure dependency. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
