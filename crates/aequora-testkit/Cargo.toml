@@ -20,6 +20,7 @@ aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
 aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
 aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
+aequora-deployment = { version = "0.1.0", path = "../aequora-deployment" }
 aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
 aequora-agent = { version = "0.1.0", path = "../aequora-agent" }
 aequora-ipc-protocol = { version = "0.1.0", path = "../aequora-ipc-protocol" }
