@@ -200,6 +200,7 @@ dependencies = [
  "aequora-policy",
  "aequora-queue",
  "aequora-region",
+ "aequora-release",
  "aequora-schema",
  "aequora-security",
  "aequora-store",
@@ -901,6 +902,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-release"
+version = "0.1.0"
+dependencies = [
+ "aequora-crypto",
+ "blake3",
+ "postcard",
+ "ron",
+ "semver",
+ "serde",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-replay"
 version = "0.1.0"
 dependencies = [
@@ -1205,6 +1220,7 @@ dependencies = [
  "aequora-queue",
  "aequora-region",
  "aequora-registry-generated",
+ "aequora-release",
  "aequora-replay",
  "aequora-scheduler",
  "aequora-schema",
@@ -1258,6 +1274,7 @@ dependencies = [
 name = "aequora-update"
 version = "0.1.0"
 dependencies = [
+ "aequora-release",
  "blake3",
  "serde",
  "thiserror",
