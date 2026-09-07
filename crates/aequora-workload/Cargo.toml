@@ -1,0 +1,20 @@
+[package]
+name = "aequora-workload"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic, runtime-neutral Aequora workload models"
+
+[dependencies]
+blake3.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ron.workspace = true
+
+[lints]
+workspace = true
