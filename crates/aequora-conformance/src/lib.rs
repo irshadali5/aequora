@@ -42,6 +42,7 @@ pub enum ConformanceDomain {
     DesktopRuntime,
     DeveloperTooling,
     ReleaseEngineering,
+    DeploymentOperations,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -99,6 +100,7 @@ pub enum ConformanceProfile {
     SQLiteMobileLocalFull,
     ConfigurationRuntimeFull,
     ReleaseEngineeringFull,
+    DeploymentTopologyFull,
 }
 
 impl ConformanceProfile {
@@ -136,6 +138,7 @@ impl ConformanceProfile {
             Self::SQLiteMobileLocalFull => 79,
             Self::ConfigurationRuntimeFull => 80,
             Self::ReleaseEngineeringFull => 81,
+            Self::DeploymentTopologyFull => 82,
         })
     }
 
@@ -171,7 +174,8 @@ impl ConformanceProfile {
             | Self::SQLiteDesktopLocalFull
             | Self::SQLiteMobileLocalFull
             | Self::ConfigurationRuntimeFull
-            | Self::ReleaseEngineeringFull => CertificationTier::FullSync,
+            | Self::ReleaseEngineeringFull
+            | Self::DeploymentTopologyFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -787,6 +791,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         }
         ConformanceProfile::ConfigurationRuntimeFull => matches!(definition.id.0, 114..=123),
         ConformanceProfile::ReleaseEngineeringFull => matches!(definition.id.0, 124..=133),
+        ConformanceProfile::DeploymentTopologyFull => matches!(definition.id.0, 134..=143),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -865,7 +870,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::SQLiteDesktopLocalFull
         | ConformanceProfile::SQLiteMobileLocalFull
         | ConformanceProfile::ConfigurationRuntimeFull
-        | ConformanceProfile::ReleaseEngineeringFull => false,
+        | ConformanceProfile::ReleaseEngineeringFull
+        | ConformanceProfile::DeploymentTopologyFull => false,
     }
 }
 
@@ -1948,6 +1954,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         FullSync,
         Some("release-engineering-full")
     ),
+    test_definition!(
+        134,
+        "deployment_single_writer",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY001",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        135,
+        "deployment_semantic_preservation",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY002",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        136,
+        "deployment_node_epoch_independence",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY003",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        137,
+        "deployment_database_credential_isolation",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY004",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        138,
+        "deployment_regional_read_safety",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY005",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        139,
+        "deployment_air_gap_independence",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY006",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        140,
+        "deployment_retry_safety",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY007",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        141,
+        "deployment_restore_epoch",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY008",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        142,
+        "deployment_durable_state_ownership",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY009",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
+    test_definition!(
+        143,
+        "deployment_infrastructure_independence",
+        DeploymentOperations,
+        "AEQ-INV-DEPLOY010",
+        FullSync,
+        Some("deployment-topology-full")
+    ),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3027,6 +3113,18 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<Vec<_>>();
         assert_eq!(ids, (124..=133).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn deployment_profile_selects_only_part_45_topology_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::DeploymentTopologyFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (134..=143).collect::<Vec<_>>());
     }
 
     #[test]
