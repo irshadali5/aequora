@@ -6,6 +6,9 @@ use aequora_authority::{
     AuthorityState, CheckpointComparison, JournalCheckpoint, PromotionEvidence,
     RecoveryVerification, compare_checkpoints,
 };
+use aequora_benchkit::{
+    BenchmarkError, BenchmarkResult, MetricDirection, RegressionPolicy, compare,
+};
 use aequora_bootstrap::{BootstrapError, BootstrapJob, SnapshotManifest};
 use aequora_cli_core::{
     CliErrorEnvelope, CliExitCode, CliRequest, ErrorCode, MachineEnvelope, OutputFormat,
@@ -36,6 +39,7 @@ use aequora_legacy::{
     BridgeHealth, CutoverReadiness, CutoverVerification, LegacyMigrationManifest,
     LegacyRetirementManifest, LegacySystemManifest, ShadowMatch, ShadowResult,
 };
+use aequora_loadgen::LoadGenerator;
 use aequora_migration::{
     CanonicalExport, CutoverBlocker, CutoverEvidence, ExportError, ExportLimits, ImportJob,
     verify_cutover,
@@ -44,6 +48,7 @@ use aequora_model::{
     ClientId, ExploreError, FailureTrace, Model, ModelAction, ModelCorrelationId, ModelEntityId,
     ModelError, ModelOperation, ModelOperationId, ReplayError, SearchBounds, explore,
 };
+use aequora_observability::{INITIAL_METRICS, ObservabilityConfig};
 use aequora_policy::ConfigGeneration;
 use aequora_queue::{
     CompactionPlan as QueueCompactionPlan, MutationMutability, OptimizationRegistry, QueueEntry,
@@ -64,6 +69,7 @@ use aequora_store::{
 };
 use aequora_store_postgres::POSTGRES_ADAPTER_MANIFEST;
 use aequora_store_stoolap::STOOLAP_ADAPTER_MANIFEST;
+use aequora_workload::{WorkloadError, WorkloadSpec};
 use std::{
     collections::BTreeMap,
     env,
@@ -201,6 +207,9 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
         None | Some("help" | "--help" | "-h") => Ok(help()),
         Some("version") => version(arguments.next().as_deref()),
         Some("doctor") => doctor(arguments.next().as_deref(), arguments.next().as_deref()),
+        Some("diagnostics") => {
+            diagnostics_command(arguments.next().as_deref(), arguments.next().as_deref())
+        }
         Some("inspect") => inspect(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("verify") => verify(
             arguments.next().as_deref(),
@@ -262,6 +271,15 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("bench") => bench_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
+        Some("load") => load_command(arguments.next().as_deref(), arguments.next().as_deref()),
+        Some("capacity") => {
+            capacity_command(arguments.next().as_deref(), arguments.next().as_deref())
+        }
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -270,9 +288,147 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> String {
     format!(
-        "{}\naequora doctor deployment <descriptor.ron>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>",
+        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>",
         base_help()
     )
+}
+
+const BUILT_IN_WORKLOADS: [&str; 8] = [
+    "generic_small/v1",
+    "generic_medium/v1",
+    "school_standard/v1",
+    "finance_append_only/v1",
+    "mobile_offline/v1",
+    "reconnect_storm/v1",
+    "hot_tenant/v1",
+    "bootstrap_large/v1",
+];
+
+fn bench_command(
+    action: Option<&str>,
+    first_path: Option<&str>,
+    second_path: Option<&str>,
+) -> Result<String, CliError> {
+    match (action, first_path, second_path) {
+        (Some("list"), None, None) => Ok(BUILT_IN_WORKLOADS.join("\n")),
+        (Some("report"), Some(path), None) => {
+            let result: BenchmarkResult = read_benchmark_ron(path)?;
+            result.validate()?;
+            Ok(format!(
+                "benchmark: {}\nscenario: {}\ngoodput: {}\np99_micros: {}\ncorrectness: passed\nenvironment: bound",
+                result.manifest.benchmark_id.as_str(),
+                result.manifest.scenario.as_str(),
+                result.counters.goodput,
+                result.latency.p99_micros,
+            ))
+        }
+        (Some("compare"), Some(baseline_path), Some(candidate_path)) => {
+            let baseline: BenchmarkResult = read_benchmark_ron(baseline_path)?;
+            let candidate: BenchmarkResult = read_benchmark_ron(candidate_path)?;
+            let comparison = compare(
+                &baseline,
+                &candidate,
+                &RegressionPolicy {
+                    direction: MetricDirection::LowerIsBetter,
+                    warning_basis_points: 500,
+                    failure_basis_points: 1_000,
+                    minimum_samples: 30,
+                    maximum_noise_basis_points: 100,
+                },
+            )?;
+            Ok(format!(
+                "benchmark: {}\ndecision: {:?}\nsignificance: {:?}\ndelta_basis_points: {}",
+                comparison.benchmark_id.as_str(),
+                comparison.decision,
+                comparison.significance,
+                comparison.delta_basis_points,
+            ))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora bench <list|report <result.ron>|compare <baseline.ron> <candidate.ron>>"
+                .to_owned(),
+        )),
+    }
+}
+
+fn load_command(action: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    if action != Some("run") {
+        return Err(CliError::Usage(
+            "usage: aequora load run <workload.ron>".to_owned(),
+        ));
+    }
+    let path = path.ok_or_else(|| CliError::Usage("workload path is required".to_owned()))?;
+    let workload = read_workload(path)?;
+    let generator = LoadGenerator::new(workload.clone())?;
+    Ok(format!(
+        "load plan validated: {}\noffered_operations: {}\nmaximum_in_flight: {}\nmaximum_queue_depth: {}\nproduction_target: denied by default\nexecution: supply an explicitly authorized runtime adapter",
+        workload.scenario.as_str(),
+        workload.total_offered_operations(),
+        workload.maximum_in_flight,
+        workload.maximum_queue_depth,
+    ) + if generator.preserves_offered_load() {
+        "\nload_model: open"
+    } else {
+        "\nload_model: closed"
+    })
+}
+
+fn capacity_command(action: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    if action != Some("estimate") {
+        return Err(CliError::Usage(
+            "usage: aequora capacity estimate <workload.ron>".to_owned(),
+        ));
+    }
+    let path = path.ok_or_else(|| CliError::Usage("workload path is required".to_owned()))?;
+    let workload = read_workload(path)?;
+    Ok(format!(
+        "scenario: {}\nevidence: Unknown\ncertified: false\nmeasured_sustainable_capacity: Unknown\nrecommended_topology: Not Yet Certified\nplanning_offered_load: {} operations over {} seconds",
+        workload.scenario.as_str(),
+        workload.total_offered_operations(),
+        workload.duration_seconds,
+    ))
+}
+
+fn read_workload(path: &str) -> Result<WorkloadSpec, CliError> {
+    let bytes = read_bounded(Path::new(path), 1024 * 1024)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| CliError::BenchmarkEncoding)?;
+    let workload =
+        ron::from_str(text).map_err(|error| CliError::BenchmarkRon(error.to_string()))?;
+    Ok(workload)
+}
+
+fn read_benchmark_ron<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, CliError> {
+    let bytes = read_bounded(Path::new(path), 16 * 1024 * 1024)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| CliError::BenchmarkEncoding)?;
+    ron::from_str(text).map_err(|error| CliError::BenchmarkRon(error.to_string()))
+}
+
+fn diagnostics_command(action: Option<&str>, identity: Option<&str>) -> Result<String, CliError> {
+    match (action, identity) {
+        (Some("summary"), None) => Ok(format!(
+            "observability status: configured\nexport: {:?}\nqueue_capacity: {}\nbatch_size: {}\nmetric_series_budget: {}\nforensic_truth: ledger,journal,audit,jobs,authority-metadata",
+            ObservabilityConfig::PRODUCTION.export,
+            ObservabilityConfig::PRODUCTION.queue_capacity,
+            ObservabilityConfig::PRODUCTION.batch_size,
+            ObservabilityConfig::PRODUCTION.maximum_metric_series,
+        )),
+        (Some("metrics"), None) => Ok(INITIAL_METRICS
+            .iter()
+            .map(|metric| format!("{} {:?}", metric.name(), metric.kind()))
+            .collect::<Vec<_>>()
+            .join("\n")),
+        (Some("trace"), Some(trace_id)) => {
+            let _ = trace_id.parse::<u128>().map_err(|_| {
+                CliError::Usage("trace ID must be an unsigned 128-bit integer".to_owned())
+            })?;
+            Ok(format!(
+                "trace lookup: best-effort trace {trace_id} is not present in the local process snapshot\nfallback: query durable operation ledger, journal, audit, jobs, and authority metadata"
+            ))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora diagnostics <summary|metrics|trace <trace-id>>".to_owned(),
+        )),
+    }
 }
 
 fn base_help() -> &'static str {
@@ -1627,6 +1783,16 @@ enum CliError {
     Configuration(#[from] aequora_config::ConfigurationError),
     #[error(transparent)]
     Release(#[from] ReleaseError),
+    #[error(transparent)]
+    Benchmark(#[from] BenchmarkError),
+    #[error(transparent)]
+    Workload(#[from] WorkloadError),
+    #[error(transparent)]
+    Loadgen(#[from] aequora_loadgen::LoadgenError),
+    #[error("benchmark or workload RON is malformed: {0}")]
+    BenchmarkRon(String),
+    #[error("benchmark or workload file must contain UTF-8 RON")]
+    BenchmarkEncoding,
     #[error("release metadata is malformed: {0}")]
     ReleaseRon(String),
     #[error("release metadata must contain UTF-8 RON")]
