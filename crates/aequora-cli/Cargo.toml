@@ -29,6 +29,7 @@ aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
 aequora-config = { version = "0.1.0", path = "../aequora-config" }
 aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
 aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
+aequora-deployment = { version = "0.1.0", path = "../aequora-deployment" }
 aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
 aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
 aequora-inspect = { version = "0.1.0", path = "../aequora-inspect" }
