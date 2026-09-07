@@ -772,11 +772,51 @@ pub enum InvariantId {
     DeploymentDurableStateOwnership,
     /// Core correctness is independent of optional infrastructure products.
     DeploymentInfrastructureIndependence,
+    /// Telemetry loss, delay, or failure cannot change synchronization correctness.
+    ObservabilityFailureIsolation,
+    /// Unbounded semantic identities never become ordinary metric labels.
+    ObservabilityCardinalitySafety,
+    /// Secrets and prohibited payload fields never enter production telemetry.
+    ObservabilitySecretRedaction,
+    /// Sampled telemetry never replaces durable forensic truth.
+    ObservabilityNonAuthority,
+    /// Telemetry buffering and export remain bounded below correctness resources.
+    ObservabilityResourceBounds,
+    /// Transport, trace, workflow, and operation identities remain distinct.
+    ObservabilityIdentitySeparation,
+    /// Latency uses monotonic timing and wall clock never orders authority.
+    ObservabilityMonotonicTiming,
+    /// SLOs classify expected outcomes separately from infrastructure failure.
+    ObservabilitySloClassification,
+    /// Client telemetry remains privacy-safe and lower priority than user intent.
+    ObservabilityClientPriority,
+    /// Every page alert has stable actionable ownership and a runbook.
+    ObservabilityAlertActionability,
+    /// Benchmarks cannot weaken production correctness semantics for speed.
+    BenchmarkSemanticIntegrity,
+    /// Published results bind workload, dataset, build, configuration, and environment.
+    BenchmarkEvidenceBinding,
+    /// Load tests verify synchronization correctness as well as speed.
+    BenchmarkCorrectnessUnderLoad,
+    /// Offered overload remains bounded by admission, queues, and memory.
+    BenchmarkResourceBounds,
+    /// Capacity recommendations reserve explicit safety headroom.
+    BenchmarkCapacityHeadroom,
+    /// Regression decisions require compatible, statistically meaningful evidence.
+    BenchmarkCompatibleRegression,
+    /// Local adapter comparisons use identical semantic workloads.
+    BenchmarkAdapterParity,
+    /// Workloads represent tail latency, offline, reconnect, conflict, and scale behavior.
+    BenchmarkRepresentativeWorkload,
+    /// Capacity claims identify measured, interpolated, extrapolated, or unknown evidence.
+    BenchmarkEvidenceClassification,
+    /// Optimization follows representative measurement and correctness verification.
+    BenchmarkMeasuredOptimization,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 381] = [
+    pub const ALL: [Self; 401] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1158,6 +1198,26 @@ impl InvariantId {
         Self::DeploymentRestoreEpoch,
         Self::DeploymentDurableStateOwnership,
         Self::DeploymentInfrastructureIndependence,
+        Self::ObservabilityFailureIsolation,
+        Self::ObservabilityCardinalitySafety,
+        Self::ObservabilitySecretRedaction,
+        Self::ObservabilityNonAuthority,
+        Self::ObservabilityResourceBounds,
+        Self::ObservabilityIdentitySeparation,
+        Self::ObservabilityMonotonicTiming,
+        Self::ObservabilitySloClassification,
+        Self::ObservabilityClientPriority,
+        Self::ObservabilityAlertActionability,
+        Self::BenchmarkSemanticIntegrity,
+        Self::BenchmarkEvidenceBinding,
+        Self::BenchmarkCorrectnessUnderLoad,
+        Self::BenchmarkResourceBounds,
+        Self::BenchmarkCapacityHeadroom,
+        Self::BenchmarkCompatibleRegression,
+        Self::BenchmarkAdapterParity,
+        Self::BenchmarkRepresentativeWorkload,
+        Self::BenchmarkEvidenceClassification,
+        Self::BenchmarkMeasuredOptimization,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1546,6 +1606,26 @@ impl InvariantId {
             Self::DeploymentRestoreEpoch => "AEQ-INV-DEPLOY008",
             Self::DeploymentDurableStateOwnership => "AEQ-INV-DEPLOY009",
             Self::DeploymentInfrastructureIndependence => "AEQ-INV-DEPLOY010",
+            Self::ObservabilityFailureIsolation => "AEQ-INV-OBS001",
+            Self::ObservabilityCardinalitySafety => "AEQ-INV-OBS002",
+            Self::ObservabilitySecretRedaction => "AEQ-INV-OBS003",
+            Self::ObservabilityNonAuthority => "AEQ-INV-OBS004",
+            Self::ObservabilityResourceBounds => "AEQ-INV-OBS005",
+            Self::ObservabilityIdentitySeparation => "AEQ-INV-OBS006",
+            Self::ObservabilityMonotonicTiming => "AEQ-INV-OBS007",
+            Self::ObservabilitySloClassification => "AEQ-INV-OBS008",
+            Self::ObservabilityClientPriority => "AEQ-INV-OBS009",
+            Self::ObservabilityAlertActionability => "AEQ-INV-OBS010",
+            Self::BenchmarkSemanticIntegrity => "AEQ-INV-BENCH001",
+            Self::BenchmarkEvidenceBinding => "AEQ-INV-BENCH002",
+            Self::BenchmarkCorrectnessUnderLoad => "AEQ-INV-BENCH003",
+            Self::BenchmarkResourceBounds => "AEQ-INV-BENCH004",
+            Self::BenchmarkCapacityHeadroom => "AEQ-INV-BENCH005",
+            Self::BenchmarkCompatibleRegression => "AEQ-INV-BENCH006",
+            Self::BenchmarkAdapterParity => "AEQ-INV-BENCH007",
+            Self::BenchmarkRepresentativeWorkload => "AEQ-INV-BENCH008",
+            Self::BenchmarkEvidenceClassification => "AEQ-INV-BENCH009",
+            Self::BenchmarkMeasuredOptimization => "AEQ-INV-BENCH010",
         }
     }
 
@@ -2683,6 +2763,66 @@ impl InvariantId {
             Self::DeploymentInfrastructureIndependence => {
                 "core correctness requires no orchestrator broker cache service mesh or public cloud"
             }
+            Self::ObservabilityFailureIsolation => {
+                "telemetry loss delay or exporter failure cannot alter synchronization correctness or authoritative commits"
+            }
+            Self::ObservabilityCardinalitySafety => {
+                "unbounded operation entity device request and tenant identities are absent from ordinary metric labels"
+            }
+            Self::ObservabilitySecretRedaction => {
+                "secrets and prohibited sensitive payload fields never appear in production telemetry or exporter errors"
+            }
+            Self::ObservabilityNonAuthority => {
+                "durable audit operation ledger journal and authority metadata remain forensic truth instead of sampled telemetry"
+            }
+            Self::ObservabilityResourceBounds => {
+                "bounded telemetry cannot exhaust resources required for intent authority transactions or synchronization"
+            }
+            Self::ObservabilityIdentitySeparation => {
+                "request trace correlation and operation identifiers retain distinct meanings"
+            }
+            Self::ObservabilityMonotonicTiming => {
+                "latency uses monotonic clocks while wall timestamps remain advisory and never order authority"
+            }
+            Self::ObservabilitySloClassification => {
+                "SLOs distinguish infrastructure failures from validation authorization conflict and business outcomes"
+            }
+            Self::ObservabilityClientPriority => {
+                "client telemetry remains bounded privacy governed resource aware and lower priority than durable user intent"
+            }
+            Self::ObservabilityAlertActionability => {
+                "every page alert has a stable identity actionable condition owner and recovery runbook"
+            }
+            Self::BenchmarkSemanticIntegrity => {
+                "benchmark speed never comes from weakening durability idempotency authorization validation audit or conflict semantics"
+            }
+            Self::BenchmarkEvidenceBinding => {
+                "every published result binds exact workload dataset build configuration and environment evidence"
+            }
+            Self::BenchmarkCorrectnessUnderLoad => {
+                "performance tests verify synchronization correctness in addition to throughput latency and resource use"
+            }
+            Self::BenchmarkResourceBounds => {
+                "unbounded offered load produces bounded admission queues and memory rather than resource exhaustion"
+            }
+            Self::BenchmarkCapacityHeadroom => {
+                "capacity recommendations reserve explicit headroom and never use saturation throughput as production capacity"
+            }
+            Self::BenchmarkCompatibleRegression => {
+                "regression gates compare statistically meaningful compatible evidence and report uncertainty honestly"
+            }
+            Self::BenchmarkAdapterParity => {
+                "official local adapters are compared with identical semantic transaction workloads and conformance requirements"
+            }
+            Self::BenchmarkRepresentativeWorkload => {
+                "workloads include realistic offline reconnect conflict dataset scale and tail latency behavior"
+            }
+            Self::BenchmarkEvidenceClassification => {
+                "capacity estimates distinguish measured interpolated extrapolated and unknown evidence without false certification"
+            }
+            Self::BenchmarkMeasuredOptimization => {
+                "optimization follows representative measurement and retains correctness after the change"
+            }
         }
     }
 
@@ -3076,6 +3216,26 @@ impl InvariantId {
             Self::DeploymentRestoreEpoch => 378,
             Self::DeploymentDurableStateOwnership => 379,
             Self::DeploymentInfrastructureIndependence => 380,
+            Self::ObservabilityFailureIsolation => 381,
+            Self::ObservabilityCardinalitySafety => 382,
+            Self::ObservabilitySecretRedaction => 383,
+            Self::ObservabilityNonAuthority => 384,
+            Self::ObservabilityResourceBounds => 385,
+            Self::ObservabilityIdentitySeparation => 386,
+            Self::ObservabilityMonotonicTiming => 387,
+            Self::ObservabilitySloClassification => 388,
+            Self::ObservabilityClientPriority => 389,
+            Self::ObservabilityAlertActionability => 390,
+            Self::BenchmarkSemanticIntegrity => 391,
+            Self::BenchmarkEvidenceBinding => 392,
+            Self::BenchmarkCorrectnessUnderLoad => 393,
+            Self::BenchmarkResourceBounds => 394,
+            Self::BenchmarkCapacityHeadroom => 395,
+            Self::BenchmarkCompatibleRegression => 396,
+            Self::BenchmarkAdapterParity => 397,
+            Self::BenchmarkRepresentativeWorkload => 398,
+            Self::BenchmarkEvidenceClassification => 399,
+            Self::BenchmarkMeasuredOptimization => 400,
         }
     }
 }
@@ -3127,7 +3287,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 381] = [
+pub static REGISTRY: [InvariantEntry; 401] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5794,6 +5954,146 @@ pub static REGISTRY: [InvariantEntry; 381] = [
         "optional_infrastructure_absence_matrix",
         "deployment_minimal_profile_contract",
         "deployment_required_optional_service_total",
+    ),
+    entry(
+        InvariantId::ObservabilityFailureIsolation,
+        "observability_failure_isolation",
+        "export_failure_correctness_matrix",
+        "bounded_exporter_failure_contract",
+        "telemetry_export_failures_total",
+    ),
+    entry(
+        InvariantId::ObservabilityCardinalitySafety,
+        "observability_cardinality_safety",
+        "unbounded_identity_cardinality_matrix",
+        "metric_series_budget_contract",
+        "telemetry_series_budget_rejection_total",
+    ),
+    entry(
+        InvariantId::ObservabilitySecretRedaction,
+        "observability_secret_redaction",
+        "secret_sentinel_ingress_matrix",
+        "structured_field_redaction_contract",
+        "telemetry_redaction_failure_total",
+    ),
+    entry(
+        InvariantId::ObservabilityNonAuthority,
+        "observability_non_authority",
+        "sampled_trace_loss_matrix",
+        "durable_forensic_fallback_contract",
+        "telemetry_truth_substitution_total",
+    ),
+    entry(
+        InvariantId::ObservabilityResourceBounds,
+        "observability_resource_bounds",
+        "slow_exporter_queue_matrix",
+        "bounded_telemetry_queue_contract",
+        "telemetry_dropped_total",
+    ),
+    entry(
+        InvariantId::ObservabilityIdentitySeparation,
+        "observability_identity_separation",
+        "request_trace_correlation_operation_matrix",
+        "telemetry_context_identity_contract",
+        "telemetry_identity_conflation_total",
+    ),
+    entry(
+        InvariantId::ObservabilityMonotonicTiming,
+        "observability_monotonic_timing",
+        "wall_clock_jump_latency_matrix",
+        "monotonic_timer_contract",
+        "telemetry_negative_duration_total",
+    ),
+    entry(
+        InvariantId::ObservabilitySloClassification,
+        "observability_slo_classification",
+        "outcome_eligibility_matrix",
+        "slo_outcome_classification_contract",
+        "slo_misclassified_outcome_total",
+    ),
+    entry(
+        InvariantId::ObservabilityClientPriority,
+        "observability_client_priority",
+        "client_disk_pressure_priority_matrix",
+        "client_telemetry_budget_contract",
+        "client_telemetry_intent_pressure_total",
+    ),
+    entry(
+        InvariantId::ObservabilityAlertActionability,
+        "observability_alert_actionability",
+        "page_alert_metadata_matrix",
+        "alert_catalog_contract",
+        "alert_metadata_invalid_total",
+    ),
+    entry(
+        InvariantId::BenchmarkSemanticIntegrity,
+        "benchmark_semantic_integrity",
+        "correctness_feature_subset_matrix",
+        "benchmark_correctness_profile_contract",
+        "benchmark_weakened_semantics_total",
+    ),
+    entry(
+        InvariantId::BenchmarkEvidenceBinding,
+        "benchmark_evidence_binding",
+        "manifest_fingerprint_matrix",
+        "benchmark_manifest_contract",
+        "benchmark_incomplete_manifest_total",
+    ),
+    entry(
+        InvariantId::BenchmarkCorrectnessUnderLoad,
+        "benchmark_correctness_under_load",
+        "load_correctness_oracle_matrix",
+        "benchmark_correctness_oracle_contract",
+        "benchmark_correctness_failure_total",
+    ),
+    entry(
+        InvariantId::BenchmarkResourceBounds,
+        "benchmark_resource_bounds",
+        "offered_load_bound_matrix",
+        "bounded_load_generator_contract",
+        "benchmark_admission_rejected_total",
+    ),
+    entry(
+        InvariantId::BenchmarkCapacityHeadroom,
+        "benchmark_capacity_headroom",
+        "capacity_headroom_matrix",
+        "capacity_estimate_contract",
+        "capacity_headroom_invalid_total",
+    ),
+    entry(
+        InvariantId::BenchmarkCompatibleRegression,
+        "benchmark_compatible_regression",
+        "environment_compatibility_matrix",
+        "regression_comparison_contract",
+        "benchmark_inconclusive_total",
+    ),
+    entry(
+        InvariantId::BenchmarkAdapterParity,
+        "benchmark_adapter_parity",
+        "local_adapter_semantic_matrix",
+        "local_adapter_benchmark_contract",
+        "benchmark_adapter_mismatch_total",
+    ),
+    entry(
+        InvariantId::BenchmarkRepresentativeWorkload,
+        "benchmark_representative_workload",
+        "workload_distribution_matrix",
+        "workload_validation_contract",
+        "benchmark_unrepresentative_workload_total",
+    ),
+    entry(
+        InvariantId::BenchmarkEvidenceClassification,
+        "benchmark_evidence_classification",
+        "capacity_evidence_class_matrix",
+        "capacity_evidence_contract",
+        "capacity_unclassified_claim_total",
+    ),
+    entry(
+        InvariantId::BenchmarkMeasuredOptimization,
+        "benchmark_measured_optimization",
+        "optimization_evidence_matrix",
+        "optimization_review_contract",
+        "optimization_unmeasured_change_total",
     ),
 ];
 
