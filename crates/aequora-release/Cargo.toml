@@ -1,0 +1,26 @@
+[package]
+name = "aequora-release"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Typed release manifests, signatures, compatibility, and update decisions for Aequora"
+repository.workspace = true
+
+[[bin]]
+name = "aequora-release"
+path = "src/bin/aequora-release.rs"
+doc = false
+
+[dependencies]
+aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
+blake3.workspace = true
+postcard.workspace = true
+ron.workspace = true
+semver.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
