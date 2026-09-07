@@ -13,6 +13,9 @@ tracing = ["dep:tracing"]
 
 [dependencies]
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 
 [lints]

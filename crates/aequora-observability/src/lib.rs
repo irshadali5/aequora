@@ -1,5 +1,9 @@
 //! Payload-free metrics and optional structured tracing hooks.
 
+mod part46;
+
+pub use part46::*;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use aequora_types::{DeviceId, RequestId, SessionId, TenantId};
