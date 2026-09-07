@@ -52,6 +52,7 @@ use aequora_region::{
     AuthorityLocation, RegionError, RegionalReadRequest, RegionalRouter, RegionalRouterConfig,
     ReplicaObservation,
 };
+use aequora_release::{CryptoTimestamp, ReleaseError, ReleaseTrustStore, SignedReleaseManifest};
 use aequora_schema::{SchemaError, SchemaRegistry};
 use aequora_security::{
     ATTACKER_CLASSES, SECURITY_ASSETS, SECURITY_INVARIANTS, SecurityError, SecurityPolicy,
@@ -69,6 +70,7 @@ use std::{
     io::{self, Read},
     path::Path,
     process::ExitCode,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -195,7 +197,7 @@ fn machine_error(error: &CliError) -> CliErrorEnvelope {
 fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliError> {
     let mut arguments = arguments.into_iter();
     match arguments.next().as_deref() {
-        None | Some("help" | "--help" | "-h") => Ok(help().to_owned()),
+        None | Some("help" | "--help" | "-h") => Ok(help()),
         Some("version") => version(arguments.next().as_deref()),
         Some("doctor") => doctor(arguments.next().as_deref()),
         Some("inspect") => inspect(arguments.next().as_deref(), arguments.next().as_deref()),
@@ -253,14 +255,72 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("release") => release_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
     }
 }
 
-fn help() -> &'static str {
-    "global: --output human|json|ron --color auto|always|never --log-format human|json --log-level <level> --trace-id <id>\naequora version\naequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora conform run <request.ron>\naequora conform storage|protocol|client|server\naequora conform report <artifact.ron>\naequora conform verify <artifact.ron>\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora init <new-directory> <client|server>"
+fn help() -> String {
+    format!(
+        "{}\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>",
+        base_help()
+    )
+}
+
+fn base_help() -> &'static str {
+    "global: --output human|json|ron --color auto|always|never --log-format human|json --log-level <level> --trace-id <id>\naequora version\naequora doctor adapters\naequora inspect adapters\naequora inspect adapter <stoolap|postgresql>\naequora verify pair <local> <authority>\naequora verify export <artifact.postcard> <schema.ron>\naequora verify model\naequora verify trace <failure.ron>\naequora integrity status\naequora integrity verify <snapshot.ron>\naequora integrity explain <repair-plan.ron>\naequora queue status <entries.ron>\naequora queue verify <entries.ron>\naequora queue compact <entries.ron> <registry.ron>\naequora queue explain <plan.ron>\naequora import plan <artifact.postcard> <schema.ron>\naequora import validate <artifact.postcard> <schema.ron>\naequora import status <job.ron>\naequora import cutover <evidence.ron>\naequora import explain\naequora bootstrap inspect <manifest.ron>\naequora bootstrap status <job.ron>\naequora bootstrap explain\naequora authority status <state.ron>\naequora authority readiness <evidence.ron>\naequora authority promote <plan.ron>\naequora authority demote <state.ron>\naequora authority restore-plan <state.ron>\naequora authority recover <state.ron> --new-epoch\naequora authority verify <verification.ron>\naequora authority fork-check <local.ron> <peer.ron>\naequora authority explain\naequora region status <topology.ron>\naequora region route <topology.ron> <request.ron>\naequora region explain\naequora compat show\naequora compat matrix\naequora compat deprecated\naequora compat check-client <hello.ron> <policy.ron>\naequora compat registry [registry.ron]\naequora conform run <request.ron>\naequora conform storage|protocol|client|server\naequora conform report <artifact.ron>\naequora conform verify <artifact.ron>\naequora admin capabilities\naequora admin validate-listener <policy.ron>\naequora admin inspect-action <action.ron>\naequora admin explain\naequora incident inspect <manifest.ron> <policy.ron>\naequora incident explain-operation <input.ron>\naequora incident explain\naequora security show\naequora security validate <policy.ron>\naequora security explain\naequora feed show\naequora feed validate <consumer.ron>\naequora feed explain\naequora legacy discover <system-manifest.ron>\naequora legacy map-verify <migration-manifest.ron>\naequora legacy bridge-status <health.ron>\naequora legacy shadow-report <results.ron>\naequora legacy cutover-plan <readiness.ron>\naequora legacy verify <verification.ron>\naequora legacy retire <retirement-manifest.ron>\naequora config check <config.ron>\naequora config effective <config.ron>\naequora config explain <setting>\naequora config diff <current.ron> <candidate.ron>\naequora init <new-directory> <client|server>"
+}
+
+fn release_command(
+    action: Option<&str>,
+    manifest_path: Option<&str>,
+    trust_path: Option<&str>,
+    artifact_directory: Option<&str>,
+) -> Result<String, CliError> {
+    const USAGE: &str =
+        "usage: aequora release verify <manifest.ron> <trust.ron> <artifact-directory>";
+    if action != Some("verify") {
+        return Err(CliError::Usage(USAGE.to_owned()));
+    }
+    let manifest_path = manifest_path.ok_or_else(|| CliError::Usage(USAGE.to_owned()))?;
+    let trust_path = trust_path.ok_or_else(|| CliError::Usage(USAGE.to_owned()))?;
+    let artifact_directory = artifact_directory.ok_or_else(|| CliError::Usage(USAGE.to_owned()))?;
+    let manifest_bytes = read_bounded(Path::new(manifest_path), 8 * 1024 * 1024)?;
+    let trust_bytes = read_bounded(Path::new(trust_path), 1024 * 1024)?;
+    let manifest: SignedReleaseManifest =
+        ron::from_str(std::str::from_utf8(&manifest_bytes).map_err(|_| CliError::ReleaseEncoding)?)
+            .map_err(|error| CliError::ReleaseRon(error.to_string()))?;
+    let trust: ReleaseTrustStore =
+        ron::from_str(std::str::from_utf8(&trust_bytes).map_err(|_| CliError::ReleaseEncoding)?)
+            .map_err(|error| CliError::ReleaseRon(error.to_string()))?;
+    let unix_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| CliError::ReleaseClock)?
+        .as_secs();
+    let now = CryptoTimestamp(i64::try_from(unix_seconds).map_err(|_| CliError::ReleaseClock)?);
+    manifest.verify_manifest(&trust, now)?;
+    let root = Path::new(artifact_directory);
+    for descriptor in &manifest.manifest.artifact_set {
+        let maximum = usize::try_from(descriptor.size)
+            .map_err(|_| CliError::Release(ReleaseError::InvalidManifest("artifact too large")))?;
+        let bytes = read_bounded(&root.join(&descriptor.name), maximum)?;
+        descriptor.verify(&bytes, &trust, now)?;
+    }
+    Ok(format!(
+        "release: verified id={} version={} artifacts={} source={} build={}",
+        manifest.manifest.release_id,
+        manifest.manifest.release_version,
+        manifest.manifest.artifact_set.len(),
+        manifest.manifest.provenance.git_commit,
+        manifest.manifest.provenance.build_id,
+    ))
 }
 
 fn config_capabilities() -> AdapterCapabilities {
@@ -1544,6 +1604,14 @@ enum CliError {
     Region(#[from] RegionError),
     #[error(transparent)]
     Configuration(#[from] aequora_config::ConfigurationError),
+    #[error(transparent)]
+    Release(#[from] ReleaseError),
+    #[error("release metadata is malformed: {0}")]
+    ReleaseRon(String),
+    #[error("release metadata must contain UTF-8 RON")]
+    ReleaseEncoding,
+    #[error("system clock cannot represent release verification time")]
+    ReleaseClock,
     #[error("configuration file must contain UTF-8 RON")]
     ConfigEncoding,
     #[error("starter target already exists: {0}")]
@@ -1627,6 +1695,10 @@ mod tests {
 
     #[test]
     fn configuration_commands_validate_explain_and_redact() {
+        let usage = command(args(&["help"]))
+            .unwrap_or_else(|error| panic!("configuration help failed: {error}"));
+        assert!(usage.contains("aequora config check <config.ron>"));
+        assert!(usage.contains("aequora config diff <current.ron> <candidate.ron>"));
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../config/production.ron")
             .to_string_lossy()
