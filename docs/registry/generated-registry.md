@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `dc0b82fcffb3ed97854b3d5b8fbc876d15fc595c74d8fa4fcf9939d277c58fac`
+Digest: `019d0d635a770505af97b92e0d9cb2794d39d8d36b6193b1359fe1dc54afa9cb`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -169,6 +169,8 @@ Digest: `dc0b82fcffb3ed97854b3d5b8fbc876d15fc595c74d8fa4fcf9939d277c58fac`
 | conformance-profile | 80 | ConfigurationRuntimeFull | Current | runtime | - | Typed, validated, redacted, atomic, capability-aware configuration and feature policy. |
 | conformance-profile | 81 | ReleaseEngineeringFull | Current | release | - | Signed immutable artifacts, compatibility-gated updates, rollback safety, and traceable release provenance. |
 | conformance-profile | 82 | DeploymentTopologyFull | Current | runtime | - | Single-writer topology, regional-read, air-gap, recovery, and operational readiness semantics. |
+| conformance-profile | 83 | ObservabilityFull | Current | runtime | - | Bounded privacy-safe metrics tracing logs SLOs alerts and exporter failure isolation. |
+| conformance-profile | 84 | BenchmarkingFull | Current | performance | - | Reproducible correctness-preserving benchmark regression workload and capacity evidence. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -312,6 +314,26 @@ Digest: `dc0b82fcffb3ed97854b3d5b8fbc876d15fc595c74d8fa4fcf9939d277c58fac`
 | conformance-test | 141 | DeploymentRestoreEpoch | Current | runtime | - | Uncertain restored continuity requires a new authority epoch. |
 | conformance-test | 142 | DeploymentDurableStateOwnership | Current | runtime | - | Correctness state survives process and node loss. |
 | conformance-test | 143 | DeploymentInfrastructureIndependence | Current | runtime | - | Core correctness has no optional infrastructure dependency. |
+| conformance-test | 144 | ObservabilityFailureIsolation | Current | runtime | - | Telemetry failure cannot alter authoritative or local synchronization work. |
+| conformance-test | 145 | ObservabilityCardinalitySafety | Current | runtime | - | Metric labels exclude unbounded semantic identities. |
+| conformance-test | 146 | ObservabilitySecretRedaction | Current | security | - | Production telemetry removes secrets and prohibited payload data. |
+| conformance-test | 147 | ObservabilityNonAuthority | Current | runtime | - | Sampled telemetry never replaces durable forensic truth. |
+| conformance-test | 148 | ObservabilityResourceBounds | Current | runtime | - | Telemetry queues and export batches remain hard bounded. |
+| conformance-test | 149 | ObservabilityIdentitySeparation | Current | runtime | - | Request trace correlation and operation identities remain distinct. |
+| conformance-test | 150 | ObservabilityMonotonicTiming | Current | runtime | - | Latency measurement is monotonic and wall time never orders authority. |
+| conformance-test | 151 | ObservabilitySloClassification | Current | runtime | - | SLO eligibility excludes validation authorization conflict and business outcomes. |
+| conformance-test | 152 | ObservabilityClientPriority | Current | client | - | Client telemetry is bounded privacy governed and lower priority than user intent. |
+| conformance-test | 153 | ObservabilityAlertActionability | Current | operations | - | Every page alert has stable identity ownership condition and runbook. |
+| conformance-test | 154 | BenchmarkSemanticIntegrity | Current | performance | - | Benchmarks retain required production correctness and security semantics. |
+| conformance-test | 155 | BenchmarkEvidenceBinding | Current | performance | - | Results bind exact workload dataset build configuration and environment. |
+| conformance-test | 156 | BenchmarkCorrectnessUnderLoad | Current | performance | - | Load evidence detects duplicate effects cursor gaps losses leaks and ordering failures. |
+| conformance-test | 157 | BenchmarkResourceBounds | Current | performance | - | Offered overload remains bounded and rejected work is visible. |
+| conformance-test | 158 | BenchmarkCapacityHeadroom | Current | performance | - | Capacity models reserve explicit headroom and N plus one where required. |
+| conformance-test | 159 | BenchmarkCompatibleRegression | Current | performance | - | Regression decisions require compatible environments and sufficient evidence. |
+| conformance-test | 160 | BenchmarkAdapterParity | Current | storage | - | SQLite and Stoolap comparisons use the same semantic transaction workloads. |
+| conformance-test | 161 | BenchmarkRepresentativeWorkload | Current | performance | - | Workloads model bounded realistic offline reconnect conflict and tail behavior. |
+| conformance-test | 162 | BenchmarkEvidenceClassification | Current | performance | - | Capacity guidance declares measured interpolated extrapolated or unknown evidence. |
+| conformance-test | 163 | BenchmarkMeasuredOptimization | Current | performance | - | Optimization requires representative before and after evidence plus correctness verification. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
