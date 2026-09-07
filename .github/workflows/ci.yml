@@ -155,6 +155,8 @@ jobs:
         run: bash scripts/check-cli-toolchain-architecture.sh
       - name: Enforce configuration, secrets, runtime policy, and feature rollout contracts
         run: bash scripts/check-configuration-architecture.sh
+      - name: Enforce packaging, signing, update-channel, and delivery contracts
+        run: bash scripts/check-release-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
