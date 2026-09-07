@@ -22,6 +22,7 @@ use aequora_conformance::{
     CertificationArtifact, CertificationRequest, ConformanceDomain, ConformanceError,
     REFERENCE_TESTS, markdown_report,
 };
+use aequora_deployment::{DeploymentDescriptor, DeploymentError};
 use aequora_diagnostics::{
     DiagnosticError, DiagnosticPolicy, IncidentBundleManifest, OperationExplanationInput,
     explain_operation,
@@ -199,7 +200,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
     match arguments.next().as_deref() {
         None | Some("help" | "--help" | "-h") => Ok(help()),
         Some("version") => version(arguments.next().as_deref()),
-        Some("doctor") => doctor(arguments.next().as_deref()),
+        Some("doctor") => doctor(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("inspect") => inspect(arguments.next().as_deref(), arguments.next().as_deref()),
         Some("verify") => verify(
             arguments.next().as_deref(),
@@ -269,7 +270,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> String {
     format!(
-        "{}\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>",
+        "{}\naequora doctor deployment <descriptor.ron>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>",
         base_help()
     )
 }
@@ -1266,10 +1267,30 @@ fn integrity(subject: Option<&str>, path: Option<&str>) -> Result<String, CliErr
     }
 }
 
-fn doctor(subject: Option<&str>) -> Result<String, CliError> {
-    if subject.is_some_and(|value| value != "adapters") {
+fn doctor(subject: Option<&str>, descriptor_path: Option<&str>) -> Result<String, CliError> {
+    if subject == Some("deployment") {
+        let path = descriptor_path.ok_or_else(|| {
+            CliError::Usage("usage: aequora doctor deployment <descriptor.ron>".to_owned())
+        })?;
+        let bytes = read_bounded(Path::new(path), 1024 * 1024)?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| CliError::DeploymentEncoding)?;
+        let descriptor = DeploymentDescriptor::from_ron(text)?;
+        let report = descriptor.doctor();
+        if !report.is_ready() {
+            return Err(CliError::DeploymentDoctor(format!("{:?}", report.findings)));
+        }
+        return Ok(format!(
+            "deployment status: ready\ntopology: {:?}\nnodes: {}\nauthority_scopes: {}\nconnection_budget: {}/{}",
+            descriptor.topology,
+            descriptor.nodes.len(),
+            descriptor.authorities.len(),
+            descriptor.connections.planned().unwrap_or(u32::MAX),
+            descriptor.connections.database_capacity,
+        ));
+    }
+    if subject.is_some_and(|value| value != "adapters") || descriptor_path.is_some() {
         return Err(CliError::Usage(
-            "doctor currently supports only `aequora doctor adapters`".to_owned(),
+            "usage: aequora doctor <adapters|deployment <descriptor.ron>>".to_owned(),
         ));
     }
     AdapterRequirements::PRODUCTION_LOCAL.verify(STOOLAP_ADAPTER_MANIFEST)?;
@@ -1612,6 +1633,12 @@ enum CliError {
     ReleaseEncoding,
     #[error("system clock cannot represent release verification time")]
     ReleaseClock,
+    #[error(transparent)]
+    Deployment(#[from] DeploymentError),
+    #[error("deployment descriptor must contain UTF-8 RON")]
+    DeploymentEncoding,
+    #[error("deployment doctor failed: {0}")]
+    DeploymentDoctor(String),
     #[error("configuration file must contain UTF-8 RON")]
     ConfigEncoding,
     #[error("starter target already exists: {0}")]
