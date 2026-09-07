@@ -98,6 +98,7 @@ implicitly claim completion of an earlier part.
 | Part 41: CLI and developer toolchain | Implemented | [Part 41 report](docs/cli-developer-toolchain-completion.md) |
 | Part 42: SQLite embedded local adapter | Implemented | [Part 42 report](docs/sqlite-local-adapter-completion.md) |
 | Part 43: Configuration, secrets, runtime policy, and feature flags | Implemented | [Part 43 report](docs/configuration-secrets-runtime-policy-feature-flags-completion.md) |
+| Part 44: Packaging, distribution, release engineering, signing, and update channels | Implemented | [Part 44 report](docs/packaging-distribution-release-engineering-completion.md) |
 
 ## Implementation workflow
 
@@ -137,6 +138,7 @@ bash scripts/check-dioxus-client-architecture.sh
 bash scripts/check-cli-toolchain-architecture.sh
 bash scripts/check-sqlite-local-adapter-architecture.sh
 bash scripts/check-configuration-architecture.sh
+bash scripts/check-release-architecture.sh
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
