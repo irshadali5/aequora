@@ -1,0 +1,14 @@
+(
+    schema_version: 1,
+    alerts: [
+        (id: "AEQ-ALERT-AUTHORITY-001", severity: Page, owner: "runtime", condition: "authoritative commit failures exhaust the fast error budget", runbook: "deploy/observability/runbooks/authority-commit-failure.md", group_by: [Environment, Region]),
+        (id: "AEQ-ALERT-DB-002", severity: Page, owner: "storage", condition: "database pool wait and transaction latency indicate sustained saturation", runbook: "deploy/observability/runbooks/database-saturation.md", group_by: [Environment, Region]),
+        (id: "AEQ-ALERT-SYNC-003", severity: Page, owner: "runtime", condition: "eligible sync availability burns the fast or slow SLO budget", runbook: "deploy/observability/runbooks/sync-availability-burn.md", group_by: [Environment, Region]),
+        (id: "AEQ-ALERT-AUTHORITY-004", severity: SecurityResponse, owner: "security", condition: "authority continuity error or fork evidence is observed", runbook: "deploy/observability/runbooks/authority-continuity.md", group_by: [Environment, Region]),
+        (id: "AEQ-ALERT-BACKUP-001", severity: Ticket, owner: "operations", condition: "verified backup or restore-drill evidence is stale", runbook: "deploy/runbooks/restore-and-promotion.md", group_by: [Environment]),
+        (id: "AEQ-ALERT-JOBS-001", severity: Ticket, owner: "runtime", condition: "bounded job backlog or dead-letter count grows persistently", runbook: "deploy/observability/runbooks/job-backlog.md", group_by: [Environment, JobKind]),
+        (id: "AEQ-ALERT-STORAGE-001", severity: Ticket, owner: "storage", condition: "critical storage growth or disk pressure approaches the reserved durability floor", runbook: "deploy/observability/runbooks/storage-pressure.md", group_by: [Environment, Component]),
+        (id: "AEQ-ALERT-COMPAT-001", severity: Ticket, owner: "release", condition: "deprecated or incompatible client population exceeds rollout policy", runbook: "deploy/observability/runbooks/compatibility-population.md", group_by: [Environment, Release]),
+    ],
+)
+

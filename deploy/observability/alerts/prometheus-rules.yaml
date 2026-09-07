@@ -1,0 +1,23 @@
+groups:
+  - name: aequora-page
+    rules:
+      - alert: AEQ-ALERT-AUTHORITY-001
+        expr: rate(aequora_operation_outcomes_total{result_class="internal_failure"}[5m]) > 0
+        for: 5m
+        labels: {severity: page, owner: runtime}
+        annotations: {runbook: deploy/observability/runbooks/authority-commit-failure.md}
+      - alert: AEQ-ALERT-DB-002
+        expr: histogram_quantile(0.95, sum by (le, environment, region) (rate(aequora_db_pool_wait_seconds_bucket[10m]))) > 0.25
+        for: 10m
+        labels: {severity: page, owner: storage}
+        annotations: {runbook: deploy/observability/runbooks/database-saturation.md}
+      - alert: AEQ-ALERT-SYNC-003
+        expr: sum(rate(aequora_sync_exchange_total{result_class=~"retryable_infrastructure_failure|internal_failure"}[1h])) / sum(rate(aequora_sync_exchange_total{result_class=~"accepted|duplicate|retryable_infrastructure_failure|internal_failure"}[1h])) > 0.0144
+        for: 10m
+        labels: {severity: page, owner: runtime}
+        annotations: {runbook: deploy/observability/runbooks/sync-availability-burn.md}
+      - alert: AEQ-ALERT-AUTHORITY-004
+        expr: increase(aequora_authority_continuity_errors_total[5m]) > 0
+        labels: {severity: security_response, owner: security}
+        annotations: {runbook: deploy/observability/runbooks/authority-continuity.md}
+

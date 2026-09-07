@@ -1,0 +1,2 @@
+{"title":"Aequora Sync Pipeline","schemaVersion":39,"panels":[{"type":"timeseries","title":"Operation Outcomes","targets":[{"expr":"sum by (result_class) (rate(aequora_operation_outcomes_total[5m]))"}]},{"type":"timeseries","title":"Outbox Pending","targets":[{"expr":"sum(aequora_outbox_pending)"}]},{"type":"timeseries","title":"Bootstrap Outcomes","targets":[{"expr":"sum by (result_class) (rate(aequora_bootstrap_outcomes_total[10m]))"}]}]}
+

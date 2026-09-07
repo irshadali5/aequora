@@ -1,0 +1,9 @@
+(
+    schema_version: 1,
+    objectives: [
+        (id: "sync_availability", sli: SyncAvailability, owner: "runtime", measurement_source: "aequora_sync_exchange_total", window_seconds: 2592000, target_basis_points: 9990, exclusions: [RejectedValidation, RejectedAuthorization, Conflict, BusinessRejection], runbook: "deploy/observability/runbooks/sync-availability-burn.md"),
+        (id: "authority_commit_latency", sli: AuthorityCommitLatency, owner: "storage", measurement_source: "aequora_db_transaction_duration_seconds", window_seconds: 2592000, target_basis_points: 9900, exclusions: [RejectedValidation, RejectedAuthorization, Conflict, BusinessRejection], runbook: "deploy/observability/runbooks/authority-commit-failure.md"),
+        (id: "bootstrap_success", sli: BootstrapSuccess, owner: "runtime", measurement_source: "aequora_bootstrap_outcomes_total", window_seconds: 2592000, target_basis_points: 9900, exclusions: [RejectedAuthorization], runbook: "deploy/observability/runbooks/sync-availability-burn.md"),
+    ],
+)
+

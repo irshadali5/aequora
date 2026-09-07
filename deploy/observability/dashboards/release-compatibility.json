@@ -1,0 +1,2 @@
+{"title":"Aequora Release and Compatibility","schemaVersion":39,"panels":[{"type":"stat","title":"Build Information","targets":[{"expr":"aequora_build_info"}]},{"type":"timeseries","title":"Errors by Bounded Release","targets":[{"expr":"sum by (release, result_class) (rate(aequora_sync_exchange_total{result_class=~\"retryable_infrastructure_failure|internal_failure\"}[5m]))"}]}]}
+

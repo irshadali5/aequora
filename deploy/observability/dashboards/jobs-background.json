@@ -1,0 +1,2 @@
+{"title":"Aequora Jobs and Background Work","schemaVersion":39,"panels":[{"type":"timeseries","title":"Pending Jobs","targets":[{"expr":"sum by (job_kind) (aequora_jobs_pending)"}]},{"type":"timeseries","title":"Bootstrap Duration p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(aequora_bootstrap_duration_seconds_bucket[10m])))"}]}]}
+

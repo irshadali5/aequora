@@ -1,0 +1,2 @@
+{"title":"Aequora PostgreSQL and Authority","schemaVersion":39,"panels":[{"type":"timeseries","title":"DB Pool Wait p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(aequora_db_pool_wait_seconds_bucket[5m])))"}]},{"type":"timeseries","title":"Authority Transaction p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(aequora_db_transaction_duration_seconds_bucket[5m])))"}]},{"type":"timeseries","title":"Timeline Lock Wait p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(aequora_timeline_lock_wait_seconds_bucket[5m])))"}]}]}
+
