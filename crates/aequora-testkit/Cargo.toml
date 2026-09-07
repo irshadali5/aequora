@@ -50,6 +50,7 @@ aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
 aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
 aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
 aequora-region = { version = "0.1.0", path = "../aequora-region" }
+aequora-release = { version = "0.1.0", path = "../aequora-release" }
 aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
 aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
 aequora-server = { version = "0.1.0", path = "../aequora-server" }
