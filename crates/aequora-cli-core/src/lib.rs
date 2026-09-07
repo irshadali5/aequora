@@ -225,10 +225,13 @@ pub enum CommandName {
     Security,
     Feed,
     Legacy,
+    Bench,
+    Load,
+    Capacity,
 }
 
 impl CommandName {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 37] = [
         Self::Init,
         Self::Doctor,
         Self::Config,
@@ -263,6 +266,9 @@ impl CommandName {
         Self::Security,
         Self::Feed,
         Self::Legacy,
+        Self::Bench,
+        Self::Load,
+        Self::Capacity,
     ];
 
     #[must_use]
@@ -302,6 +308,9 @@ impl CommandName {
             Self::Security => "security",
             Self::Feed => "feed",
             Self::Legacy => "legacy",
+            Self::Bench => "bench",
+            Self::Load => "load",
+            Self::Capacity => "capacity",
         }
     }
 }
