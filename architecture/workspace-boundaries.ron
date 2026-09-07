@@ -108,6 +108,7 @@
                 "aequora-agent",
                 "aequora-axum",
                 "aequora-config",
+                "aequora-deployment",
                 "aequora-desktop-runtime",
                 "aequora-dioxus",
                 "aequora-http",
