@@ -71,6 +71,9 @@ aequora-storage-profile = { version = "0.1.0", path = "../aequora-storage-profil
 aequora-storage-backup = { version = "0.1.0", path = "../aequora-storage-backup" }
 aequora-storage-conformance = { version = "0.1.0", path = "../aequora-storage-conformance" }
 aequora-blob-store = { version = "0.1.0", path = "../aequora-blob-store" }
+aequora-benchkit = { version = "0.1.0", path = "../aequora-benchkit" }
+aequora-loadgen = { version = "0.1.0", path = "../aequora-loadgen" }
+aequora-workload = { version = "0.1.0", path = "../aequora-workload" }
 async-trait.workspace = true
 futures-util.workspace = true
 postcard.workspace = true
