@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "hot_tenant/v1", domain: Inventory, dataset_seed: 4707,
+ tenants: 1000, clients: 20000, active_clients: 8000, duration_seconds: 900,
+ arrival: Step, load_model: Open, offered_operations_per_second: 5000,
+ maximum_in_flight: 1024, maximum_queue_depth: 8192,
+ operation_mix_basis_points: {"stock.reserve": 7000, "stock.release": 1000, "read.sync": 2000},
+ payload_bytes: (p50: 300, p95: 1500, p99: 6000), offline_clients_basis_points: 1000,
+ reconnect_window_seconds: 60,
+ network: (profile: Broadband, latency_millis: 30, jitter_millis: 10, loss_basis_points: 10, bandwidth_bytes_per_second: 10000000),
+ conflicts: (conflicting_operations_basis_points: 2500, hot_entity_basis_points: 7000),
+ dependencies: (dependent_operations_basis_points: 800, maximum_depth: 8, maximum_edges_per_operation: 5),
+ cache_state: Warm, dataset_reset: RetainedJournal, synthetic_or_sanitized: true,
+)

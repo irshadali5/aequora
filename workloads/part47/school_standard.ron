@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "school_standard/v1", domain: SchoolErp, dataset_seed: 4703,
+ tenants: 100, clients: 10000, active_clients: 3000, duration_seconds: 900,
+ arrival: Burst, load_model: Open, offered_operations_per_second: 1500,
+ maximum_in_flight: 768, maximum_queue_depth: 4096,
+ operation_mix_basis_points: {"attendance.record": 4500, "student.update": 1500, "fee.record": 1000, "read.sync": 3000},
+ payload_bytes: (p50: 400, p95: 2000, p99: 8000), offline_clients_basis_points: 2000,
+ reconnect_window_seconds: 120,
+ network: (profile: Cellular, latency_millis: 80, jitter_millis: 25, loss_basis_points: 50, bandwidth_bytes_per_second: 2000000),
+ conflicts: (conflicting_operations_basis_points: 150, hot_entity_basis_points: 700),
+ dependencies: (dependent_operations_basis_points: 600, maximum_depth: 8, maximum_edges_per_operation: 4),
+ cache_state: Mixed, dataset_reset: Preloaded, synthetic_or_sanitized: true,
+)

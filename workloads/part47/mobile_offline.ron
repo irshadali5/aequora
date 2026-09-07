@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "mobile_offline/v1", domain: FieldService, dataset_seed: 4705,
+ tenants: 200, clients: 20000, active_clients: 5000, duration_seconds: 1800,
+ arrival: Scheduled, load_model: Closed, offered_operations_per_second: 600,
+ maximum_in_flight: 256, maximum_queue_depth: 8192,
+ operation_mix_basis_points: {"visit.update": 5500, "attachment.metadata": 1500, "read.sync": 3000},
+ payload_bytes: (p50: 500, p95: 4000, p99: 16000), offline_clients_basis_points: 6500,
+ reconnect_window_seconds: 600,
+ network: (profile: LossyMobile, latency_millis: 180, jitter_millis: 80, loss_basis_points: 500, bandwidth_bytes_per_second: 250000),
+ conflicts: (conflicting_operations_basis_points: 500, hot_entity_basis_points: 400),
+ dependencies: (dependent_operations_basis_points: 1200, maximum_depth: 12, maximum_edges_per_operation: 6),
+ cache_state: Mixed, dataset_reset: Preloaded, synthetic_or_sanitized: true,
+)

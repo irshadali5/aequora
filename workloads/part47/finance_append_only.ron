@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "finance_append_only/v1", domain: FinanceErp, dataset_seed: 4704,
+ tenants: 50, clients: 5000, active_clients: 1500, duration_seconds: 900,
+ arrival: PoissonLike, load_model: Open, offered_operations_per_second: 800,
+ maximum_in_flight: 384, maximum_queue_depth: 2048,
+ operation_mix_basis_points: {"ledger.append": 7500, "read.sync": 2500},
+ payload_bytes: (p50: 600, p95: 3000, p99: 12000), offline_clients_basis_points: 500,
+ reconnect_window_seconds: 60,
+ network: (profile: Broadband, latency_millis: 25, jitter_millis: 5, loss_basis_points: 5, bandwidth_bytes_per_second: 10000000),
+ conflicts: (conflicting_operations_basis_points: 50, hot_entity_basis_points: 1000),
+ dependencies: (dependent_operations_basis_points: 1500, maximum_depth: 16, maximum_edges_per_operation: 6),
+ cache_state: Warm, dataset_reset: RetainedJournal, synthetic_or_sanitized: true,
+)

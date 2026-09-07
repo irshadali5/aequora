@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "bootstrap_large/v1", domain: DocumentMetadata, dataset_seed: 4708,
+ tenants: 50, clients: 1000, active_clients: 500, duration_seconds: 3600,
+ arrival: Ramp, load_model: Closed, offered_operations_per_second: 100,
+ maximum_in_flight: 64, maximum_queue_depth: 512,
+ operation_mix_basis_points: {"snapshot.install": 8000, "read.sync": 2000},
+ payload_bytes: (p50: 65536, p95: 262144, p99: 1048576), offline_clients_basis_points: 2000,
+ reconnect_window_seconds: 300,
+ network: (profile: HighLatencyWan, latency_millis: 200, jitter_millis: 40, loss_basis_points: 50, bandwidth_bytes_per_second: 1000000),
+ conflicts: (conflicting_operations_basis_points: 10, hot_entity_basis_points: 100),
+ dependencies: (dependent_operations_basis_points: 100, maximum_depth: 4, maximum_edges_per_operation: 2),
+ cache_state: Cold, dataset_reset: Preloaded, synthetic_or_sanitized: true,
+)

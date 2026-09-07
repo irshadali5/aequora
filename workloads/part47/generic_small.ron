@@ -1,0 +1,13 @@
+(
+ format_version: 1, scenario: "generic_small/v1", domain: GenericCrud, dataset_seed: 4701,
+ tenants: 10, clients: 100, active_clients: 25, duration_seconds: 60,
+ arrival: Constant, load_model: Closed, offered_operations_per_second: 50,
+ maximum_in_flight: 32, maximum_queue_depth: 128,
+ operation_mix_basis_points: {"entity.update": 6000, "read.sync": 4000},
+ payload_bytes: (p50: 256, p95: 1024, p99: 4096), offline_clients_basis_points: 500,
+ reconnect_window_seconds: 30,
+ network: (profile: Broadband, latency_millis: 20, jitter_millis: 5, loss_basis_points: 5, bandwidth_bytes_per_second: 10000000),
+ conflicts: (conflicting_operations_basis_points: 50, hot_entity_basis_points: 100),
+ dependencies: (dependent_operations_basis_points: 200, maximum_depth: 4, maximum_edges_per_operation: 3),
+ cache_state: Warm, dataset_reset: Fresh, synthetic_or_sanitized: true,
+)
