@@ -732,11 +732,31 @@ pub enum InvariantId {
     ConfigFailedReloadPreservation,
     /// Client flags cannot grant entitlement or weaken server security policy.
     ConfigAuthoritativePolicy,
+    /// Every artifact is bound to immutable source and build provenance.
+    ReleaseTraceability,
+    /// A semantic version cannot silently identify different bytes.
+    ReleaseArtifactImmutability,
+    /// Production artifacts are hash-checked and purpose-specifically signed.
+    ReleaseSignatureIntegrity,
+    /// Upgrade requires every independent compatibility dimension to pass.
+    ReleaseCompatibilityGate,
+    /// Client upgrade preserves all durable local synchronization intent.
+    ReleaseClientIntentPreservation,
+    /// Rollback requires compatible state or an explicit verified migration.
+    ReleaseRollbackSafety,
+    /// Channel promotion retains the exact built artifact bytes.
+    ReleaseImmutablePromotion,
+    /// Ordinary build jobs never possess production signing or publishing credentials.
+    ReleaseCredentialIsolation,
+    /// Untrusted, expired, incompatible, halted, or revoked updates fail closed.
+    ReleaseUpdateFailClosed,
+    /// Product `SemVer` never substitutes for protocol, store, config, or registry versions.
+    ReleaseVersionDimensionSeparation,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 361] = [
+    pub const ALL: [Self; 371] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1098,6 +1118,16 @@ impl InvariantId {
         Self::ConfigAdapterCapabilitySafety,
         Self::ConfigFailedReloadPreservation,
         Self::ConfigAuthoritativePolicy,
+        Self::ReleaseTraceability,
+        Self::ReleaseArtifactImmutability,
+        Self::ReleaseSignatureIntegrity,
+        Self::ReleaseCompatibilityGate,
+        Self::ReleaseClientIntentPreservation,
+        Self::ReleaseRollbackSafety,
+        Self::ReleaseImmutablePromotion,
+        Self::ReleaseCredentialIsolation,
+        Self::ReleaseUpdateFailClosed,
+        Self::ReleaseVersionDimensionSeparation,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1466,6 +1496,16 @@ impl InvariantId {
             Self::ConfigAdapterCapabilitySafety => "AEQ-INV-CONFIG008",
             Self::ConfigFailedReloadPreservation => "AEQ-INV-CONFIG009",
             Self::ConfigAuthoritativePolicy => "AEQ-INV-CONFIG010",
+            Self::ReleaseTraceability => "AEQ-INV-RELEASE001",
+            Self::ReleaseArtifactImmutability => "AEQ-INV-RELEASE002",
+            Self::ReleaseSignatureIntegrity => "AEQ-INV-RELEASE003",
+            Self::ReleaseCompatibilityGate => "AEQ-INV-RELEASE004",
+            Self::ReleaseClientIntentPreservation => "AEQ-INV-RELEASE005",
+            Self::ReleaseRollbackSafety => "AEQ-INV-RELEASE006",
+            Self::ReleaseImmutablePromotion => "AEQ-INV-RELEASE007",
+            Self::ReleaseCredentialIsolation => "AEQ-INV-RELEASE008",
+            Self::ReleaseUpdateFailClosed => "AEQ-INV-RELEASE009",
+            Self::ReleaseVersionDimensionSeparation => "AEQ-INV-RELEASE010",
         }
     }
 
@@ -2543,6 +2583,36 @@ impl InvariantId {
             Self::ConfigAuthoritativePolicy => {
                 "client feature flags cannot grant business entitlement or weaken authoritative server security policy"
             }
+            Self::ReleaseTraceability => {
+                "every official artifact is bound to immutable source build configuration target and release manifest"
+            }
+            Self::ReleaseArtifactImmutability => {
+                "a published semantic version cannot silently identify different artifact bytes"
+            }
+            Self::ReleaseSignatureIntegrity => {
+                "production artifacts are integrity checked and signed by a purpose-specific identity"
+            }
+            Self::ReleaseCompatibilityGate => {
+                "upgrade cannot bypass database store protocol configuration or registry compatibility checks"
+            }
+            Self::ReleaseClientIntentPreservation => {
+                "supported client upgrades preserve pending operations cursors conflicts store identity and durable intent"
+            }
+            Self::ReleaseRollbackSafety => {
+                "rollback requires compatible resulting state or an explicit verified rollback migration"
+            }
+            Self::ReleaseImmutablePromotion => {
+                "release channels promote the same exact artifact bytes whenever practical"
+            }
+            Self::ReleaseCredentialIsolation => {
+                "production signing and publishing credentials remain isolated from ordinary build jobs"
+            }
+            Self::ReleaseUpdateFailClosed => {
+                "unsigned mismatched expired incompatible halted and revoked updates never become trusted"
+            }
+            Self::ReleaseVersionDimensionSeparation => {
+                "product SemVer remains independent from protocol store operation config snapshot and registry versions"
+            }
         }
     }
 
@@ -2916,6 +2986,16 @@ impl InvariantId {
             Self::ConfigAdapterCapabilitySafety => 358,
             Self::ConfigFailedReloadPreservation => 359,
             Self::ConfigAuthoritativePolicy => 360,
+            Self::ReleaseTraceability => 361,
+            Self::ReleaseArtifactImmutability => 362,
+            Self::ReleaseSignatureIntegrity => 363,
+            Self::ReleaseCompatibilityGate => 364,
+            Self::ReleaseClientIntentPreservation => 365,
+            Self::ReleaseRollbackSafety => 366,
+            Self::ReleaseImmutablePromotion => 367,
+            Self::ReleaseCredentialIsolation => 368,
+            Self::ReleaseUpdateFailClosed => 369,
+            Self::ReleaseVersionDimensionSeparation => 370,
         }
     }
 }
@@ -2967,7 +3047,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 361] = [
+pub static REGISTRY: [InvariantEntry; 371] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -5494,6 +5574,76 @@ pub static REGISTRY: [InvariantEntry; 361] = [
         "flag_entitlement_intersection_matrix",
         "feature_entitlement_separation_contract",
         "config_client_policy_grant_total",
+    ),
+    entry(
+        InvariantId::ReleaseTraceability,
+        "release_traceability",
+        "release_manifest_provenance_matrix",
+        "release_manifest_verification_contract",
+        "release_untraceable_artifact_total",
+    ),
+    entry(
+        InvariantId::ReleaseArtifactImmutability,
+        "release_artifact_immutability",
+        "semantic_version_digest_conflict_matrix",
+        "immutable_release_index_contract",
+        "release_version_repoint_total",
+    ),
+    entry(
+        InvariantId::ReleaseSignatureIntegrity,
+        "release_signature_integrity",
+        "artifact_tamper_and_key_purpose_matrix",
+        "final_artifact_signature_contract",
+        "release_signature_failure_total",
+    ),
+    entry(
+        InvariantId::ReleaseCompatibilityGate,
+        "release_compatibility_gate",
+        "upgrade_dimension_matrix",
+        "release_compatibility_contract",
+        "release_incompatible_upgrade_total",
+    ),
+    entry(
+        InvariantId::ReleaseClientIntentPreservation,
+        "release_client_intent_preservation",
+        "atomic_upgrade_failure_matrix",
+        "desktop_upgrade_checkpoint_contract",
+        "release_upgrade_intent_loss_total",
+    ),
+    entry(
+        InvariantId::ReleaseRollbackSafety,
+        "release_rollback_safety",
+        "rollback_class_and_format_matrix",
+        "release_rollback_contract",
+        "release_unsafe_rollback_total",
+    ),
+    entry(
+        InvariantId::ReleaseImmutablePromotion,
+        "release_immutable_promotion",
+        "channel_promotion_digest_matrix",
+        "release_promotion_contract",
+        "release_rebuild_on_promotion_total",
+    ),
+    entry(
+        InvariantId::ReleaseCredentialIsolation,
+        "release_credential_isolation",
+        "release_job_permission_matrix",
+        "release_workflow_permission_contract",
+        "release_credential_exposure_total",
+    ),
+    entry(
+        InvariantId::ReleaseUpdateFailClosed,
+        "release_update_fail_closed",
+        "update_metadata_adversarial_matrix",
+        "signed_update_metadata_contract",
+        "release_untrusted_update_total",
+    ),
+    entry(
+        InvariantId::ReleaseVersionDimensionSeparation,
+        "release_version_dimension_separation",
+        "independent_version_dimension_matrix",
+        "release_compatibility_dimension_contract",
+        "release_version_conflation_total",
     ),
 ];
 
