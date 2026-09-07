@@ -140,6 +140,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-benchkit"
+version = "0.1.0"
+dependencies = [
+ "aequora-invariants",
+ "aequora-workload",
+ "ron",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-blob"
 version = "0.1.0"
 dependencies = [
@@ -184,6 +195,7 @@ dependencies = [
  "aequora",
  "aequora-admin",
  "aequora-authority",
+ "aequora-benchkit",
  "aequora-bootstrap",
  "aequora-cli-core",
  "aequora-compat",
@@ -196,8 +208,10 @@ dependencies = [
  "aequora-inspect",
  "aequora-integrity",
  "aequora-legacy",
+ "aequora-loadgen",
  "aequora-migration",
  "aequora-model",
+ "aequora-observability",
  "aequora-policy",
  "aequora-queue",
  "aequora-region",
@@ -208,6 +222,7 @@ dependencies = [
  "aequora-store-postgres",
  "aequora-store-stoolap",
  "aequora-types",
+ "aequora-workload",
  "hex",
  "ron",
  "serde",
@@ -307,6 +322,7 @@ dependencies = [
  "aequora-crypto",
  "aequora-feature-flags",
  "aequora-http",
+ "aequora-observability",
  "aequora-performance",
  "aequora-policy",
  "aequora-protocol",
@@ -642,6 +658,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-loadgen"
+version = "0.1.0"
+dependencies = [
+ "aequora-benchkit",
+ "aequora-workload",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-macros"
 version = "0.1.0"
 dependencies = [
@@ -727,6 +753,9 @@ name = "aequora-observability"
 version = "0.1.0"
 dependencies = [
  "aequora-types",
+ "ron",
+ "serde",
+ "thiserror",
  "tracing",
 ]
 
@@ -1194,6 +1223,7 @@ dependencies = [
  "aequora-agent",
  "aequora-audit",
  "aequora-authority",
+ "aequora-benchkit",
  "aequora-blob-store",
  "aequora-bootstrap",
  "aequora-client",
@@ -1221,6 +1251,7 @@ dependencies = [
  "aequora-legacy",
  "aequora-legacy-api",
  "aequora-live",
+ "aequora-loadgen",
  "aequora-migration",
  "aequora-mobile-bindings",
  "aequora-mobile-runtime",
@@ -1255,6 +1286,7 @@ dependencies = [
  "aequora-update",
  "aequora-validator",
  "aequora-workflow",
+ "aequora-workload",
  "async-trait",
  "blake3",
  "criterion",
@@ -1315,6 +1347,17 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "aequora-workload"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "postcard",
+ "ron",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
