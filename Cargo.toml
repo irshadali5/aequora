@@ -97,6 +97,9 @@ members = [
     "crates/aequora-storage-encryption",
     "crates/aequora-storage-conformance",
     "crates/aequora-blob-store",
+    "crates/aequora-benchkit",
+    "crates/aequora-workload",
+    "crates/aequora-loadgen",
 ]
 
 [workspace.package]
