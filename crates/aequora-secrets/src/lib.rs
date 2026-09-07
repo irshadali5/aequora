@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, fs, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, env, fmt, fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -46,7 +46,7 @@ pub struct SecretProviderRef {
 }
 
 /// Serializable reference to secret material. This type never contains plaintext secret bytes.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SecretRef {
     /// Name of an environment variable.
     Environment(SecretKey),
@@ -56,6 +56,19 @@ pub enum SecretRef {
     OsStore(SecretKey),
     /// Key in an application-registered provider.
     Provider(SecretProviderRef),
+}
+
+impl fmt::Debug for SecretRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Environment(key) => formatter.debug_tuple("Environment").field(key).finish(),
+            Self::File(_) => formatter.write_str("File(<redacted-path>)"),
+            Self::OsStore(key) => formatter.debug_tuple("OsStore").field(key).finish(),
+            Self::Provider(reference) => {
+                formatter.debug_tuple("Provider").field(reference).finish()
+            }
+        }
+    }
 }
 
 /// How a consumer can adopt a rotated value.
@@ -126,6 +139,25 @@ pub trait SecretProvider: Send + Sync {
     ///
     /// Returns a typed provider error without embedding secret contents.
     async fn resolve(&self, key: &SecretKey) -> Result<SecretBytes, SecretError>;
+}
+
+/// Built-in provider for simple container and CI environment injection.
+///
+/// High-assurance deployments should prefer an OS store or dedicated external provider.
+pub struct EnvironmentSecretProvider;
+
+#[async_trait]
+impl SecretProvider for EnvironmentSecretProvider {
+    async fn resolve(&self, key: &SecretKey) -> Result<SecretBytes, SecretError> {
+        let value = env::var(key.as_str()).map_err(|error| match error {
+            env::VarError::NotPresent => SecretError::NotFound,
+            env::VarError::NotUnicode(_) => SecretError::ProviderFailure,
+        })?;
+        if value.is_empty() {
+            return Err(SecretError::NotFound);
+        }
+        Ok(SecretBytes::new(value.into_bytes()))
+    }
 }
 
 /// Resolution error that never contains plaintext secret material.
@@ -226,7 +258,7 @@ impl SecretResolver {
 
 fn read_secret_file(path: &PathBuf) -> Result<SecretBytes, SecretError> {
     let metadata = fs::metadata(path).map_err(|_| SecretError::InsecureFile)?;
-    if !metadata.is_file() {
+    if !metadata.is_file() || metadata.len() > 1_048_576 {
         return Err(SecretError::InsecureFile);
     }
     #[cfg(unix)]
@@ -309,5 +341,7 @@ mod tests {
         let secret = SecretString::new("part43-marker-secret".to_owned());
         assert_eq!(secret.expose(), "part43-marker-secret");
         assert_eq!(format!("{secret:?}"), "<redacted>");
+        let file = SecretRef::File(PathBuf::from("/sensitive/mounted/credential"));
+        assert_eq!(format!("{file:?}"), "File(<redacted-path>)");
     }
 }
