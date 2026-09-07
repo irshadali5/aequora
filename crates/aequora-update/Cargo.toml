@@ -8,6 +8,7 @@ description = "Signed desktop update planning and local-intent preservation cont
 repository.workspace = true
 
 [dependencies]
+aequora-release = { version = "0.1.0", path = "../aequora-release" }
 blake3.workspace = true
 serde.workspace = true
 thiserror.workspace = true
