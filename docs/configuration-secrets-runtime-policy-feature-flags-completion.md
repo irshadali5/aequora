@@ -41,6 +41,22 @@ No external configuration service is required.
 
 ## Completed verification
 
-Verification evidence for the current checkout is recorded by the focused gate and repository
-commands above. Environment-bound production secret stores and signed remote policy distribution
-remain application/deployment evidence and are not fabricated by this repository.
+Verified on 2026-09-07 with `CARGO_BUILD_JOBS=1`:
+
+- the focused Part 43 gate, including configuration, secret, runtime-policy, feature-policy,
+  testkit, invariant, conformance, registry, CLI validation, and CLI redaction tests;
+- locked/offline all-feature workspace tests, after granting the existing loopback HTTP test the
+  required local bind permission;
+- strict workspace Clippy and all-target/all-feature checking;
+- Rust 1.87 all-target/all-feature checking and warning-denied workspace Rustdoc;
+- Guppy/workspace boundaries (22 rules, 94 crates, 9 layers, 12 isolated dependencies);
+- database-neutral custom, Stoolap, SQLite, PostgreSQL, and combined profiles; and
+- registry Rust/Markdown generation and verification, formatting, and diff hygiene.
+
+The first sandboxed workspace test attempt failed only because the existing `aequora-http`
+loopback listener received `Operation not permitted`; the permitted rerun passed. The semantic
+retrieval refresh downloaded its model and indexed the new Part 43 configuration code, but its
+full GraphRAG scan was stopped after prolonged processing to preserve bounded laptop resources.
+This does not affect source, build, or test verification. Environment-bound production secret
+stores and signed remote policy distribution remain application/deployment evidence and are not
+fabricated by this repository.
