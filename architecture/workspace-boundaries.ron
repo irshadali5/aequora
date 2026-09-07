@@ -5,6 +5,7 @@
             name: "foundation",
             crates: [
                 "aequora-blob",
+                "aequora-workload",
                 "aequora-compute",
                 "aequora-feature-flags",
                 "aequora-coordination",
@@ -26,6 +27,7 @@
                 "aequora-admin",
                 "aequora-audit",
                 "aequora-authority",
+                "aequora-benchkit",
                 "aequora-clock",
                 "aequora-codec",
                 "aequora-compat",
@@ -138,6 +140,7 @@
             name: "tooling-verification",
             crates: [
                 "aequora-dev",
+                "aequora-loadgen",
                 "aequora-model",
                 "aequora-testkit",
             ],
@@ -146,6 +149,7 @@
     allowed_outward_edges: [
         (source: "aequora", dependency: "aequora-testkit"),
         (source: "aequora-cli", dependency: "aequora-model"),
+        (source: "aequora-cli", dependency: "aequora-loadgen"),
     ],
     dependency_budgets: [
         (crate_name: "aequora-types", max_workspace: 0, max_external: 3),
