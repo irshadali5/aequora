@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `0d8d449713074a2fbd65d2eef195fe0b367e3067e0d68e31777daaef4bec8e99`
+Digest: `f28a4a68da87904a3793b8b780faad67c68bc9b84db5d337113b3531ca732b4c`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -173,6 +173,7 @@ Digest: `0d8d449713074a2fbd65d2eef195fe0b367e3067e0d68e31777daaef4bec8e99`
 | conformance-profile | 84 | BenchmarkingFull | Current | performance | - | Reproducible correctness-preserving benchmark regression workload and capacity evidence. |
 | conformance-profile | 85 | VerificationFull | Current | quality | - | Deterministic fault-aware verification and explicit release quality-gate evidence. |
 | conformance-profile | 86 | SupplyChainFull | Current | release | - | Fail-closed dependency, SBOM, provenance, reproducibility, and third-party risk governance. |
+| conformance-profile | 87 | GeneralAvailabilityFull | Current | release | - | Evidence-bound v1 scope, support, upgrade, blocker, and general-availability decisions. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -356,6 +357,16 @@ Digest: `0d8d449713074a2fbd65d2eef195fe0b367e3067e0d68e31777daaef4bec8e99`
 | conformance-test | 181 | SupplyServiceBoundary | Current | architecture | - | Operational providers have explicit failure behavior and do not become authority. |
 | conformance-test | 182 | SupplyEvidenceHonesty | Current | release | - | Reproducibility and support claims cannot exceed retained evidence. |
 | conformance-test | 183 | SupplyDependencyJustification | Current | architecture | - | Every critical dependency records capability lifecycle owner and replacement value. |
+| conformance-test | 184 | GaAtomicityEvidence | Current | quality | - | General availability requires executable Tx A Tx B and Tx C failure evidence. |
+| conformance-test | 185 | GaSupportClaimEvidence | Current | release | - | Support and maturity claims require current evidence on the claimed target or profile. |
+| conformance-test | 186 | GaReleaseBlockers | Current | release | - | Unresolved systemic correctness and security defects block general availability. |
+| conformance-test | 187 | GaUpgradePreservation | Current | storage | - | Supported upgrades preserve pending intent cursors conflicts identity authority audit and governance state. |
+| conformance-test | 188 | GaScopeDiscipline | Current | architecture | - | The frozen v1 path excludes unvalidated database transport consensus plugin and language breadth. |
+| conformance-test | 189 | GaArtifactPromotion | Current | release | - | General availability promotes the exact verified release candidate artifact bytes. |
+| conformance-test | 190 | GaClaimHonesty | Current | release | - | Capacity performance platform and reproducibility claims remain evidence-bound. |
+| conformance-test | 191 | GaGateIntegrity | Current | quality | - | Schedule pressure cannot weaken mandatory correctness security migration compatibility or supply-chain gates. |
+| conformance-test | 192 | GaExplicitEvolution | Current | compatibility | - | Post-GA semantic changes use explicit versions capabilities migrations registry governance and deprecation. |
+| conformance-test | 193 | GaDomainBoundary | Current | architecture | - | Application business semantics remain outside the synchronization engine. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
