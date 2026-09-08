@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `08e17cb32d0803b3ab30a1d8cc2b64bc0f5622e011c9eb5959ca855083136be8`
+Digest: `0d8d449713074a2fbd65d2eef195fe0b367e3067e0d68e31777daaef4bec8e99`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -172,6 +172,7 @@ Digest: `08e17cb32d0803b3ab30a1d8cc2b64bc0f5622e011c9eb5959ca855083136be8`
 | conformance-profile | 83 | ObservabilityFull | Current | runtime | - | Bounded privacy-safe metrics tracing logs SLOs alerts and exporter failure isolation. |
 | conformance-profile | 84 | BenchmarkingFull | Current | performance | - | Reproducible correctness-preserving benchmark regression workload and capacity evidence. |
 | conformance-profile | 85 | VerificationFull | Current | quality | - | Deterministic fault-aware verification and explicit release quality-gate evidence. |
+| conformance-profile | 86 | SupplyChainFull | Current | release | - | Fail-closed dependency, SBOM, provenance, reproducibility, and third-party risk governance. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -345,6 +346,16 @@ Digest: `08e17cb32d0803b3ab30a1d8cc2b64bc0f5622e011c9eb5959ca855083136be8`
 | conformance-test | 171 | VerificationExpiringWaivers | Current | release | - | Required gate waivers are explicit owned scoped risk-documented and expiring. |
 | conformance-test | 172 | VerificationIncidentRegression | Current | quality | - | Systemic correctness incidents bind to durable regression evidence. |
 | conformance-test | 173 | VerificationProductionSemanticParity | Current | architecture | - | Test infrastructure never weakens production correctness semantics. |
+| conformance-test | 174 | SupplyLicenseAdmission | Current | release | - | Unknown prohibited and unreviewed dependency licenses fail release policy. |
+| conformance-test | 175 | SupplyArtifactBinding | Current | release | - | Artifact source lockfile configuration SBOM provenance and digest identities agree. |
+| conformance-test | 176 | SupplyCriticalBoundary | Current | architecture | - | Tier 2 and Tier 3 implementation types remain behind neutral contracts. |
+| conformance-test | 177 | SupplyExceptionGovernance | Current | security | - | Exceptions and risk acceptances are explicit owned justified and expiring. |
+| conformance-test | 178 | SupplySigningIsolation | Current | release | - | Signing credentials are absent from ordinary and untrusted build execution. |
+| conformance-test | 179 | SupplyUpdateVerification | Current | quality | - | Semantic dependency updates retain domain-specific verification evidence. |
+| conformance-test | 180 | SupplyOfflineBuild | Current | release | - | Staged high-assurance builds require no uncontrolled network access. |
+| conformance-test | 181 | SupplyServiceBoundary | Current | architecture | - | Operational providers have explicit failure behavior and do not become authority. |
+| conformance-test | 182 | SupplyEvidenceHonesty | Current | release | - | Reproducibility and support claims cannot exceed retained evidence. |
+| conformance-test | 183 | SupplyDependencyJustification | Current | architecture | - | Every critical dependency records capability lifecycle owner and replacement value. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
