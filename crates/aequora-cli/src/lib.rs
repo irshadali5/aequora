@@ -21,6 +21,9 @@ use aequora_compat::{
 use aequora_config::{
     AdapterCapabilities, ConfigSource, RawDeploymentConfig, diff_effective, explain_setting,
 };
+use aequora_conformance::verification::{
+    Qualification, QualityGateManifest, VerificationError, VerificationReport,
+};
 use aequora_conformance::{
     CertificationArtifact, CertificationRequest, ConformanceDomain, ConformanceError,
     REFERENCE_TESTS, markdown_report,
@@ -181,6 +184,8 @@ fn machine_error(error: &CliError) -> CliErrorEnvelope {
             "compatibility verification failed",
         ),
         CliError::Conformance(_)
+        | CliError::Verification(_)
+        | CliError::ReleaseBlocked(_)
         | CliError::Schema(_)
         | CliError::SchemaRon(_)
         | CliError::TraceRon(_)
@@ -288,7 +293,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> String {
     format!(
-        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>",
+        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora verify release <quality-gates.ron>\naequora verify report <verification-report.ron>\naequora verify replay <model-failure.ron>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>",
         base_help()
     )
 }
@@ -1506,11 +1511,51 @@ fn verify(
         }
         Some("export") => verify_export(local, authority),
         Some("model") if local.is_none() && authority.is_none() => verify_model(),
-        Some("trace") if authority.is_none() => verify_trace(local),
+        Some("trace" | "replay") if authority.is_none() => verify_trace(local),
+        Some("release") if authority.is_none() => verify_release(local),
+        Some("report") if authority.is_none() => verify_report(local),
         _ => Err(CliError::Usage(
-            "usage: aequora verify <pair|export|model|trace> ...".to_owned(),
+            "usage: aequora verify <pair|export|model|trace|replay|release|report> ...".to_owned(),
         )),
     }
+}
+
+fn verify_release(path: Option<&str>) -> Result<String, CliError> {
+    let path = path.ok_or_else(|| {
+        CliError::Usage("usage: aequora verify release <quality-gates.ron>".to_owned())
+    })?;
+    let manifest: QualityGateManifest = read_ron(path, 16 * 1024 * 1024)?;
+    match manifest.evaluate()? {
+        Qualification::Passed => Ok(format!(
+            "release: qualified profile={:?} required_suites={} waivers=0",
+            manifest.profile,
+            manifest.required_suites.len()
+        )),
+        Qualification::PassedWithWaivers { suites } => Ok(format!(
+            "release: qualified-with-waivers profile={:?} required_suites={} waivers={}",
+            manifest.profile,
+            manifest.required_suites.len(),
+            suites.len()
+        )),
+        Qualification::Blocked { suites } => Err(CliError::ReleaseBlocked(format!(
+            "profile={:?} blocked_suites={suites:?}",
+            manifest.profile
+        ))),
+    }
+}
+
+fn verify_report(path: Option<&str>) -> Result<String, CliError> {
+    let path = path.ok_or_else(|| {
+        CliError::Usage("usage: aequora verify report <verification-report.ron>".to_owned())
+    })?;
+    let report: VerificationReport = read_ron(path, 16 * 1024 * 1024)?;
+    report.validate()?;
+    Ok(format!(
+        "verification report: valid suite={:?} results={} build={}",
+        report.suite,
+        report.results.len(),
+        report.build
+    ))
 }
 
 fn verify_model() -> Result<String, CliError> {
@@ -1723,6 +1768,10 @@ enum CliError {
     Usage(String),
     #[error(transparent)]
     Conformance(#[from] ConformanceError),
+    #[error(transparent)]
+    Verification(#[from] VerificationError),
+    #[error("release qualification blocked: {0}")]
+    ReleaseBlocked(String),
     #[error("unknown built-in adapter {0:?}")]
     UnknownAdapter(String),
     #[error(transparent)]
@@ -1868,6 +1917,18 @@ mod tests {
             .unwrap_or_else(|error| panic!("model verification failed: {error}"));
         assert!(output.contains("model: ok version="));
         assert!(output.contains("states="));
+    }
+
+    #[test]
+    fn verify_release_accepts_only_complete_quality_gate_evidence() {
+        let path = format!(
+            "{}/../../tests/fixtures/part48/core-library-pass.ron",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let output = verify_release(Some(&path))
+            .unwrap_or_else(|error| panic!("quality gate verification failed: {error}"));
+        assert!(output.contains("release: qualified"));
+        assert!(output.contains("required_suites=6"));
     }
 
     #[test]
