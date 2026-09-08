@@ -17,10 +17,25 @@ import urllib.request
 from collections import defaultdict, deque
 
 WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PUBLISH_ALLOWLIST = os.path.join(WORKSPACE_ROOT, "release", "publish-allowlist.txt")
+
+
+def load_publish_allowlist():
+    """Load the explicit public-crate allowlist; blank lines and comments are ignored."""
+    with open(PUBLISH_ALLOWLIST, encoding="utf-8") as allowlist_file:
+        names = {
+            line.strip()
+            for line in allowlist_file
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    if not names:
+        raise RuntimeError("publish allowlist is empty")
+    return names
 
 
 def load_workspace_crates():
     """Load Cargo's complete workspace graph, including dev and target dependencies."""
+    publish_allowlist = load_publish_allowlist()
     result = subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps"],
         cwd=WORKSPACE_ROOT,
@@ -39,7 +54,7 @@ def load_workspace_crates():
             "name": package["name"],
             "version": package["version"],
             "path": os.path.relpath(manifest_dir, WORKSPACE_ROOT),
-            "publish": package["publish"] != [],
+            "publish": package["publish"] != [] and package["name"] in publish_allowlist,
             # Cargo metadata reports canonical package names even for renamed dependencies.
             # Path dependencies are the local workspace edges relevant to publish ordering.
             "deps": {
@@ -48,6 +63,9 @@ def load_workspace_crates():
                 if dependency.get("path") is not None
             },
         }
+    unknown = publish_allowlist.difference(crates_info)
+    if unknown:
+        raise RuntimeError(f"publish allowlist names unknown crates: {sorted(unknown)}")
     return crates_info
 
 
@@ -150,7 +168,7 @@ def main():
 
     try:
         crates_info = load_workspace_crates()
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as error:
+    except (OSError, RuntimeError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f"Error: failed to load Cargo workspace metadata: {error}")
         sys.exit(1)
 
