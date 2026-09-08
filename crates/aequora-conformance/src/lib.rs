@@ -48,6 +48,7 @@ pub enum ConformanceDomain {
     Observability,
     PerformanceEngineering,
     VerificationInfrastructure,
+    SupplyChainSecurity,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -109,6 +110,7 @@ pub enum ConformanceProfile {
     ObservabilityFull,
     BenchmarkingFull,
     VerificationFull,
+    SupplyChainFull,
 }
 
 impl ConformanceProfile {
@@ -150,6 +152,7 @@ impl ConformanceProfile {
             Self::ObservabilityFull => 83,
             Self::BenchmarkingFull => 84,
             Self::VerificationFull => 85,
+            Self::SupplyChainFull => 86,
         })
     }
 
@@ -189,7 +192,8 @@ impl ConformanceProfile {
             | Self::DeploymentTopologyFull
             | Self::ObservabilityFull
             | Self::BenchmarkingFull
-            | Self::VerificationFull => CertificationTier::FullSync,
+            | Self::VerificationFull
+            | Self::SupplyChainFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -809,6 +813,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::ObservabilityFull => matches!(definition.id.0, 144..=153),
         ConformanceProfile::BenchmarkingFull => matches!(definition.id.0, 154..=163),
         ConformanceProfile::VerificationFull => matches!(definition.id.0, 164..=173),
+        ConformanceProfile::SupplyChainFull => matches!(definition.id.0, 174..=183),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -891,7 +896,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::DeploymentTopologyFull
         | ConformanceProfile::ObservabilityFull
         | ConformanceProfile::BenchmarkingFull
-        | ConformanceProfile::VerificationFull => false,
+        | ConformanceProfile::VerificationFull
+        | ConformanceProfile::SupplyChainFull => false,
     }
 }
 
@@ -2294,6 +2300,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         FullSync,
         Some("verification-full")
     ),
+    test_definition!(
+        174,
+        "supply_license_admission",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY001",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        175,
+        "supply_artifact_sbom_binding",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY002",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        176,
+        "supply_critical_boundary",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY003",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        177,
+        "supply_expiring_exceptions",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY004",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        178,
+        "supply_signing_isolation",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY005",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        179,
+        "supply_update_verification",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY006",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        180,
+        "supply_offline_staged_build",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY007",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        181,
+        "supply_service_boundary",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY008",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        182,
+        "supply_evidence_honesty",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY009",
+        FullSync,
+        Some("supply-chain-full")
+    ),
+    test_definition!(
+        183,
+        "supply_dependency_justification",
+        SupplyChainSecurity,
+        "AEQ-INV-SUPPLY010",
+        FullSync,
+        Some("supply-chain-full")
+    ),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3421,6 +3507,18 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<Vec<_>>();
         assert_eq!(ids, (164..=173).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn supply_chain_profile_selects_only_part_49_governance_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::SupplyChainFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (174..=183).collect::<Vec<_>>());
     }
 
     #[test]
