@@ -4,6 +4,8 @@
 //! filesystem, or process dependency; adapters provide observations and applications decide how
 //! to persist or publish the resulting evidence bundle.
 
+pub mod verification;
+
 use aequora_registry_types::{CertificationTierId, ConformanceProfileId, ConformanceTestId};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -45,6 +47,7 @@ pub enum ConformanceDomain {
     DeploymentOperations,
     Observability,
     PerformanceEngineering,
+    VerificationInfrastructure,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -105,6 +108,7 @@ pub enum ConformanceProfile {
     DeploymentTopologyFull,
     ObservabilityFull,
     BenchmarkingFull,
+    VerificationFull,
 }
 
 impl ConformanceProfile {
@@ -145,6 +149,7 @@ impl ConformanceProfile {
             Self::DeploymentTopologyFull => 82,
             Self::ObservabilityFull => 83,
             Self::BenchmarkingFull => 84,
+            Self::VerificationFull => 85,
         })
     }
 
@@ -183,7 +188,8 @@ impl ConformanceProfile {
             | Self::ReleaseEngineeringFull
             | Self::DeploymentTopologyFull
             | Self::ObservabilityFull
-            | Self::BenchmarkingFull => CertificationTier::FullSync,
+            | Self::BenchmarkingFull
+            | Self::VerificationFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -802,6 +808,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::DeploymentTopologyFull => matches!(definition.id.0, 134..=143),
         ConformanceProfile::ObservabilityFull => matches!(definition.id.0, 144..=153),
         ConformanceProfile::BenchmarkingFull => matches!(definition.id.0, 154..=163),
+        ConformanceProfile::VerificationFull => matches!(definition.id.0, 164..=173),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -883,7 +890,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::ReleaseEngineeringFull
         | ConformanceProfile::DeploymentTopologyFull
         | ConformanceProfile::ObservabilityFull
-        | ConformanceProfile::BenchmarkingFull => false,
+        | ConformanceProfile::BenchmarkingFull
+        | ConformanceProfile::VerificationFull => false,
     }
 }
 
@@ -2206,6 +2214,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         FullSync,
         Some("benchmarking-full")
     ),
+    test_definition!(
+        164,
+        "verification_invariant_evidence",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY001",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        165,
+        "verification_crash_retry_ambiguity",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY002",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        166,
+        "verification_adapter_semantic_parity",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY003",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        167,
+        "verification_cursor_atomicity",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY004",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        168,
+        "verification_ambiguous_commit_idempotency",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY005",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        169,
+        "verification_upgrade_state_preservation",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY006",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        170,
+        "verification_reproducible_failures",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY007",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        171,
+        "verification_expiring_waivers",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY008",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        172,
+        "verification_incident_regression",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY009",
+        FullSync,
+        Some("verification-full")
+    ),
+    test_definition!(
+        173,
+        "verification_production_semantic_parity",
+        VerificationInfrastructure,
+        "AEQ-INV-VERIFY010",
+        FullSync,
+        Some("verification-full")
+    ),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3321,6 +3409,18 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<Vec<_>>();
         assert_eq!(ids, (154..=163).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn verification_profile_selects_only_part_48_quality_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::VerificationFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (164..=173).collect::<Vec<_>>());
     }
 
     #[test]
