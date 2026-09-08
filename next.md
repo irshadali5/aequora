@@ -71,10 +71,11 @@ part-specific completion reports.
 
 ## Repository status
 
-The reusable implementation is complete through Part 48. See the [implementation plan](plan.md)
+The reusable implementation contracts are complete through Part 50. See the [implementation plan](plan.md)
 for sequencing and the [completion audit](docs/next-completion.md) for the historical v1 kernel
-evidence and compatibility decisions. Deployment-specific certification evidence remains exact to
-each built binary and environment and is not inferred from repository ownership.
+evidence and compatibility decisions. The checked-in Part 50 readiness snapshot explicitly does
+not declare GA. Deployment-specific certification evidence remains exact to each built binary and
+environment and is not inferred from repository ownership.
 
 ## Change policy
 

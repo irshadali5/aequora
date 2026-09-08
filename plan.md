@@ -65,6 +65,9 @@ outside the reusable core.
 | 45 | [Deployment topologies and operational environments](sys-arch/45-deployment-topologies-single-node-ha-multi-region-edge-enterprise-air-gapped-operational-environment-architecture.md) |
 | 46 | [Observability, metrics, tracing, logging, SLOs, and alerts](sys-arch/46-observability-metrics-tracing-logging-slos-alerting-production-telemetry-architecture.md) |
 | 47 | [Benchmarking, regression, capacity planning, and sizing](sys-arch/47-benchmarking-performance-regression-capacity-planning-workload-modeling-scalability-testing-production-sizing-architecture.md) |
+| 48 | [Testkit, verification, fault injection, and release quality gates](sys-arch/48-testkit-verification-fault-injection-property-model-integration-e2e-release-quality-gates-architecture.md) |
+| 49 | [Licensing, dependency policy, and supply-chain security](sys-arch/49-licensing-dependency-policy-supply-chain-security-crate-governance-sbom-reproducible-builds-third-party-risk-architecture.md) |
+| 50 | [v1 scope, productization milestones, readiness, RC, and GA](sys-arch/50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture.md) |
 
 ## Implementation status
 
@@ -108,6 +111,7 @@ implicitly claim completion of an earlier part.
 | Part 47: Benchmarking, regression, capacity planning, and production sizing | Implemented | [Part 47 report](docs/benchmarking-capacity-planning-completion.md) |
 | Part 48: Testkit, verification, fault injection, and release quality gates | Implemented | [Part 48 report](docs/testkit-verification-quality-gates-completion.md) |
 | Part 49: Licensing, dependency policy, supply-chain security, SBOM, and reproducible builds | Implemented | [Part 49 report](docs/supply-chain-governance-completion.md) |
+| Part 50: v1 scope, productization milestones, readiness, RC, GA, and evolution | Implemented | [Part 50 report](docs/v1-productization-ga-completion.md) |
 
 ## Implementation workflow
 
@@ -152,6 +156,8 @@ bash scripts/check-deployment-architecture.sh
 bash scripts/check-observability-architecture.sh
 bash scripts/check-benchmarking-architecture.sh
 bash scripts/check-verification-architecture.sh
+bash scripts/check-supply-chain-architecture.sh
+bash scripts/check-productization-architecture.sh
 
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
