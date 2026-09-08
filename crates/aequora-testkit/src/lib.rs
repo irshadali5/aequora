@@ -8,6 +8,7 @@ pub mod live;
 pub mod migration;
 pub mod profiles;
 pub mod replay;
+pub mod verification;
 
 use aequora_client::{ClientError, ClientSyncEngine, SyncOutcome};
 use aequora_coordination::{
