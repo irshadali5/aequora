@@ -1,0 +1,10 @@
+(
+    schema_version: 1,
+    category: Integration,
+    runtime_class: Medium,
+    seed: (4801),
+    maximum_actions: 100000,
+    maximum_artifact_bytes: 16777216,
+    external_resources: ExplicitlyConfigured,
+    process_fault_mode: ReturnedErrorsOnly,
+)

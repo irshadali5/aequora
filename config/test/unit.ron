@@ -1,0 +1,10 @@
+(
+    schema_version: 1,
+    category: Unit,
+    runtime_class: Fast,
+    seed: (48),
+    maximum_actions: 10000,
+    maximum_artifact_bytes: 1048576,
+    external_resources: Denied,
+    process_fault_mode: ReturnedErrorsOnly,
+)
