@@ -106,6 +106,7 @@ implicitly claim completion of an earlier part.
 | Part 45: Deployment topologies and operational environments | Implemented | [Part 45 report](docs/deployment-topologies-completion.md) |
 | Part 46: Observability, metrics, tracing, logging, SLOs, and alerts | Implemented | [Part 46 report](docs/observability-production-telemetry-completion.md) |
 | Part 47: Benchmarking, regression, capacity planning, and production sizing | Implemented | [Part 47 report](docs/benchmarking-capacity-planning-completion.md) |
+| Part 48: Testkit, verification, fault injection, and release quality gates | Implemented | [Part 48 report](docs/testkit-verification-quality-gates-completion.md) |
 
 ## Implementation workflow
 
@@ -149,6 +150,8 @@ bash scripts/check-release-architecture.sh
 bash scripts/check-deployment-architecture.sh
 bash scripts/check-observability-architecture.sh
 bash scripts/check-benchmarking-architecture.sh
+bash scripts/check-verification-architecture.sh
+
 cargo check --workspace --all-targets --all-features --locked --offline
 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
 cargo test --workspace --all-features --locked --offline
