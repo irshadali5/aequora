@@ -228,10 +228,12 @@ pub enum CommandName {
     Bench,
     Load,
     Capacity,
+    Deps,
+    SupplyChain,
 }
 
 impl CommandName {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::Init,
         Self::Doctor,
         Self::Config,
@@ -269,6 +271,8 @@ impl CommandName {
         Self::Bench,
         Self::Load,
         Self::Capacity,
+        Self::Deps,
+        Self::SupplyChain,
     ];
 
     #[must_use]
@@ -311,6 +315,8 @@ impl CommandName {
             Self::Bench => "bench",
             Self::Load => "load",
             Self::Capacity => "capacity",
+            Self::Deps => "deps",
+            Self::SupplyChain => "supply-chain",
         }
     }
 }
