@@ -221,6 +221,7 @@ dependencies = [
  "aequora-store",
  "aequora-store-postgres",
  "aequora-store-stoolap",
+ "aequora-supply-chain",
  "aequora-types",
  "aequora-workload",
  "hex",
@@ -1216,6 +1217,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aequora-supply-chain"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "aequora-testkit"
 version = "0.1.0"
 dependencies = [
@@ -1282,6 +1292,7 @@ dependencies = [
  "aequora-storage-core",
  "aequora-storage-profile",
  "aequora-store",
+ "aequora-supply-chain",
  "aequora-transport",
  "aequora-types",
  "aequora-update",
