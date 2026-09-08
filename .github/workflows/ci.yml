@@ -29,10 +29,14 @@ jobs:
         run: rustup toolchain install stable --profile minimal
       - name: Install pinned cargo-audit
         run: cargo +stable install cargo-audit --version 0.22.2 --locked
+      - name: Install pinned cargo-deny
+        run: cargo +stable install cargo-deny --version 0.20.2 --locked
       - name: Audit workspace dependencies
         run: cargo +stable audit --file Cargo.lock
       - name: Audit fuzz dependencies
         run: cargo +stable audit --file fuzz/Cargo.lock
+      - name: Enforce license source and dependency policy
+        run: cargo +stable deny check licenses bans sources
 
   quality:
     name: Stable quality gate
@@ -165,6 +169,8 @@ jobs:
         run: bash scripts/check-benchmarking-architecture.sh
       - name: Enforce deterministic verification and release quality-gate contracts
         run: bash scripts/check-verification-architecture.sh
+      - name: Enforce licensing, SBOM, provenance, and supply-chain governance
+        run: bash scripts/check-supply-chain-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
