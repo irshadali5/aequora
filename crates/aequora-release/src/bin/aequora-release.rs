@@ -1,3 +1,4 @@
+use aequora_release::productization::{DecisionCheck, GaReadinessManifest, V1Scope};
 use aequora_release::{ArtifactHashes, PromotionEvidence, SupportMatrix};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -44,6 +45,36 @@ fn run(mut arguments: impl Iterator<Item = String>) -> Result<String, String> {
             let matrix = SupportMatrix::from_ron(&text).map_err(|error| error.to_string())?;
             Ok(format!("support-matrix: ok targets={}", matrix.targets.len()))
         }
+        Some("v1-scope") => {
+            let path = required_path(arguments.next(), "v1-scope <scope.ron>")?;
+            let scope = V1Scope::from_ron(&read_metadata(&path)?)
+                .map_err(|error| error.to_string())?;
+            Ok(format!(
+                "v1-scope: frozen authority={:?} transport={:?} official-local={} conditional-local={}",
+                scope.authority,
+                scope.transport,
+                scope.official_local_adapters.len(),
+                scope.conditional_local_adapters.len(),
+            ))
+        }
+        Some("readiness") => {
+            let path = required_path(arguments.next(), "readiness <manifest.ron>")?;
+            let manifest = GaReadinessManifest::from_ron(&read_metadata(&path)?)
+                .map_err(|error| error.to_string())?;
+            let decision = manifest.evaluate().map_err(|error| error.to_string())?;
+            Ok(format!(
+                "readiness: eligible={} release={} blocking-gates={} blocking-defects={} blocking-risks={} blocking-milestones={} exact-candidate={} upgrades={} reviews={}",
+                decision.is_eligible(),
+                manifest.release_id,
+                decision.blocking_gates.len(),
+                decision.blocking_defects.len(),
+                decision.blocking_risks.len(),
+                decision.blocking_milestones.len(),
+                decision.exact_candidate_artifact == DecisionCheck::Satisfied,
+                decision.upgrade_evidence == DecisionCheck::Satisfied,
+                decision.readiness_reviews == DecisionCheck::Satisfied,
+            ))
+        }
         Some("verify-promotion") => {
             let path = required_path(
                 arguments.next(),
@@ -69,7 +100,7 @@ fn run(mut arguments: impl Iterator<Item = String>) -> Result<String, String> {
             ))
         }
         _ => Err(
-            "usage: aequora-release hash <artifact> | support-matrix <matrix.ron> | verify-promotion <evidence.ron> <minimum-approvers>"
+            "usage: aequora-release hash <artifact> | support-matrix <matrix.ron> | v1-scope <scope.ron> | readiness <manifest.ron> | verify-promotion <evidence.ron> <minimum-approvers>"
                 .to_owned(),
         ),
     }
