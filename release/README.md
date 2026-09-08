@@ -4,6 +4,11 @@ The typed authority for release manifests, final-byte verification, update decis
 and promotion is `aequora-release`. The architectural authority is `sys-arch/44-*`. This directory
 contains operational inputs rather than a second architecture specification.
 
+Part 50 adds `v1-scope.ron` and `v1-readiness.ron`. The former is the machine-readable v1 scope
+freeze. The latter is a truthful development readiness snapshot and intentionally evaluates as
+ineligible for GA until exact release, deployment, upgrade, target, ownership, and pilot evidence
+is attached. `KNOWN_ISSUES.md` defines the companion issue-recording policy.
+
 ## Required bundle
 
 An official bundle contains `release-manifest.ron`, its detached signature, `SHA256SUMS`,
