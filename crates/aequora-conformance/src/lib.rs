@@ -49,6 +49,7 @@ pub enum ConformanceDomain {
     PerformanceEngineering,
     VerificationInfrastructure,
     SupplyChainSecurity,
+    ProductReadiness,
 }
 
 /// Strength of a certification claim. Higher tiers include lower-tier requirements.
@@ -111,6 +112,7 @@ pub enum ConformanceProfile {
     BenchmarkingFull,
     VerificationFull,
     SupplyChainFull,
+    GeneralAvailabilityFull,
 }
 
 impl ConformanceProfile {
@@ -153,6 +155,7 @@ impl ConformanceProfile {
             Self::BenchmarkingFull => 84,
             Self::VerificationFull => 85,
             Self::SupplyChainFull => 86,
+            Self::GeneralAvailabilityFull => 87,
         })
     }
 
@@ -193,7 +196,8 @@ impl ConformanceProfile {
             | Self::ObservabilityFull
             | Self::BenchmarkingFull
             | Self::VerificationFull
-            | Self::SupplyChainFull => CertificationTier::FullSync,
+            | Self::SupplyChainFull
+            | Self::GeneralAvailabilityFull => CertificationTier::FullSync,
             Self::ServerEnterprise => CertificationTier::Enterprise,
         }
     }
@@ -814,6 +818,7 @@ const fn definition_in_profile(definition: &TestDefinition, profile: Conformance
         ConformanceProfile::BenchmarkingFull => matches!(definition.id.0, 154..=163),
         ConformanceProfile::VerificationFull => matches!(definition.id.0, 164..=173),
         ConformanceProfile::SupplyChainFull => matches!(definition.id.0, 174..=183),
+        ConformanceProfile::GeneralAvailabilityFull => matches!(definition.id.0, 184..=193),
         _ => definition.id.0 < 49 && domain_in_profile(definition.domain, profile),
     }
 }
@@ -897,7 +902,8 @@ const fn domain_in_profile(domain: ConformanceDomain, profile: ConformanceProfil
         | ConformanceProfile::ObservabilityFull
         | ConformanceProfile::BenchmarkingFull
         | ConformanceProfile::VerificationFull
-        | ConformanceProfile::SupplyChainFull => false,
+        | ConformanceProfile::SupplyChainFull
+        | ConformanceProfile::GeneralAvailabilityFull => false,
     }
 }
 
@@ -2380,6 +2386,86 @@ pub static REFERENCE_TESTS: &[TestDefinition] = &[
         FullSync,
         Some("supply-chain-full")
     ),
+    test_definition!(
+        184,
+        "ga_atomicity_failure_evidence",
+        ProductReadiness,
+        "AEQ-INV-GA001",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        185,
+        "ga_evidence_bound_support_claims",
+        ProductReadiness,
+        "AEQ-INV-GA002",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        186,
+        "ga_release_blocker_policy",
+        ProductReadiness,
+        "AEQ-INV-GA003",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        187,
+        "ga_upgrade_state_preservation",
+        ProductReadiness,
+        "AEQ-INV-GA004",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        188,
+        "ga_v1_scope_discipline",
+        ProductReadiness,
+        "AEQ-INV-GA005",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        189,
+        "ga_exact_candidate_promotion",
+        ProductReadiness,
+        "AEQ-INV-GA006",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        190,
+        "ga_claim_evidence_honesty",
+        ProductReadiness,
+        "AEQ-INV-GA007",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        191,
+        "ga_mandatory_gate_integrity",
+        ProductReadiness,
+        "AEQ-INV-GA008",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        192,
+        "ga_explicit_semantic_evolution",
+        ProductReadiness,
+        "AEQ-INV-GA009",
+        FullSync,
+        Some("general-availability-full")
+    ),
+    test_definition!(
+        193,
+        "ga_product_domain_boundary",
+        ProductReadiness,
+        "AEQ-INV-GA010",
+        FullSync,
+        Some("general-availability-full")
+    ),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3519,6 +3605,18 @@ mod tests {
         .map(|definition| definition.id.0)
         .collect::<Vec<_>>();
         assert_eq!(ids, (174..=183).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn general_availability_profile_selects_only_part_50_product_contracts() {
+        let ids = definitions_for(
+            ConformanceProfile::GeneralAvailabilityFull,
+            CertificationTier::FullSync,
+        )
+        .into_iter()
+        .map(|definition| definition.id.0)
+        .collect::<Vec<_>>();
+        assert_eq!(ids, (184..=193).collect::<Vec<_>>());
     }
 
     #[test]
