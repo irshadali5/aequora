@@ -70,6 +70,7 @@ members = [
     "crates/aequora-store-postgres",
     "crates/aequora-store-sqlite",
     "crates/aequora-store-stoolap",
+    "crates/aequora-supply-chain",
     "crates/aequora-testkit",
     "crates/aequora-transport",
     "crates/aequora-types",
