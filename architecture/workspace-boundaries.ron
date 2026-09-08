@@ -147,7 +147,6 @@
         ),
     ],
     allowed_outward_edges: [
-        (source: "aequora", dependency: "aequora-testkit"),
         (source: "aequora-cli", dependency: "aequora-model"),
         (source: "aequora-cli", dependency: "aequora-loadgen"),
     ],
