@@ -163,6 +163,8 @@ jobs:
         run: bash scripts/check-observability-architecture.sh
       - name: Enforce benchmarking and capacity evidence contracts
         run: bash scripts/check-benchmarking-architecture.sh
+      - name: Enforce deterministic verification and release quality-gate contracts
+        run: bash scripts/check-verification-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
