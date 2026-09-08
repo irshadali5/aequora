@@ -39,6 +39,7 @@ aequora-loadgen = { version = "0.1.0", path = "../aequora-loadgen" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap" }
+aequora-supply-chain = { version = "0.1.0", path = "../aequora-supply-chain" }
 aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
 aequora-model = { version = "0.1.0", path = "../aequora-model" }
 aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
