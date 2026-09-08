@@ -61,6 +61,9 @@ use aequora_region::{
     AuthorityLocation, RegionError, RegionalReadRequest, RegionalRouter, RegionalRouterConfig,
     ReplicaObservation,
 };
+use aequora_release::productization::{
+    DecisionCheck, GaReadinessManifest, ProductizationError, V1Scope,
+};
 use aequora_release::{CryptoTimestamp, ReleaseError, ReleaseTrustStore, SignedReleaseManifest};
 use aequora_schema::{SchemaError, SchemaRegistry};
 use aequora_security::{
@@ -195,7 +198,8 @@ fn machine_error(error: &CliError) -> CliErrorEnvelope {
         | CliError::Model(_)
         | CliError::Explore(_)
         | CliError::Replay(_)
-        | CliError::SupplyChain(_) => CliErrorEnvelope::new(
+        | CliError::SupplyChain(_)
+        | CliError::Productization(_) => CliErrorEnvelope::new(
             ErrorCode::ValidationFailed,
             RetryClass::Never,
             "validation or conformance failed",
@@ -253,6 +257,9 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
             arguments.next().as_deref(),
             arguments.next().as_deref(),
         ),
+        Some("compatibility") => {
+            compatibility_command(arguments.next().as_deref(), arguments.next().as_deref())
+        }
         Some("conform") => {
             conform_command(arguments.next().as_deref(), arguments.next().as_deref())
         }
@@ -306,7 +313,7 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> String {
     format!(
-        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora verify release <quality-gates.ron>\naequora verify report <verification-report.ron>\naequora verify replay <model-failure.ron>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>\naequora deps verify <policy.ron>\naequora deps explain <crate> <policy.ron>\naequora supply-chain summary <policy.ron>\naequora supply-chain sbom <policy.ron> <sbom.ron>\naequora supply-chain verify <policy.ron> <sbom.ron> <release-evidence.ron>",
+        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora release readiness <readiness.ron>\naequora release v1-scope <scope.ron>\naequora compatibility check [registry.ron]\naequora verify release <quality-gates.ron>\naequora verify report <verification-report.ron>\naequora verify replay <model-failure.ron>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>\naequora deps verify <policy.ron>\naequora deps explain <crate> <policy.ron>\naequora supply-chain summary <policy.ron>\naequora supply-chain sbom <policy.ron> <sbom.ron>\naequora supply-chain verify <policy.ron> <sbom.ron> <release-evidence.ron>",
         base_help()
     )
 }
@@ -566,8 +573,42 @@ fn release_command(
     trust_path: Option<&str>,
     artifact_directory: Option<&str>,
 ) -> Result<String, CliError> {
-    const USAGE: &str =
-        "usage: aequora release verify <manifest.ron> <trust.ron> <artifact-directory>";
+    const USAGE: &str = "usage: aequora release <verify <manifest.ron> <trust.ron> <artifact-directory>|readiness <readiness.ron>|v1-scope <scope.ron>>";
+    if action == Some("readiness") {
+        let path = manifest_path.ok_or_else(|| CliError::Usage(USAGE.to_owned()))?;
+        if trust_path.is_some() || artifact_directory.is_some() {
+            return Err(CliError::Usage(USAGE.to_owned()));
+        }
+        let manifest: GaReadinessManifest = read_ron(path, 8 * 1024 * 1024)?;
+        let decision = manifest.evaluate()?;
+        return Ok(format!(
+            "readiness: eligible={} release={} blocking_gates={} blocking_defects={} blocking_risks={} blocking_milestones={} exact_candidate={} upgrades={} reviews={} writes=0",
+            decision.is_eligible(),
+            manifest.release_id,
+            decision.blocking_gates.len(),
+            decision.blocking_defects.len(),
+            decision.blocking_risks.len(),
+            decision.blocking_milestones.len(),
+            decision.exact_candidate_artifact == DecisionCheck::Satisfied,
+            decision.upgrade_evidence == DecisionCheck::Satisfied,
+            decision.readiness_reviews == DecisionCheck::Satisfied,
+        ));
+    }
+    if action == Some("v1-scope") {
+        let path = manifest_path.ok_or_else(|| CliError::Usage(USAGE.to_owned()))?;
+        if trust_path.is_some() || artifact_directory.is_some() {
+            return Err(CliError::Usage(USAGE.to_owned()));
+        }
+        let scope: V1Scope = read_ron(path, 2 * 1024 * 1024)?;
+        scope.validate()?;
+        return Ok(format!(
+            "v1-scope: frozen authority={:?} transport={:?} official_local={} conditional_local={} writes=0",
+            scope.authority,
+            scope.transport,
+            scope.official_local_adapters.len(),
+            scope.conditional_local_adapters.len(),
+        ));
+    }
     if action != Some("verify") {
         return Err(CliError::Usage(USAGE.to_owned()));
     }
@@ -700,8 +741,27 @@ fn config_command(
 }
 
 fn version(extra: Option<&str>) -> Result<String, CliError> {
+    if extra == Some("--verbose") {
+        let registry = canonical_registry()?;
+        return Ok(format!(
+            "aequora-cli={}\ncommit={}\ntarget={}-{}\nrust-msrv=1.87\nprotocol-generation={}\nregistry-generation={}\nstore-format=adapter-versioned\nconfiguration-schema=1\nprofile-version=registry-governed",
+            env!("CARGO_PKG_VERSION"),
+            option_env!("AEQUORA_BUILD_COMMIT").unwrap_or("unknown"),
+            env::consts::ARCH,
+            env::consts::OS,
+            registry
+                .protocols
+                .iter()
+                .map(|entry| entry.version.0)
+                .max()
+                .unwrap_or(0),
+            registry.registry_generation,
+        ));
+    }
     if extra.is_some() {
-        return Err(CliError::Usage("usage: aequora version".to_owned()));
+        return Err(CliError::Usage(
+            "usage: aequora version [--verbose]".to_owned(),
+        ));
     }
     Ok(format!(
         "aequora-cli={} commit={} target={}-{} features=static-toolchain protocol=registry-governed",
@@ -709,6 +769,25 @@ fn version(extra: Option<&str>) -> Result<String, CliError> {
         option_env!("AEQUORA_BUILD_COMMIT").unwrap_or("unknown"),
         env::consts::ARCH,
         env::consts::OS,
+    ))
+}
+
+fn compatibility_command(action: Option<&str>, path: Option<&str>) -> Result<String, CliError> {
+    if action != Some("check") {
+        return Err(CliError::Usage(
+            "usage: aequora compatibility check [registry.ron]".to_owned(),
+        ));
+    }
+    let registry = match path {
+        Some(path) => read_ron::<CompatibilityRegistry>(path, 2 * 1024 * 1024)?,
+        None => canonical_registry()?,
+    };
+    registry.validate()?;
+    Ok(format!(
+        "compatibility: compatible registry-generation={} protocols={} operations={} writes=0",
+        registry.registry_generation,
+        registry.protocols.len(),
+        registry.operations.len(),
     ))
 }
 
@@ -1960,6 +2039,8 @@ enum CliError {
     Loadgen(#[from] aequora_loadgen::LoadgenError),
     #[error(transparent)]
     SupplyChain(#[from] SupplyChainError),
+    #[error(transparent)]
+    Productization(#[from] ProductizationError),
     #[error("benchmark or workload RON is malformed: {0}")]
     BenchmarkRon(String),
     #[error("benchmark or workload file must contain UTF-8 RON")]
@@ -2207,5 +2288,40 @@ mod tests {
             read_bounded(&path, 1_024),
             Err(CliError::InputLimit { maximum: 1_024, .. })
         ));
+    }
+
+    #[test]
+    fn productization_commands_are_read_only_and_fail_closed() {
+        let scope = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/v1-scope.ron");
+        let readiness = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../release/v1-readiness.ron"
+        );
+        let scope_output = command(vec![
+            "release".to_owned(),
+            "v1-scope".to_owned(),
+            scope.to_owned(),
+        ])
+        .unwrap_or_else(|error| panic!("scope command failed: {error}"));
+        assert!(scope_output.contains("v1-scope: frozen"));
+        assert!(scope_output.contains("writes=0"));
+
+        let readiness_output = command(vec![
+            "release".to_owned(),
+            "readiness".to_owned(),
+            readiness.to_owned(),
+        ])
+        .unwrap_or_else(|error| panic!("readiness command failed: {error}"));
+        assert!(readiness_output.contains("eligible=false"));
+        assert!(readiness_output.contains("writes=0"));
+
+        let compatibility = command(vec!["compatibility".to_owned(), "check".to_owned()])
+            .unwrap_or_else(|error| panic!("compatibility command failed: {error}"));
+        assert!(compatibility.contains("compatibility: compatible"));
+
+        let verbose = command(vec!["version".to_owned(), "--verbose".to_owned()])
+            .unwrap_or_else(|error| panic!("verbose version command failed: {error}"));
+        assert!(verbose.contains("registry-generation="));
+        assert!(verbose.contains("store-format=adapter-versioned"));
     }
 }
