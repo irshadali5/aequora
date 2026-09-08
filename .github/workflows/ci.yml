@@ -171,6 +171,8 @@ jobs:
         run: bash scripts/check-verification-architecture.sh
       - name: Enforce licensing, SBOM, provenance, and supply-chain governance
         run: bash scripts/check-supply-chain-architecture.sh
+      - name: Enforce v1 scope, productization, and GA-readiness contracts
+        run: bash scripts/check-productization-architecture.sh
       - name: Enforce bounded Part 19 performance and memory contracts
         run: |
           bash scripts/check-performance-architecture.sh
