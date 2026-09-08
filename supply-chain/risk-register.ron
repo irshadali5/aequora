@@ -1,0 +1,22 @@
+[
+    (
+        identity: "native-sqlite",
+        purpose: "embedded durable local replica",
+        risk: "bundled C engine and native build toolchain",
+        failure_mode: "build failure or storage vulnerability",
+        license: "MIT",
+        replacement: "LocalStore-compatible Stoolap or system SQLite profile",
+        owner: "storage",
+        review_at_unix_seconds: 1893456000,
+    ),
+    (
+        identity: "rustls-ring",
+        purpose: "TLS for HTTP and QUIC adapters",
+        risk: "security-critical cryptography and native assembly",
+        failure_mode: "transport authentication or availability failure",
+        license: "Apache-2.0 AND ISC through reviewed transitive graph",
+        replacement: "transport-specific TLS provider behind SyncTransport",
+        owner: "security",
+        review_at_unix_seconds: 1893456000,
+    ),
+]

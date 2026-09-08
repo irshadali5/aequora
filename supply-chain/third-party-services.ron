@@ -1,0 +1,24 @@
+[
+    (
+        provider: "managed-postgresql",
+        purpose: "optional authoritative PostgreSQL hosting",
+        data_handled: ["tenant-domain-data", "operation-ledger", "journal"],
+        failure_behavior: "writes stop or retry; no alternate authority is inferred",
+        replacement: "compatible self-hosted or managed PostgreSQL environment",
+        residency: "deployment-selected",
+        owner: "storage",
+        source_of_authority: false,
+        required_in_air_gapped_profile: false,
+    ),
+    (
+        provider: "telemetry-collector",
+        purpose: "optional operational telemetry export",
+        data_handled: ["redacted-operational-telemetry"],
+        failure_behavior: "bounded telemetry drops while core synchronization continues",
+        replacement: "another exporter or disabled external export",
+        residency: "deployment-selected",
+        owner: "operations",
+        source_of_authority: false,
+        required_in_air_gapped_profile: false,
+    ),
+]
