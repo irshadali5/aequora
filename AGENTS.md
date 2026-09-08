@@ -29,3 +29,6 @@ bash scripts/check-database-neutrality.sh
 - Never silently delete pending outbox intent.
 - Never modify stable protocol or registry IDs without the governing compatibility process.
 - Never disable, delete, or loosen a failing correctness test merely to make a change pass.
+- Never add, remove, or materially upgrade a Tier 2 or Tier 3 dependency without documenting its
+  capability need, verified license and source, architecture boundary, transitive/native/build-
+  script impact, owner and replacement plan, and required semantic verification.
