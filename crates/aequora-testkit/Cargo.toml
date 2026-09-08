@@ -78,7 +78,9 @@ async-trait.workspace = true
 futures-util.workspace = true
 postcard.workspace = true
 ron.workspace = true
+serde.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
@@ -88,7 +90,6 @@ aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
 criterion.workspace = true
 proptest = "=1.6.0"
 tokio.workspace = true
-uuid.workspace = true
 
 [[bench]]
 name = "core_pipeline"
