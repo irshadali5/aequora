@@ -2,7 +2,7 @@
 
 Generation: `2`
 
-Digest: `019d0d635a770505af97b92e0d9cb2794d39d8d36b6193b1359fe1dc54afa9cb`
+Digest: `08e17cb32d0803b3ab30a1d8cc2b64bc0f5622e011c9eb5959ca855083136be8`
 
 | Domain | ID | Name | Status | Owner | Schema | Description |
 |---|---:|---|---|---|---:|---|
@@ -171,6 +171,7 @@ Digest: `019d0d635a770505af97b92e0d9cb2794d39d8d36b6193b1359fe1dc54afa9cb`
 | conformance-profile | 82 | DeploymentTopologyFull | Current | runtime | - | Single-writer topology, regional-read, air-gap, recovery, and operational readiness semantics. |
 | conformance-profile | 83 | ObservabilityFull | Current | runtime | - | Bounded privacy-safe metrics tracing logs SLOs alerts and exporter failure isolation. |
 | conformance-profile | 84 | BenchmarkingFull | Current | performance | - | Reproducible correctness-preserving benchmark regression workload and capacity evidence. |
+| conformance-profile | 85 | VerificationFull | Current | quality | - | Deterministic fault-aware verification and explicit release quality-gate evidence. |
 | conformance-test | 1 | LocalIntentAtomicity | Current | conformance | - | Local mutation and durable intent commit atomically. |
 | conformance-test | 2 | AuthoritativePublicationAtomicity | Current | conformance | - | Authority state, journal, ledger, and audit publish atomically. |
 | conformance-test | 3 | IdempotentAuthority | Current | conformance | - | Retries produce one authoritative logical effect. |
@@ -334,6 +335,16 @@ Digest: `019d0d635a770505af97b92e0d9cb2794d39d8d36b6193b1359fe1dc54afa9cb`
 | conformance-test | 161 | BenchmarkRepresentativeWorkload | Current | performance | - | Workloads model bounded realistic offline reconnect conflict and tail behavior. |
 | conformance-test | 162 | BenchmarkEvidenceClassification | Current | performance | - | Capacity guidance declares measured interpolated extrapolated or unknown evidence. |
 | conformance-test | 163 | BenchmarkMeasuredOptimization | Current | performance | - | Optimization requires representative before and after evidence plus correctness verification. |
+| conformance-test | 164 | VerificationInvariantEvidence | Current | quality | - | Correctness-critical invariants bind to executable verification evidence. |
+| conformance-test | 165 | VerificationCrashRetryAmbiguity | Current | quality | - | Crash retry process-death and ambiguous-commit boundaries are tested explicitly. |
+| conformance-test | 166 | VerificationAdapterSemanticParity | Current | storage | - | Official adapters prove the same semantics for claimed capabilities. |
+| conformance-test | 167 | VerificationCursorAtomicity | Current | client | - | Injected failures cannot durably advance a cursor ahead of applied state. |
+| conformance-test | 168 | VerificationAmbiguousCommitIdempotency | Current | server | - | Response loss after commit and retry preserves one logical effect and outcome. |
+| conformance-test | 169 | VerificationUpgradeStatePreservation | Current | storage | - | Supported upgrades preserve pending intent cursor conflict and authority state. |
+| conformance-test | 170 | VerificationReproducibleFailures | Current | quality | - | Randomized and injected failures retain seeds traces fixtures or artifacts. |
+| conformance-test | 171 | VerificationExpiringWaivers | Current | release | - | Required gate waivers are explicit owned scoped risk-documented and expiring. |
+| conformance-test | 172 | VerificationIncidentRegression | Current | quality | - | Systemic correctness incidents bind to durable regression evidence. |
+| conformance-test | 173 | VerificationProductionSemanticParity | Current | architecture | - | Test infrastructure never weakens production correctness semantics. |
 | certification-tier | 1 | Experimental | Current | conformance | - | Experimental evidence without a production claim. |
 | certification-tier | 10 | CoreTransactional | Current | conformance | - | Core atomic transaction and replay semantics. |
 | certification-tier | 20 | FullSync | Current | conformance | - | Full synchronization, fencing, cursor, and snapshot semantics. |
