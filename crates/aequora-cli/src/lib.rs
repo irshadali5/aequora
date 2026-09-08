@@ -72,6 +72,7 @@ use aequora_store::{
 };
 use aequora_store_postgres::POSTGRES_ADAPTER_MANIFEST;
 use aequora_store_stoolap::STOOLAP_ADAPTER_MANIFEST;
+use aequora_supply_chain::{DependencyPolicy, ReleaseEvidence, SbomDocument, SupplyChainError};
 use aequora_workload::{WorkloadError, WorkloadSpec};
 use std::{
     collections::BTreeMap,
@@ -193,7 +194,8 @@ fn machine_error(error: &CliError) -> CliErrorEnvelope {
         | CliError::QueueRon(_)
         | CliError::Model(_)
         | CliError::Explore(_)
-        | CliError::Replay(_) => CliErrorEnvelope::new(
+        | CliError::Replay(_)
+        | CliError::SupplyChain(_) => CliErrorEnvelope::new(
             ErrorCode::ValidationFailed,
             RetryClass::Never,
             "validation or conformance failed",
@@ -285,6 +287,17 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
         Some("capacity") => {
             capacity_command(arguments.next().as_deref(), arguments.next().as_deref())
         }
+        Some("deps") => deps_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
+        Some("supply-chain") => supply_chain_command(
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+            arguments.next().as_deref(),
+        ),
         Some(other) => Err(CliError::Usage(format!(
             "unknown command {other:?}; run `aequora help`"
         ))),
@@ -293,9 +306,116 @@ fn command(arguments: impl IntoIterator<Item = String>) -> Result<String, CliErr
 
 fn help() -> String {
     format!(
-        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora verify release <quality-gates.ron>\naequora verify report <verification-report.ron>\naequora verify replay <model-failure.ron>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>",
+        "{}\naequora doctor deployment <descriptor.ron>\naequora diagnostics summary\naequora diagnostics metrics\naequora diagnostics trace <trace-id>\naequora release verify <manifest.ron> <trust.ron> <artifact-directory>\naequora verify release <quality-gates.ron>\naequora verify report <verification-report.ron>\naequora verify replay <model-failure.ron>\naequora bench list\naequora bench compare <baseline.ron> <candidate.ron>\naequora bench report <result.ron>\naequora load run <workload.ron>\naequora capacity estimate <workload.ron>\naequora deps verify <policy.ron>\naequora deps explain <crate> <policy.ron>\naequora supply-chain summary <policy.ron>\naequora supply-chain sbom <policy.ron> <sbom.ron>\naequora supply-chain verify <policy.ron> <sbom.ron> <release-evidence.ron>",
         base_help()
     )
+}
+
+fn policy_at_current_time(path: &str) -> Result<DependencyPolicy, CliError> {
+    let policy: DependencyPolicy = read_ron(path, 16 * 1024 * 1024)?;
+    policy.validate(current_unix_seconds()?)?;
+    Ok(policy)
+}
+
+fn current_unix_seconds() -> Result<u64, CliError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| CliError::ReleaseClock)
+        .map(|duration| duration.as_secs())
+}
+
+fn deps_command(
+    action: Option<&str>,
+    first: Option<&str>,
+    second: Option<&str>,
+) -> Result<String, CliError> {
+    match (action, first, second) {
+        (Some("verify"), Some(policy_path), None) => {
+            let policy = policy_at_current_time(policy_path)?;
+            Ok(format!(
+                "dependency policy: valid reviewed={} tier2_or_tier3={} exceptions={} risk_acceptances={}",
+                policy.dependencies.len(),
+                policy
+                    .dependencies
+                    .iter()
+                    .filter(|dependency| dependency.risk >= aequora_supply_chain::RiskTier::Tier2)
+                    .count(),
+                policy.exceptions.len(),
+                policy.risk_acceptances.len(),
+            ))
+        }
+        (Some("explain"), Some(package), Some(policy_path)) => {
+            let policy = policy_at_current_time(policy_path)?;
+            let dependency = policy.dependency(package).ok_or_else(|| {
+                CliError::SupplyChain(SupplyChainError::UnreviewedDependency(package.to_owned()))
+            })?;
+            Ok(format!(
+                "dependency: {}\nclass: {:?}\nrisk: {:?}\nlicense: {}\nsource: {}\nowner: {}\ncapability: {}\nreplacement: {}\nnative_code: {}\nbuild_script: {}\nproc_macro: {}",
+                dependency.package,
+                dependency.class,
+                dependency.risk,
+                dependency.license_expression,
+                dependency.source,
+                dependency.owner,
+                dependency.capability,
+                dependency.replacement,
+                dependency.native_code,
+                dependency.build_script,
+                dependency.proc_macro,
+            ))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora deps <verify <policy.ron>|explain <crate> <policy.ron>>".to_owned(),
+        )),
+    }
+}
+
+fn supply_chain_command(
+    action: Option<&str>,
+    policy_path: Option<&str>,
+    sbom_path: Option<&str>,
+    evidence_path: Option<&str>,
+) -> Result<String, CliError> {
+    let policy_path = policy_path.ok_or_else(|| {
+        CliError::Usage(
+            "usage: aequora supply-chain <summary|sbom|verify> <policy.ron> ...".to_owned(),
+        )
+    })?;
+    let policy = policy_at_current_time(policy_path)?;
+    match (action, sbom_path, evidence_path) {
+        (Some("summary"), None, None) => Ok(format!(
+            "supply-chain: policy-valid\nreviewed_dependencies: {}\napproved_sources: {}\nexceptions: {}\nrisk_acceptances: {}",
+            policy.dependencies.len(),
+            policy.approved_sources.len(),
+            policy.exceptions.len(),
+            policy.risk_acceptances.len(),
+        )),
+        (Some("sbom"), Some(sbom_path), None) => {
+            let sbom: SbomDocument = read_ron(sbom_path, 64 * 1024 * 1024)?;
+            sbom.validate(&policy)?;
+            Ok(format!(
+                "sbom: valid\nartifact: {}\nprofile: {:?}\ncomponents: {}\nbuild: {}",
+                sbom.artifact,
+                sbom.profile,
+                sbom.components.len(),
+                sbom.build_id,
+            ))
+        }
+        (Some("verify"), Some(sbom_path), Some(evidence_path)) => {
+            let sbom: SbomDocument = read_ron(sbom_path, 64 * 1024 * 1024)?;
+            let evidence: ReleaseEvidence = read_ron(evidence_path, 16 * 1024 * 1024)?;
+            sbom.validate(&policy)?;
+            evidence.validate()?;
+            evidence.verify_sbom(&sbom)?;
+            Ok(format!(
+                "supply-chain: verified\nartifact: {}\nbuild: {}\nsource: {}\noffline_after_staging: true\nsigning_credentials_isolated: true",
+                sbom.artifact, sbom.build_id, sbom.source_commit,
+            ))
+        }
+        _ => Err(CliError::Usage(
+            "usage: aequora supply-chain <summary <policy.ron>|sbom <policy.ron> <sbom.ron>|verify <policy.ron> <sbom.ron> <release-evidence.ron>>".to_owned(),
+        )),
+    }
 }
 
 const BUILT_IN_WORKLOADS: [&str; 8] = [
@@ -1838,6 +1958,8 @@ enum CliError {
     Workload(#[from] WorkloadError),
     #[error(transparent)]
     Loadgen(#[from] aequora_loadgen::LoadgenError),
+    #[error(transparent)]
+    SupplyChain(#[from] SupplyChainError),
     #[error("benchmark or workload RON is malformed: {0}")]
     BenchmarkRon(String),
     #[error("benchmark or workload file must contain UTF-8 RON")]
