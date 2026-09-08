@@ -852,11 +852,31 @@ pub enum InvariantId {
     SupplyEvidenceHonesty,
     /// New dependencies require capability and lifecycle justification.
     SupplyDependencyJustification,
+    /// GA requires executable Tx A, Tx B, and Tx C failure evidence.
+    GaAtomicityEvidence,
+    /// Support and maturity claims never exceed target-bound evidence.
+    GaSupportClaimEvidence,
+    /// Open systemic correctness or security defects block GA.
+    GaReleaseBlockers,
+    /// Supported upgrades preserve every correctness-critical durable state class.
+    GaUpgradePreservation,
+    /// Unvalidated breadth cannot expand the frozen v1 critical path.
+    GaScopeDiscipline,
+    /// RC promotion preserves the exact verified artifact bytes.
+    GaArtifactPromotion,
+    /// Capacity, platform, and reproducibility claims are evidence-bound.
+    GaClaimHonesty,
+    /// Schedule pressure cannot weaken mandatory release gates.
+    GaGateIntegrity,
+    /// Semantic evolution uses explicit compatibility mechanisms.
+    GaExplicitEvolution,
+    /// Application business semantics remain outside the synchronization engine.
+    GaDomainBoundary,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 421] = [
+    pub const ALL: [Self; 431] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1278,6 +1298,16 @@ impl InvariantId {
         Self::SupplyServiceBoundary,
         Self::SupplyEvidenceHonesty,
         Self::SupplyDependencyJustification,
+        Self::GaAtomicityEvidence,
+        Self::GaSupportClaimEvidence,
+        Self::GaReleaseBlockers,
+        Self::GaUpgradePreservation,
+        Self::GaScopeDiscipline,
+        Self::GaArtifactPromotion,
+        Self::GaClaimHonesty,
+        Self::GaGateIntegrity,
+        Self::GaExplicitEvolution,
+        Self::GaDomainBoundary,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1706,6 +1736,16 @@ impl InvariantId {
             Self::SupplyServiceBoundary => "AEQ-INV-SUPPLY008",
             Self::SupplyEvidenceHonesty => "AEQ-INV-SUPPLY009",
             Self::SupplyDependencyJustification => "AEQ-INV-SUPPLY010",
+            Self::GaAtomicityEvidence => "AEQ-INV-GA001",
+            Self::GaSupportClaimEvidence => "AEQ-INV-GA002",
+            Self::GaReleaseBlockers => "AEQ-INV-GA003",
+            Self::GaUpgradePreservation => "AEQ-INV-GA004",
+            Self::GaScopeDiscipline => "AEQ-INV-GA005",
+            Self::GaArtifactPromotion => "AEQ-INV-GA006",
+            Self::GaClaimHonesty => "AEQ-INV-GA007",
+            Self::GaGateIntegrity => "AEQ-INV-GA008",
+            Self::GaExplicitEvolution => "AEQ-INV-GA009",
+            Self::GaDomainBoundary => "AEQ-INV-GA010",
         }
     }
 
@@ -2963,6 +3003,36 @@ impl InvariantId {
             Self::SupplyDependencyJustification => {
                 "new dependencies retain capability lifecycle legal security architecture and maintenance justification"
             }
+            Self::GaAtomicityEvidence => {
+                "general availability requires executable failure evidence for local intent authoritative execution and local reconciliation atomicity"
+            }
+            Self::GaSupportClaimEvidence => {
+                "feature adapter platform and topology maturity claims never exceed current target bound evidence"
+            }
+            Self::GaReleaseBlockers => {
+                "unresolved systemic correctness data loss authorization tenant isolation or authority fork defects block general availability"
+            }
+            Self::GaUpgradePreservation => {
+                "supported upgrades preserve durable identifiers pending operations cursors conflicts authority metadata audit and governance state"
+            }
+            Self::GaScopeDiscipline => {
+                "the v1 critical path gains no database transport consensus plugin or language breadth without validated production need"
+            }
+            Self::GaArtifactPromotion => {
+                "general availability promotes the exact verified release candidate bytes whenever technically possible"
+            }
+            Self::GaClaimHonesty => {
+                "capacity performance platform support and reproducibility claims are bound to retained evidence"
+            }
+            Self::GaGateIntegrity => {
+                "release dates cannot weaken correctness security migration compatibility or supply chain gates"
+            }
+            Self::GaExplicitEvolution => {
+                "post general availability semantic evolution uses explicit versions capabilities migrations registry governance and deprecation"
+            }
+            Self::GaDomainBoundary => {
+                "application business semantics remain owned by product domains outside the synchronization engine"
+            }
         }
     }
 
@@ -3396,6 +3466,16 @@ impl InvariantId {
             Self::SupplyServiceBoundary => 418,
             Self::SupplyEvidenceHonesty => 419,
             Self::SupplyDependencyJustification => 420,
+            Self::GaAtomicityEvidence => 421,
+            Self::GaSupportClaimEvidence => 422,
+            Self::GaReleaseBlockers => 423,
+            Self::GaUpgradePreservation => 424,
+            Self::GaScopeDiscipline => 425,
+            Self::GaArtifactPromotion => 426,
+            Self::GaClaimHonesty => 427,
+            Self::GaGateIntegrity => 428,
+            Self::GaExplicitEvolution => 429,
+            Self::GaDomainBoundary => 430,
         }
     }
 }
@@ -3447,7 +3527,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 421] = [
+pub static REGISTRY: [InvariantEntry; 431] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -6394,6 +6474,76 @@ pub static REGISTRY: [InvariantEntry; 421] = [
         "dependency_justification_property",
         "dependency_review_contract",
         "supply_unjustified_dependency_total",
+    ),
+    entry(
+        InvariantId::GaAtomicityEvidence,
+        "ga_atomicity_release_gate",
+        "tx_a_b_c_failure_evidence_property",
+        "verification_profile_contract",
+        "ga_missing_atomicity_evidence_total",
+    ),
+    entry(
+        InvariantId::GaSupportClaimEvidence,
+        "ga_support_claim_maturity",
+        "claim_evidence_bound_property",
+        "target_conformance_contract",
+        "ga_overstated_support_claim_total",
+    ),
+    entry(
+        InvariantId::GaReleaseBlockers,
+        "ga_open_defect_gate",
+        "systemic_defect_blocks_property",
+        "release_blocker_contract",
+        "ga_open_critical_defect_total",
+    ),
+    entry(
+        InvariantId::GaUpgradePreservation,
+        "ga_upgrade_preservation",
+        "durable_state_upgrade_property",
+        "migration_conformance_contract",
+        "ga_incomplete_upgrade_evidence_total",
+    ),
+    entry(
+        InvariantId::GaScopeDiscipline,
+        "ga_v1_scope_freeze",
+        "critical_path_scope_property",
+        "v1_scope_manifest_contract",
+        "ga_scope_expansion_total",
+    ),
+    entry(
+        InvariantId::GaArtifactPromotion,
+        "ga_exact_artifact_promotion",
+        "candidate_digest_identity_property",
+        "release_promotion_contract",
+        "ga_artifact_rebuild_total",
+    ),
+    entry(
+        InvariantId::GaClaimHonesty,
+        "ga_evidence_bound_claim",
+        "production_claim_classification_property",
+        "support_matrix_contract",
+        "ga_unsubstantiated_claim_total",
+    ),
+    entry(
+        InvariantId::GaGateIntegrity,
+        "ga_mandatory_gate_integrity",
+        "release_schedule_independence_property",
+        "quality_gate_contract",
+        "ga_weakened_gate_total",
+    ),
+    entry(
+        InvariantId::GaExplicitEvolution,
+        "ga_semantic_evolution",
+        "versioned_change_property",
+        "compatibility_registry_contract",
+        "ga_silent_reinterpretation_total",
+    ),
+    entry(
+        InvariantId::GaDomainBoundary,
+        "ga_product_domain_boundary",
+        "business_semantic_isolation_property",
+        "workspace_boundary_contract",
+        "ga_domain_logic_leak_total",
     ),
 ];
 
