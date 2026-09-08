@@ -169,3 +169,5 @@ Welcome to the **Aequora System Architecture Wiki**. This repository contains th
   Third-party risk management, crate governance, license compliance, Software Bill of Materials, and reproducible builds.
 - **[Part 50: Aequora v1 Scope, Productization Plan, Milestones, and GA Exit Criteria](50-aequora-v1-scope-productization-milestones-production-readiness-release-candidate-ga-long-term-evolution-architecture.md)**  
   Productization roadmap, milestone gates, release candidate checklist, GA criteria, and long-term evolution.
+
+  Implementation evidence: [Part 50 completion report](../docs/v1-productization-ga-completion.md).
