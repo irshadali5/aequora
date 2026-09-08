@@ -52,6 +52,14 @@ required-features = ["testkit"]
 name = "school_erp"
 required-features = ["stoolap", "testkit"]
 
+[[example]]
+name = "realworld_server"
+required-features = ["axum", "testkit"]
+
+[[example]]
+name = "realworld_stress"
+required-features = ["axum", "http-client", "stoolap", "testkit"]
+
 [[test]]
 name = "adapter_manifests"
 required-features = ["postgres", "sqlite", "stoolap"]
@@ -65,7 +73,9 @@ aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
+aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
 aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 async-trait.workspace = true
 axum.workspace = true
