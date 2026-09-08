@@ -1,0 +1,16 @@
+(
+    schema_version: 1,
+    release: "0.1.0-rc.1",
+    profile: CoreLibrary,
+    issued_at_unix_ms: 1000,
+    required_suites: [Unit, Property, Model, ProtocolCompatibility, Security, ArtifactIntegrity],
+    results: {
+        Unit: (status: Pass, evidence: [(kind: "verification-report", location: "artifacts/unit.ron", digest: "blake3:unit")], waiver: None),
+        Property: (status: Pass, evidence: [(kind: "verification-report", location: "artifacts/property.ron", digest: "blake3:property")], waiver: None),
+        Model: (status: Pass, evidence: [(kind: "model-report", location: "artifacts/model.ron", digest: "blake3:model")], waiver: None),
+        ProtocolCompatibility: (status: Pass, evidence: [(kind: "compatibility-report", location: "artifacts/compatibility.ron", digest: "blake3:compatibility")], waiver: None),
+        Security: (status: Pass, evidence: [(kind: "security-report", location: "artifacts/security.ron", digest: "blake3:security")], waiver: None),
+        ArtifactIntegrity: (status: Pass, evidence: [(kind: "artifact-report", location: "artifacts/artifact.ron", digest: "blake3:artifact")], waiver: None),
+    },
+    evidence: [(kind: "manifest", location: "artifacts/manifest.ron", digest: "blake3:manifest")],
+)
