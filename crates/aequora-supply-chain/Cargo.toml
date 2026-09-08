@@ -1,0 +1,16 @@
+[package]
+name = "aequora-supply-chain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Neutral dependency governance, SBOM, provenance, and third-party risk contracts for Aequora"
+repository.workspace = true
+
+[dependencies]
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
