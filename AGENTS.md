@@ -21,3 +21,11 @@ required:
 cargo run -q -p aequora-dev -- check
 bash scripts/check-database-neutrality.sh
 ```
+
+# Correctness rules for coding agents
+
+- Never bypass Tx A, Tx B, or Tx C atomicity.
+- Never weaken `OperationId` idempotency or advance a cursor outside Tx C.
+- Never silently delete pending outbox intent.
+- Never modify stable protocol or registry IDs without the governing compatibility process.
+- Never disable, delete, or loosen a failing correctness test merely to make a change pass.
