@@ -832,11 +832,31 @@ pub enum InvariantId {
     VerificationIncidentRegression,
     /// Test infrastructure preserves production correctness semantics.
     VerificationProductionParity,
+    /// Release artifacts contain only dependencies with reviewed licenses.
+    SupplyLicenseAdmission,
+    /// Artifact identity binds source, lockfile, configuration, SBOM, provenance, and digest.
+    SupplyArtifactBinding,
+    /// Critical dependencies remain isolated behind neutral architecture boundaries.
+    SupplyCriticalBoundary,
+    /// Advisories, exceptions, and risk acceptance are explicit, owned, and expiring.
+    SupplyExceptionGovernance,
+    /// Release signing credentials remain isolated from ordinary and untrusted builds.
+    SupplySigningIsolation,
+    /// Semantic dependency updates retain domain-specific verification evidence.
+    SupplyUpdateVerification,
+    /// Staged high-assurance builds do not require uncontrolled network access.
+    SupplyOfflineBuild,
+    /// Third-party services stay explicit, replaceable, and non-authoritative.
+    SupplyServiceBoundary,
+    /// Supply-chain and reproducibility claims never exceed current evidence.
+    SupplyEvidenceHonesty,
+    /// New dependencies require capability and lifecycle justification.
+    SupplyDependencyJustification,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 411] = [
+    pub const ALL: [Self; 421] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1248,6 +1268,16 @@ impl InvariantId {
         Self::VerificationWaiverGovernance,
         Self::VerificationIncidentRegression,
         Self::VerificationProductionParity,
+        Self::SupplyLicenseAdmission,
+        Self::SupplyArtifactBinding,
+        Self::SupplyCriticalBoundary,
+        Self::SupplyExceptionGovernance,
+        Self::SupplySigningIsolation,
+        Self::SupplyUpdateVerification,
+        Self::SupplyOfflineBuild,
+        Self::SupplyServiceBoundary,
+        Self::SupplyEvidenceHonesty,
+        Self::SupplyDependencyJustification,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1666,6 +1696,16 @@ impl InvariantId {
             Self::VerificationWaiverGovernance => "AEQ-INV-VERIFY008",
             Self::VerificationIncidentRegression => "AEQ-INV-VERIFY009",
             Self::VerificationProductionParity => "AEQ-INV-VERIFY010",
+            Self::SupplyLicenseAdmission => "AEQ-INV-SUPPLY001",
+            Self::SupplyArtifactBinding => "AEQ-INV-SUPPLY002",
+            Self::SupplyCriticalBoundary => "AEQ-INV-SUPPLY003",
+            Self::SupplyExceptionGovernance => "AEQ-INV-SUPPLY004",
+            Self::SupplySigningIsolation => "AEQ-INV-SUPPLY005",
+            Self::SupplyUpdateVerification => "AEQ-INV-SUPPLY006",
+            Self::SupplyOfflineBuild => "AEQ-INV-SUPPLY007",
+            Self::SupplyServiceBoundary => "AEQ-INV-SUPPLY008",
+            Self::SupplyEvidenceHonesty => "AEQ-INV-SUPPLY009",
+            Self::SupplyDependencyJustification => "AEQ-INV-SUPPLY010",
         }
     }
 
@@ -2893,6 +2933,36 @@ impl InvariantId {
             Self::VerificationProductionParity => {
                 "test infrastructure never weakens production correctness semantics for speed or convenience"
             }
+            Self::SupplyLicenseAdmission => {
+                "production artifacts contain no dependency with an unknown prohibited or unreviewed license"
+            }
+            Self::SupplyArtifactBinding => {
+                "every artifact binds source lockfile build configuration SBOM provenance and cryptographic digest"
+            }
+            Self::SupplyCriticalBoundary => {
+                "tier two and tier three dependencies do not leak implementation types or semantics into core contracts"
+            }
+            Self::SupplyExceptionGovernance => {
+                "advisory exceptions and risk acceptances are explicit owned justified and time bounded"
+            }
+            Self::SupplySigningIsolation => {
+                "release signing credentials are isolated from untrusted and ordinary build execution"
+            }
+            Self::SupplyUpdateVerification => {
+                "semantic dependency updates pass corresponding compatibility conformance migration and security verification"
+            }
+            Self::SupplyOfflineBuild => {
+                "staged high assurance release builds require no uncontrolled network access"
+            }
+            Self::SupplyServiceBoundary => {
+                "third party services have explicit failure behavior and never silently become semantic authority"
+            }
+            Self::SupplyEvidenceHonesty => {
+                "reproducibility support and dependency security claims never exceed retained evidence"
+            }
+            Self::SupplyDependencyJustification => {
+                "new dependencies retain capability lifecycle legal security architecture and maintenance justification"
+            }
         }
     }
 
@@ -3316,6 +3386,16 @@ impl InvariantId {
             Self::VerificationWaiverGovernance => 408,
             Self::VerificationIncidentRegression => 409,
             Self::VerificationProductionParity => 410,
+            Self::SupplyLicenseAdmission => 411,
+            Self::SupplyArtifactBinding => 412,
+            Self::SupplyCriticalBoundary => 413,
+            Self::SupplyExceptionGovernance => 414,
+            Self::SupplySigningIsolation => 415,
+            Self::SupplyUpdateVerification => 416,
+            Self::SupplyOfflineBuild => 417,
+            Self::SupplyServiceBoundary => 418,
+            Self::SupplyEvidenceHonesty => 419,
+            Self::SupplyDependencyJustification => 420,
         }
     }
 }
@@ -3367,7 +3447,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 411] = [
+pub static REGISTRY: [InvariantEntry; 421] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -6244,6 +6324,76 @@ pub static REGISTRY: [InvariantEntry; 411] = [
         "test_production_parity_property",
         "architecture_boundary_contract",
         "verification_weakened_semantics_total",
+    ),
+    entry(
+        InvariantId::SupplyLicenseAdmission,
+        "supply_license_policy",
+        "unknown_license_fail_closed_property",
+        "resolved_graph_license_contract",
+        "supply_unreviewed_license_total",
+    ),
+    entry(
+        InvariantId::SupplyArtifactBinding,
+        "supply_artifact_identity",
+        "artifact_sbom_binding_property",
+        "release_provenance_contract",
+        "supply_artifact_binding_failure_total",
+    ),
+    entry(
+        InvariantId::SupplyCriticalBoundary,
+        "supply_dependency_layer",
+        "critical_type_isolation_property",
+        "workspace_boundary_contract",
+        "supply_critical_boundary_violation_total",
+    ),
+    entry(
+        InvariantId::SupplyExceptionGovernance,
+        "supply_exception_lifecycle",
+        "exception_expiry_property",
+        "dependency_policy_contract",
+        "supply_expired_exception_total",
+    ),
+    entry(
+        InvariantId::SupplySigningIsolation,
+        "supply_signing_trust_domain",
+        "credential_isolation_property",
+        "release_runner_contract",
+        "supply_signing_exposure_total",
+    ),
+    entry(
+        InvariantId::SupplyUpdateVerification,
+        "supply_update_impact",
+        "update_verification_matrix_property",
+        "semantic_upgrade_contract",
+        "supply_incomplete_update_evidence_total",
+    ),
+    entry(
+        InvariantId::SupplyOfflineBuild,
+        "supply_declared_build_inputs",
+        "offline_staged_build_property",
+        "air_gap_release_contract",
+        "supply_build_network_access_total",
+    ),
+    entry(
+        InvariantId::SupplyServiceBoundary,
+        "supply_service_authority",
+        "provider_failure_boundary_property",
+        "service_inventory_contract",
+        "supply_hidden_authority_total",
+    ),
+    entry(
+        InvariantId::SupplyEvidenceHonesty,
+        "supply_claim_evidence",
+        "reproducibility_level_property",
+        "independent_rebuild_contract",
+        "supply_overstated_claim_total",
+    ),
+    entry(
+        InvariantId::SupplyDependencyJustification,
+        "supply_dependency_admission",
+        "dependency_justification_property",
+        "dependency_review_contract",
+        "supply_unjustified_dependency_total",
     ),
 ];
 
