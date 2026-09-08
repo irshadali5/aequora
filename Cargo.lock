@@ -354,6 +354,7 @@ dependencies = [
 name = "aequora-conformance"
 version = "0.1.0"
 dependencies = [
+ "aequora-invariants",
  "aequora-registry-types",
  "blake3",
  "hex",
@@ -1294,6 +1295,7 @@ dependencies = [
  "postcard",
  "proptest",
  "ron",
+ "serde",
  "thiserror",
  "tokio",
  "uuid",
