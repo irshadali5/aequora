@@ -22,7 +22,9 @@ http-client = ["dep:aequora-http"]
 postgres = ["dep:aequora-store-postgres"]
 sqlite = ["dep:aequora-store-sqlite"]
 stoolap = ["dep:aequora-store-stoolap"]
-testkit = ["dep:aequora-testkit"]
+# Compatibility switch for examples. Test support is a dev-dependency and never enters a
+# production dependency graph.
+testkit = []
 
 [dependencies]
 aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
@@ -41,7 +43,6 @@ aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
 aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
 aequora-store-sqlite = { version = "0.1.0", path = "../aequora-store-sqlite", optional = true }
 aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
-aequora-testkit = { version = "0.1.0", path = "../aequora-testkit", optional = true }
 
 [[example]]
 name = "in_process"
@@ -60,6 +61,7 @@ name = "derive_operation"
 required-features = ["macros"]
 
 [dev-dependencies]
+aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
 aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
 aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
 aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
