@@ -10,9 +10,20 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 /// Stable fault points used by crash/retry/fencing conformance probes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FaultPoint {
     BeforeTransaction,
+    AfterTransactionBegin,
+    AfterDomainMutation,
+    AfterOutboxWrite,
+    BeforeCommit,
+    AfterCommit,
+    BeforeResponse,
+    AfterResponseDecode,
+    BeforeCursorWrite,
+    AfterCursorWrite,
+    DuringMigration,
+    DuringSnapshotInstall,
     AfterStateBeforeIntent,
     AfterIntentBeforeCommit,
     AfterCommitBeforeResponse,
