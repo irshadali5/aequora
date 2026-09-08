@@ -4,6 +4,8 @@
 //! artifact repositories, update transports, CI systems, and protected signing services remain
 //! adapters around these contracts.
 
+pub mod productization;
+
 pub use aequora_crypto::CryptoTimestamp;
 use aequora_crypto::{
     KeyProvider, KeyPurpose, KeyStatus, PublicKeyBytes, SignatureEnvelope, SigningError,
