@@ -222,6 +222,7 @@ pub enum CommandName {
     Bootstrap,
     Region,
     Compat,
+    Compatibility,
     Security,
     Feed,
     Legacy,
@@ -233,7 +234,7 @@ pub enum CommandName {
 }
 
 impl CommandName {
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::Init,
         Self::Doctor,
         Self::Config,
@@ -265,6 +266,7 @@ impl CommandName {
         Self::Bootstrap,
         Self::Region,
         Self::Compat,
+        Self::Compatibility,
         Self::Security,
         Self::Feed,
         Self::Legacy,
@@ -309,6 +311,7 @@ impl CommandName {
             Self::Bootstrap => "bootstrap",
             Self::Region => "region",
             Self::Compat => "compat",
+            Self::Compatibility => "compatibility",
             Self::Security => "security",
             Self::Feed => "feed",
             Self::Legacy => "legacy",
