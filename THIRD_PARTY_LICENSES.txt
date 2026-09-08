@@ -1,0 +1,5 @@
+Release-specific dependency licenses are generated from Cargo.lock and Cargo metadata by:
+
+scripts/generate-supply-chain-artifacts.sh <output-directory> <artifact>
+
+Package the generated THIRD_PARTY_LICENSES.txt and THIRD_PARTY_NOTICES.md with each artifact.
