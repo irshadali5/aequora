@@ -812,11 +812,31 @@ pub enum InvariantId {
     BenchmarkEvidenceClassification,
     /// Optimization follows representative measurement and correctness verification.
     BenchmarkMeasuredOptimization,
+    /// Correctness-critical invariants retain executable verification evidence.
+    VerificationInvariantEvidence,
+    /// Crash, retry, process-death, and ambiguous-commit behavior is tested explicitly.
+    VerificationFailureBoundaryCoverage,
+    /// Official adapters prove identical claimed semantic properties.
+    VerificationAdapterParity,
+    /// Cursor durability is atomic with authoritative local reconciliation.
+    VerificationCursorAtomicity,
+    /// Response loss after authoritative commit preserves one logical effect and outcome.
+    VerificationAmbiguousCommit,
+    /// Supported upgrades preserve durable client and authority state.
+    VerificationUpgradePreservation,
+    /// Random and injected failures retain deterministic reproduction artifacts.
+    VerificationReproducibility,
+    /// Required gate waivers are explicit, owned, scoped, risk-documented, and expiring.
+    VerificationWaiverGovernance,
+    /// Systemic correctness incidents become durable regression evidence.
+    VerificationIncidentRegression,
+    /// Test infrastructure preserves production correctness semantics.
+    VerificationProductionParity,
 }
 
 impl InvariantId {
     /// Every required core invariant in stable identifier order.
-    pub const ALL: [Self; 401] = [
+    pub const ALL: [Self; 411] = [
         Self::IdempotentAuthority,
         Self::LocalIntentAtomicity,
         Self::AuthoritativePublicationAtomicity,
@@ -1218,6 +1238,16 @@ impl InvariantId {
         Self::BenchmarkRepresentativeWorkload,
         Self::BenchmarkEvidenceClassification,
         Self::BenchmarkMeasuredOptimization,
+        Self::VerificationInvariantEvidence,
+        Self::VerificationFailureBoundaryCoverage,
+        Self::VerificationAdapterParity,
+        Self::VerificationCursorAtomicity,
+        Self::VerificationAmbiguousCommit,
+        Self::VerificationUpgradePreservation,
+        Self::VerificationReproducibility,
+        Self::VerificationWaiverGovernance,
+        Self::VerificationIncidentRegression,
+        Self::VerificationProductionParity,
     ];
 
     /// Stable external identifier used by traces, tests, diagnostics, and documentation.
@@ -1626,6 +1656,16 @@ impl InvariantId {
             Self::BenchmarkRepresentativeWorkload => "AEQ-INV-BENCH008",
             Self::BenchmarkEvidenceClassification => "AEQ-INV-BENCH009",
             Self::BenchmarkMeasuredOptimization => "AEQ-INV-BENCH010",
+            Self::VerificationInvariantEvidence => "AEQ-INV-VERIFY001",
+            Self::VerificationFailureBoundaryCoverage => "AEQ-INV-VERIFY002",
+            Self::VerificationAdapterParity => "AEQ-INV-VERIFY003",
+            Self::VerificationCursorAtomicity => "AEQ-INV-VERIFY004",
+            Self::VerificationAmbiguousCommit => "AEQ-INV-VERIFY005",
+            Self::VerificationUpgradePreservation => "AEQ-INV-VERIFY006",
+            Self::VerificationReproducibility => "AEQ-INV-VERIFY007",
+            Self::VerificationWaiverGovernance => "AEQ-INV-VERIFY008",
+            Self::VerificationIncidentRegression => "AEQ-INV-VERIFY009",
+            Self::VerificationProductionParity => "AEQ-INV-VERIFY010",
         }
     }
 
@@ -2823,6 +2863,36 @@ impl InvariantId {
             Self::BenchmarkMeasuredOptimization => {
                 "optimization follows representative measurement and retains correctness after the change"
             }
+            Self::VerificationInvariantEvidence => {
+                "every correctness critical invariant has executable evidence at an appropriate verification layer"
+            }
+            Self::VerificationFailureBoundaryCoverage => {
+                "retries crashes process death and ambiguous commits are tested explicitly"
+            }
+            Self::VerificationAdapterParity => {
+                "official adapters pass the same semantic properties for every capability they claim"
+            }
+            Self::VerificationCursorAtomicity => {
+                "no injected failure can leave a durable cursor ahead of authoritatively applied local state"
+            }
+            Self::VerificationAmbiguousCommit => {
+                "authoritative commit followed by response loss and retry produces one logical effect and outcome"
+            }
+            Self::VerificationUpgradePreservation => {
+                "supported upgrades preserve pending operations cursors conflicts authority metadata and durable identifiers"
+            }
+            Self::VerificationReproducibility => {
+                "fault and randomized failures are reproducible from retained seeds traces fixtures or artifacts"
+            }
+            Self::VerificationWaiverGovernance => {
+                "required release gate waivers are explicit owned risk documented scoped and expiring"
+            }
+            Self::VerificationIncidentRegression => {
+                "systemic correctness incidents become durable regression tests or model traces before closure"
+            }
+            Self::VerificationProductionParity => {
+                "test infrastructure never weakens production correctness semantics for speed or convenience"
+            }
         }
     }
 
@@ -3236,6 +3306,16 @@ impl InvariantId {
             Self::BenchmarkRepresentativeWorkload => 398,
             Self::BenchmarkEvidenceClassification => 399,
             Self::BenchmarkMeasuredOptimization => 400,
+            Self::VerificationInvariantEvidence => 401,
+            Self::VerificationFailureBoundaryCoverage => 402,
+            Self::VerificationAdapterParity => 403,
+            Self::VerificationCursorAtomicity => 404,
+            Self::VerificationAmbiguousCommit => 405,
+            Self::VerificationUpgradePreservation => 406,
+            Self::VerificationReproducibility => 407,
+            Self::VerificationWaiverGovernance => 408,
+            Self::VerificationIncidentRegression => 409,
+            Self::VerificationProductionParity => 410,
         }
     }
 }
@@ -3287,7 +3367,7 @@ pub struct InvariantEntry {
 }
 
 /// Complete minimum registry required by `01-formal-correctness.md`.
-pub static REGISTRY: [InvariantEntry; 401] = [
+pub static REGISTRY: [InvariantEntry; 411] = [
     entry(
         InvariantId::IdempotentAuthority,
         "authority_idempotency",
@@ -6094,6 +6174,76 @@ pub static REGISTRY: [InvariantEntry; 401] = [
         "optimization_evidence_matrix",
         "optimization_review_contract",
         "optimization_unmeasured_change_total",
+    ),
+    entry(
+        InvariantId::VerificationInvariantEvidence,
+        "verification_invariant_coverage",
+        "invariant_coverage_map_contract",
+        "release_evidence_contract",
+        "verification_uncovered_invariant_total",
+    ),
+    entry(
+        InvariantId::VerificationFailureBoundaryCoverage,
+        "verification_failure_boundary_model",
+        "crash_retry_ambiguity_matrix",
+        "fault_campaign_contract",
+        "verification_uncovered_failure_boundary_total",
+    ),
+    entry(
+        InvariantId::VerificationAdapterParity,
+        "verification_adapter_oracle",
+        "differential_adapter_property",
+        "official_adapter_parity_contract",
+        "verification_adapter_divergence_total",
+    ),
+    entry(
+        InvariantId::VerificationCursorAtomicity,
+        "verification_cursor_transition",
+        "cursor_failpoint_property",
+        "tx_c_fault_contract",
+        "verification_cursor_ahead_total",
+    ),
+    entry(
+        InvariantId::VerificationAmbiguousCommit,
+        "verification_ambiguous_commit_transition",
+        "response_loss_retry_property",
+        "tx_b_ambiguity_contract",
+        "verification_duplicate_effect_total",
+    ),
+    entry(
+        InvariantId::VerificationUpgradePreservation,
+        "verification_upgrade_state_model",
+        "upgrade_preservation_matrix",
+        "migration_compatibility_contract",
+        "verification_upgrade_loss_total",
+    ),
+    entry(
+        InvariantId::VerificationReproducibility,
+        "verification_seeded_trace",
+        "seed_replay_property",
+        "failure_artifact_contract",
+        "verification_unreplayable_failure_total",
+    ),
+    entry(
+        InvariantId::VerificationWaiverGovernance,
+        "verification_gate_decision",
+        "waiver_expiry_property",
+        "quality_manifest_contract",
+        "verification_invalid_waiver_total",
+    ),
+    entry(
+        InvariantId::VerificationIncidentRegression,
+        "verification_incident_feedback_loop",
+        "regression_corpus_contract",
+        "incident_closure_contract",
+        "verification_incident_without_regression_total",
+    ),
+    entry(
+        InvariantId::VerificationProductionParity,
+        "verification_semantic_parity",
+        "test_production_parity_property",
+        "architecture_boundary_contract",
+        "verification_weakened_semantics_total",
     ),
 ];
 
