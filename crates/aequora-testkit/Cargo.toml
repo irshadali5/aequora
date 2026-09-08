@@ -61,6 +61,7 @@ aequora-secrets = { version = "0.1.0", path = "../aequora-secrets" }
 aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
 aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-supply-chain = { version = "0.1.0", path = "../aequora-supply-chain" }
 aequora-transport = { version = "0.1.0", path = "../aequora-transport" }
 aequora-types = { version = "0.1.0", path = "../aequora-types" }
 aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
