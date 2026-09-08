@@ -1,0 +1,14 @@
+(
+    source_commit: "0123456789abcdef0123456789abcdef01234567",
+    lockfile_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    build_configuration_digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    sbom_digest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    provenance_digest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    artifact_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    builder_identity: "controlled-runner-49",
+    rust_toolchain: "rustc-1.87.0",
+    target: "x86_64-unknown-linux-gnu",
+    network_access_after_staging: false,
+    signing_credentials_exposed_to_build: false,
+    dependency_changes: [],
+)
