@@ -107,6 +107,7 @@ implicitly claim completion of an earlier part.
 | Part 46: Observability, metrics, tracing, logging, SLOs, and alerts | Implemented | [Part 46 report](docs/observability-production-telemetry-completion.md) |
 | Part 47: Benchmarking, regression, capacity planning, and production sizing | Implemented | [Part 47 report](docs/benchmarking-capacity-planning-completion.md) |
 | Part 48: Testkit, verification, fault injection, and release quality gates | Implemented | [Part 48 report](docs/testkit-verification-quality-gates-completion.md) |
+| Part 49: Licensing, dependency policy, supply-chain security, SBOM, and reproducible builds | Implemented | [Part 49 report](docs/supply-chain-governance-completion.md) |
 
 ## Implementation workflow
 
