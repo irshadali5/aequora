@@ -79,12 +79,14 @@ aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
 aequora-store = { version = "0.1.0", path = "../aequora-store" }
 async-trait.workspace = true
 axum.workspace = true
+blake3.workspace = true
 hex.workspace = true
 postcard.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+zeroize.workspace = true
 
 [lints]
 workspace = true
