@@ -15,6 +15,7 @@ use thiserror::Error;
 
 /// Current deployment configuration schema, independent of protocol and storage versions.
 pub const CURRENT_CONFIG_SCHEMA_VERSION: ConfigSchemaVersion = ConfigSchemaVersion(1);
+const MAX_DEPLOYMENT_CONFIG_RON_BYTES: usize = 1024 * 1024;
 
 /// Version of the human-edited configuration schema.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -276,6 +277,9 @@ impl RawDeploymentConfig {
         input: &str,
         capabilities: AdapterCapabilities,
     ) -> Result<ValidatedDeploymentConfig, ConfigurationError> {
+        if input.len() > MAX_DEPLOYMENT_CONFIG_RON_BYTES {
+            return Err(ConfigurationError::InvalidValue("configuration size"));
+        }
         let raw: Self =
             ron::from_str(input).map_err(|error| ConfigurationError::Ron(error.to_string()))?;
         raw.validate(capabilities)
@@ -547,6 +551,9 @@ impl ConfigLoader {
 }
 
 fn parse_patch(input: &str) -> Result<ConfigPatch, ConfigurationError> {
+    if input.len() > MAX_DEPLOYMENT_CONFIG_RON_BYTES {
+        return Err(ConfigurationError::InvalidValue("configuration size"));
+    }
     ron::from_str(input).map_err(|error| ConfigurationError::Ron(error.to_string()))
 }
 
@@ -742,6 +749,9 @@ pub fn migrate_v0(
     input: &str,
     capabilities: AdapterCapabilities,
 ) -> Result<ValidatedDeploymentConfig, ConfigurationError> {
+    if input.len() > MAX_DEPLOYMENT_CONFIG_RON_BYTES {
+        return Err(ConfigurationError::InvalidValue("configuration size"));
+    }
     let legacy: LegacyConfigV0 =
         ron::from_str(input).map_err(|error| ConfigurationError::Ron(error.to_string()))?;
     RawDeploymentConfig {
@@ -784,6 +794,17 @@ pub enum ConfigurationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_deployment_configuration_is_rejected_before_decoding() {
+        assert!(matches!(
+            RawDeploymentConfig::from_ron(
+                &" ".repeat(MAX_DEPLOYMENT_CONFIG_RON_BYTES + 1),
+                capabilities()
+            ),
+            Err(ConfigurationError::InvalidValue("configuration size"))
+        ));
+    }
 
     fn capabilities() -> AdapterCapabilities {
         AdapterCapabilities {
