@@ -1,42 +1,59 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: aequora-server-config
+  name: aequora-stress-harness-config
 data:
   PORT: "8443"
   HOST: "0.0.0.0"
+  AEQUORA_STRESS_ALLOW_CONTAINER_BIND: "1"
   RUST_LOG: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aequora-stress-harness-secret
+type: Opaque
+stringData:
+  AEQUORA_STRESS_AUTH_KEY_HEX: "AEQUORA_STRESS_AUTH_KEY_HEX_VALUE"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aequora-server
+  name: aequora-stress-harness
   labels:
     app: aequora
-    role: api
+    role: stress-harness
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: aequora
-      role: api
+      role: stress-harness
   template:
     metadata:
       labels:
         app: aequora
-        role: api
+        role: stress-harness
     spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: aequora-api
-          image: localhost/aequora-server:latest
-          imagePullPolicy: IfNotPresent
+          image: localhost/aequora-stress-harness:local
+          imagePullPolicy: Never
           envFrom:
             - configMapRef:
-                name: aequora-server-config
+                name: aequora-stress-harness-config
+            - secretRef:
+                name: aequora-stress-harness-secret
           ports:
-            - name: https
+            - name: http
               containerPort: 8443
               hostPort: 8443
+              hostIP: 127.0.0.1
           readinessProbe:
             httpGet:
               path: /sync/v1/health/ready
@@ -58,20 +75,14 @@ spec:
               memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: aequora-api
-  labels:
-    app: aequora
-spec:
-  type: ClusterIP
-  selector:
-    app: aequora
-    role: api
-  ports:
-    - name: api
-      port: 8443
-      targetPort: 8443
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
