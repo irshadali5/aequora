@@ -8,9 +8,9 @@ description = "Database-neutral multi-consumer authoritative change-feed contrac
 repository.workspace = true
 
 [dependencies]
-aequora-metadata = { version = "0.1.0", path = "../aequora-metadata" }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-metadata = { version = "0.1.1", path = "../aequora-metadata" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 blake3.workspace = true
 serde.workspace = true

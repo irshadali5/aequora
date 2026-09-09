@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Database-neutral retention, legal hold, erasure, lifecycle, and purge contracts for Aequora"
 
 [dependencies]
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 blake3.workspace = true
 postcard.workspace = true
 serde.workspace = true

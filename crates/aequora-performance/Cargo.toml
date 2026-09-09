@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Runtime-neutral performance, memory-budget, and benchmark policy for Aequora"
 
 [dependencies]
-aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
+aequora-invariants = { version = "0.1.1", path = "../aequora-invariants" }
 blake3.workspace = true
 serde.workspace = true
 thiserror.workspace = true

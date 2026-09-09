@@ -9,10 +9,10 @@ description = "Build-generated immutable Aequora durable registry"
 build = "build.rs"
 
 [dependencies]
-aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
+aequora-registry-types = { version = "0.1.1", path = "../aequora-registry-types" }
 
 [build-dependencies]
-aequora-registry-codegen = { version = "0.1.0", path = "../aequora-registry-codegen" }
+aequora-registry-codegen = { version = "0.1.1", path = "../aequora-registry-codegen" }
 
 [lints]
 workspace = true

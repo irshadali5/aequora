@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Deterministic durable workflow, checkpoint, and compensation contracts for Aequora"
 
 [dependencies]
-aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-jobs = { version = "0.1.1", path = "../aequora-jobs" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true

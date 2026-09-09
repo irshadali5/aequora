@@ -8,7 +8,7 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
 thiserror.workspace = true
 
 [lints]

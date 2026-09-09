@@ -8,7 +8,7 @@ description = "Epoch-safe regional read routing, residency, and tenant authority
 repository.workspace = true
 
 [dependencies]
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

@@ -13,7 +13,7 @@ path = "src/bin/aequora-release.rs"
 doc = false
 
 [dependencies]
-aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
+aequora-crypto = { version = "0.1.1", path = "../aequora-crypto" }
 blake3.workspace = true
 postcard.workspace = true
 ron.workspace = true

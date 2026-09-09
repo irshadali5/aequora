@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Database-neutral subscriptions and authorized dynamic datasets for Aequora"
 
 [dependencies]
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true

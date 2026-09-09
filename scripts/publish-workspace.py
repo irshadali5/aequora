@@ -106,7 +106,7 @@ def compute_topological_layers(crates_info):
     return layers
 
 
-def check_crates_io_version(crate_name, target_version="0.1.0"):
+def check_crates_io_version(crate_name, target_version="0.1.1"):
     url = f"https://crates.io/api/v1/crates/{crate_name}"
     req = urllib.request.Request(
         url,

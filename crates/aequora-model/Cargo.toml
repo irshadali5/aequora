@@ -8,7 +8,7 @@ description = "Database-neutral executable state-machine model for Aequora corre
 repository.workspace = true
 
 [dependencies]
-aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
+aequora-invariants = { version = "0.1.1", path = "../aequora-invariants" }
 blake3.workspace = true
 ron.workspace = true
 serde.workspace = true

@@ -8,9 +8,9 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-security = { version = "0.1.0", path = "../aequora-security" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-security = { version = "0.1.1", path = "../aequora-security" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 postcard.workspace = true
 serde.workspace = true

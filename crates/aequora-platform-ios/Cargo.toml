@@ -8,7 +8,7 @@ description = "Thin iOS host normalization contracts for the Aequora mobile runt
 repository.workspace = true
 
 [dependencies]
-aequora-mobile-runtime = { version = "0.1.0", path = "../aequora-mobile-runtime" }
+aequora-mobile-runtime = { version = "0.1.1", path = "../aequora-mobile-runtime" }
 serde.workspace = true
 thiserror.workspace = true
 

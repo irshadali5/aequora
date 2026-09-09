@@ -8,7 +8,7 @@ description = "Platform-neutral desktop lifecycle, coordination, and OS integrat
 repository.workspace = true
 
 [dependencies]
-aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
+aequora-coordination = { version = "0.1.1", path = "../aequora-coordination" }
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true

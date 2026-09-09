@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Bounded, stateful, runtime-neutral Aequora load generator core"
 
 [dependencies]
-aequora-benchkit = { version = "0.1.0", path = "../aequora-benchkit" }
-aequora-workload = { version = "0.1.0", path = "../aequora-workload" }
+aequora-benchkit = { version = "0.1.1", path = "../aequora-benchkit" }
+aequora-workload = { version = "0.1.1", path = "../aequora-workload" }
 serde.workspace = true
 thiserror.workspace = true
 

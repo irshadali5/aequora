@@ -8,8 +8,8 @@ description = "Database-neutral conformance and certification contracts for Aequ
 repository.workspace = true
 
 [dependencies]
-aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
-aequora-registry-types = { version = "0.1.0", path = "../aequora-registry-types" }
+aequora-invariants = { version = "0.1.1", path = "../aequora-invariants" }
+aequora-registry-types = { version = "0.1.1", path = "../aequora-registry-types" }
 blake3.workspace = true
 hex.workspace = true
 postcard.workspace = true

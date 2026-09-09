@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Reproducible benchmark, regression, and capacity evidence contracts for Aequora"
 
 [dependencies]
-aequora-invariants = { version = "0.1.0", path = "../aequora-invariants" }
-aequora-workload = { version = "0.1.0", path = "../aequora-workload" }
+aequora-invariants = { version = "0.1.1", path = "../aequora-invariants" }
+aequora-workload = { version = "0.1.1", path = "../aequora-workload" }
 serde.workspace = true
 thiserror.workspace = true
 

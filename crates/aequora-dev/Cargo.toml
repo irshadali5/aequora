@@ -9,17 +9,17 @@ description = "Token-efficient dependency context and architecture checks for Ae
 publish = false
 
 [dependencies]
-aequora-audit = { version = "0.1.0", path = "../aequora-audit" }
-aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
-aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
-aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
-aequora-governance = { version = "0.1.0", path = "../aequora-governance" }
-aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
-aequora-profile = { version = "0.1.0", path = "../aequora-profile" }
-aequora-replay = { version = "0.1.0", path = "../aequora-replay" }
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-security = { version = "0.1.0", path = "../aequora-security" }
-aequora-scope = { version = "0.1.0", path = "../aequora-scope" }
+aequora-audit = { version = "0.1.1", path = "../aequora-audit" }
+aequora-coordination = { version = "0.1.1", path = "../aequora-coordination" }
+aequora-crypto = { version = "0.1.1", path = "../aequora-crypto" }
+aequora-feed = { version = "0.1.1", path = "../aequora-feed" }
+aequora-governance = { version = "0.1.1", path = "../aequora-governance" }
+aequora-performance = { version = "0.1.1", path = "../aequora-performance" }
+aequora-profile = { version = "0.1.1", path = "../aequora-profile" }
+aequora-replay = { version = "0.1.1", path = "../aequora-replay" }
+aequora-scheduler = { version = "0.1.1", path = "../aequora-scheduler" }
+aequora-security = { version = "0.1.1", path = "../aequora-security" }
+aequora-scope = { version = "0.1.1", path = "../aequora-scope" }
 guppy.workspace = true
 ron.workspace = true
 serde.workspace = true

@@ -16,25 +16,25 @@ test-facilities = []
 
 [dependencies]
 blake3.workspace = true
-aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
-aequora-crypto = { version = "0.1.0", path = "../aequora-crypto" }
-aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
-aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
-aequora-client = { version = "0.1.0", path = "../aequora-client" }
-aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
-aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
-aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
-aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
-aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
-aequora-quic = { version = "0.1.0", path = "../aequora-quic", optional = true }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-server = { version = "0.1.0", path = "../aequora-server" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
-aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
-aequora-feature-flags = { version = "0.1.0", path = "../aequora-feature-flags" }
-aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
-aequora-secrets = { version = "0.1.0", path = "../aequora-secrets" }
+aequora-admission = { version = "0.1.1", path = "../aequora-admission" }
+aequora-crypto = { version = "0.1.1", path = "../aequora-crypto" }
+aequora-performance = { version = "0.1.1", path = "../aequora-performance" }
+aequora-axum = { version = "0.1.1", path = "../aequora-axum", optional = true }
+aequora-client = { version = "0.1.1", path = "../aequora-client" }
+aequora-compute = { version = "0.1.1", path = "../aequora-compute" }
+aequora-conformance = { version = "0.1.1", path = "../aequora-conformance" }
+aequora-coordination = { version = "0.1.1", path = "../aequora-coordination" }
+aequora-http = { version = "0.1.1", path = "../aequora-http", optional = true }
+aequora-observability = { version = "0.1.1", path = "../aequora-observability" }
+aequora-quic = { version = "0.1.1", path = "../aequora-quic", optional = true }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-scheduler = { version = "0.1.1", path = "../aequora-scheduler" }
+aequora-server = { version = "0.1.1", path = "../aequora-server" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
+aequora-validator = { version = "0.1.1", path = "../aequora-validator" }
+aequora-feature-flags = { version = "0.1.1", path = "../aequora-feature-flags" }
+aequora-policy = { version = "0.1.1", path = "../aequora-policy" }
+aequora-secrets = { version = "0.1.1", path = "../aequora-secrets" }
 postcard.workspace = true
 ron.workspace = true
 serde.workspace = true

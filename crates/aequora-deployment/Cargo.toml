@@ -8,9 +8,9 @@ description = "Topology-neutral deployment descriptors, readiness, routing, and 
 repository.workspace = true
 
 [dependencies]
-aequora-config = { version = "0.1.0", path = "../aequora-config" }
-aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-config = { version = "0.1.1", path = "../aequora-config" }
+aequora-policy = { version = "0.1.1", path = "../aequora-policy" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 ron.workspace = true
 semver.workspace = true
 serde.workspace = true

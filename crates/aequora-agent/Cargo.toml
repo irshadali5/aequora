@@ -8,9 +8,9 @@ description = "Local desktop agent ownership, authenticated IPC, and diagnostics
 repository.workspace = true
 
 [dependencies]
-aequora-coordination = { version = "0.1.0", path = "../aequora-coordination" }
-aequora-desktop-runtime = { version = "0.1.0", path = "../aequora-desktop-runtime" }
-aequora-ipc-protocol = { version = "0.1.0", path = "../aequora-ipc-protocol" }
+aequora-coordination = { version = "0.1.1", path = "../aequora-coordination" }
+aequora-desktop-runtime = { version = "0.1.1", path = "../aequora-desktop-runtime" }
+aequora-ipc-protocol = { version = "0.1.1", path = "../aequora-ipc-protocol" }
 serde.workspace = true
 thiserror.workspace = true
 

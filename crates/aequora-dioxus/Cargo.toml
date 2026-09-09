@@ -8,10 +8,10 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
-aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
-aequora-client = { version = "0.1.0", path = "../aequora-client" }
-aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-adapter-sdk = { version = "0.1.1", path = "../aequora-adapter-sdk" }
+aequora-client = { version = "0.1.1", path = "../aequora-client" }
+aequora-operation = { version = "0.1.1", path = "../aequora-operation" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 dioxus.workspace = true
 tokio.workspace = true
 

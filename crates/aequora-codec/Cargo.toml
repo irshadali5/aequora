@@ -15,7 +15,7 @@ json = ["dep:serde_json"]
 zstd = ["dep:zstd"]
 
 [dependencies]
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 blake3.workspace = true
 bytes.workspace = true
 postcard.workspace = true

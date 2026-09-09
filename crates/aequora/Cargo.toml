@@ -27,22 +27,22 @@ stoolap = ["dep:aequora-store-stoolap"]
 testkit = []
 
 [dependencies]
-aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
-aequora-client = { version = "0.1.0", path = "../aequora-client" }
-aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
-aequora-registry-generated = { version = "0.1.0", path = "../aequora-registry-generated" }
-aequora-server = { version = "0.1.0", path = "../aequora-server" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-adapter-sdk = { version = "0.1.1", path = "../aequora-adapter-sdk" }
+aequora-client = { version = "0.1.1", path = "../aequora-client" }
+aequora-operation = { version = "0.1.1", path = "../aequora-operation" }
+aequora-registry-generated = { version = "0.1.1", path = "../aequora-registry-generated" }
+aequora-server = { version = "0.1.1", path = "../aequora-server" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 
-aequora-executor = { version = "0.1.0", path = "../aequora-executor", optional = true }
-aequora-macros = { version = "0.1.0", path = "../aequora-macros", optional = true }
-aequora-profile = { version = "0.1.0", path = "../aequora-profile", optional = true }
+aequora-executor = { version = "0.1.1", path = "../aequora-executor", optional = true }
+aequora-macros = { version = "0.1.1", path = "../aequora-macros", optional = true }
+aequora-profile = { version = "0.1.1", path = "../aequora-profile", optional = true }
 
-aequora-axum = { version = "0.1.0", path = "../aequora-axum", optional = true }
-aequora-http = { version = "0.1.0", path = "../aequora-http", optional = true }
-aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres", optional = true }
-aequora-store-sqlite = { version = "0.1.0", path = "../aequora-store-sqlite", optional = true }
-aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap", optional = true }
+aequora-axum = { version = "0.1.1", path = "../aequora-axum", optional = true }
+aequora-http = { version = "0.1.1", path = "../aequora-http", optional = true }
+aequora-store-postgres = { version = "0.1.1", path = "../aequora-store-postgres", optional = true }
+aequora-store-sqlite = { version = "0.1.1", path = "../aequora-store-sqlite", optional = true }
+aequora-store-stoolap = { version = "0.1.1", path = "../aequora-store-stoolap", optional = true }
 
 [[example]]
 name = "in_process"
@@ -69,14 +69,14 @@ name = "derive_operation"
 required-features = ["macros"]
 
 [dev-dependencies]
-aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
-aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
-aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
-aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
-aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-store = { version = "0.1.0", path = "../aequora-store" }
+aequora-testkit = { version = "0.1.1", path = "../aequora-testkit" }
+aequora-clock = { version = "0.1.1", path = "../aequora-clock" }
+aequora-conflict = { version = "0.1.1", path = "../aequora-conflict" }
+aequora-executor = { version = "0.1.1", path = "../aequora-executor" }
+aequora-observability = { version = "0.1.1", path = "../aequora-observability" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-scheduler = { version = "0.1.1", path = "../aequora-scheduler" }
+aequora-store = { version = "0.1.1", path = "../aequora-store" }
 async-trait.workspace = true
 axum.workspace = true
 blake3.workspace = true

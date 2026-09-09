@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Database-neutral durable job, lease, retry, and recurring schedule contracts for Aequora"
 
 [dependencies]
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-scheduler = { version = "0.1.1", path = "../aequora-scheduler" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 blake3.workspace = true
 serde.workspace = true

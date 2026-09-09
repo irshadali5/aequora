@@ -8,11 +8,11 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
-aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
-aequora-store = { version = "0.1.0", path = "../aequora-store" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
+aequora-adapter-sdk = { version = "0.1.1", path = "../aequora-adapter-sdk" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-queue = { version = "0.1.1", path = "../aequora-queue" }
+aequora-store = { version = "0.1.1", path = "../aequora-store" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
 async-trait.workspace = true
 blake3.workspace = true
 postcard.workspace = true
@@ -20,7 +20,7 @@ rusqlite.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-aequora-testkit = { version = "0.1.0", path = "../aequora-testkit" }
+aequora-testkit = { version = "0.1.1", path = "../aequora-testkit" }
 tempfile.workspace = true
 tokio.workspace = true
 

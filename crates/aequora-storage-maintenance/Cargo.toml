@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 description = "Bounded local storage maintenance and migration contracts for Aequora"
 [dependencies]
-aequora-storage-core = { version = "0.1.0", path = "../aequora-storage-core" }
+aequora-storage-core = { version = "0.1.1", path = "../aequora-storage-core" }
 serde.workspace = true
 thiserror.workspace = true
 [lints]

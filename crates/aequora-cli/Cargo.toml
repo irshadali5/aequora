@@ -21,37 +21,37 @@ name = "generated_server_starter"
 path = "templates/server.rs"
 
 [dependencies]
-aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
-aequora-benchkit = { version = "0.1.0", path = "../aequora-benchkit" }
-aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
-aequora-bootstrap = { version = "0.1.0", path = "../aequora-bootstrap" }
-aequora-cli-core = { version = "0.1.0", path = "../aequora-cli-core" }
-aequora-compat = { version = "0.1.0", path = "../aequora-compat" }
-aequora-config = { version = "0.1.0", path = "../aequora-config" }
-aequora-conformance = { version = "0.1.0", path = "../aequora-conformance" }
-aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
-aequora-deployment = { version = "0.1.0", path = "../aequora-deployment" }
-aequora-feed = { version = "0.1.0", path = "../aequora-feed" }
-aequora-integrity = { version = "0.1.0", path = "../aequora-integrity" }
-aequora-inspect = { version = "0.1.0", path = "../aequora-inspect" }
-aequora-legacy = { version = "0.1.0", path = "../aequora-legacy" }
-aequora-loadgen = { version = "0.1.0", path = "../aequora-loadgen" }
-aequora-store = { version = "0.1.0", path = "../aequora-store" }
-aequora-store-postgres = { version = "0.1.0", path = "../aequora-store-postgres" }
-aequora-store-stoolap = { version = "0.1.0", path = "../aequora-store-stoolap" }
-aequora-supply-chain = { version = "0.1.0", path = "../aequora-supply-chain" }
-aequora-migration = { version = "0.1.0", path = "../aequora-migration" }
-aequora-model = { version = "0.1.0", path = "../aequora-model" }
-aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
-aequora-queue = { version = "0.1.0", path = "../aequora-queue" }
-aequora-region = { version = "0.1.0", path = "../aequora-region" }
-aequora-release = { version = "0.1.0", path = "../aequora-release" }
-aequora-schema = { version = "0.1.0", path = "../aequora-schema" }
-aequora-security = { version = "0.1.0", path = "../aequora-security" }
-aequora-devtools = { version = "0.1.0", path = "../aequora-devtools" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
-aequora-policy = { version = "0.1.0", path = "../aequora-policy" }
-aequora-workload = { version = "0.1.0", path = "../aequora-workload" }
+aequora-admin = { version = "0.1.1", path = "../aequora-admin" }
+aequora-benchkit = { version = "0.1.1", path = "../aequora-benchkit" }
+aequora-authority = { version = "0.1.1", path = "../aequora-authority" }
+aequora-bootstrap = { version = "0.1.1", path = "../aequora-bootstrap" }
+aequora-cli-core = { version = "0.1.1", path = "../aequora-cli-core" }
+aequora-compat = { version = "0.1.1", path = "../aequora-compat" }
+aequora-config = { version = "0.1.1", path = "../aequora-config" }
+aequora-conformance = { version = "0.1.1", path = "../aequora-conformance" }
+aequora-diagnostics = { version = "0.1.1", path = "../aequora-diagnostics" }
+aequora-deployment = { version = "0.1.1", path = "../aequora-deployment" }
+aequora-feed = { version = "0.1.1", path = "../aequora-feed" }
+aequora-integrity = { version = "0.1.1", path = "../aequora-integrity" }
+aequora-inspect = { version = "0.1.1", path = "../aequora-inspect" }
+aequora-legacy = { version = "0.1.1", path = "../aequora-legacy" }
+aequora-loadgen = { version = "0.1.1", path = "../aequora-loadgen" }
+aequora-store = { version = "0.1.1", path = "../aequora-store" }
+aequora-store-postgres = { version = "0.1.1", path = "../aequora-store-postgres" }
+aequora-store-stoolap = { version = "0.1.1", path = "../aequora-store-stoolap" }
+aequora-supply-chain = { version = "0.1.1", path = "../aequora-supply-chain" }
+aequora-migration = { version = "0.1.1", path = "../aequora-migration" }
+aequora-model = { version = "0.1.1", path = "../aequora-model" }
+aequora-observability = { version = "0.1.1", path = "../aequora-observability" }
+aequora-queue = { version = "0.1.1", path = "../aequora-queue" }
+aequora-region = { version = "0.1.1", path = "../aequora-region" }
+aequora-release = { version = "0.1.1", path = "../aequora-release" }
+aequora-schema = { version = "0.1.1", path = "../aequora-schema" }
+aequora-security = { version = "0.1.1", path = "../aequora-security" }
+aequora-devtools = { version = "0.1.1", path = "../aequora-devtools" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
+aequora-policy = { version = "0.1.1", path = "../aequora-policy" }
+aequora-workload = { version = "0.1.1", path = "../aequora-workload" }
 hex.workspace = true
 ron.workspace = true
 serde.workspace = true
@@ -59,7 +59,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-aequora = { version = "0.1.0", path = "../aequora" }
+aequora = { version = "0.1.1", path = "../aequora" }
 
 [lints]
 workspace = true

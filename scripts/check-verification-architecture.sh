@@ -53,7 +53,7 @@ for manifest in crates/aequora-conformance/Cargo.toml crates/aequora-model/Cargo
 done
 
 normal_dependents="$(CARGO_BUILD_JOBS=1 cargo tree -e normal -i aequora-testkit --locked --offline)"
-test "$normal_dependents" = "aequora-testkit v0.1.0 ($root/crates/aequora-testkit)" || {
+test "$normal_dependents" = "aequora-testkit v0.1.1 ($root/crates/aequora-testkit)" || {
     echo "a production crate depends on aequora-testkit:" >&2
     echo "$normal_dependents" >&2
     exit 1

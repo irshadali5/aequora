@@ -8,28 +8,28 @@ description.workspace = true
 repository.workspace = true
 
 [dependencies]
-aequora-adapter-sdk = { version = "0.1.0", path = "../aequora-adapter-sdk" }
-aequora-admission = { version = "0.1.0", path = "../aequora-admission" }
-aequora-admin = { version = "0.1.0", path = "../aequora-admin" }
-aequora-authority = { version = "0.1.0", path = "../aequora-authority" }
-aequora-clock = { version = "0.1.0", path = "../aequora-clock" }
-aequora-codec = { version = "0.1.0", path = "../aequora-codec" }
-aequora-conflict = { version = "0.1.0", path = "../aequora-conflict" }
-aequora-compute = { version = "0.1.0", path = "../aequora-compute" }
-aequora-diagnostics = { version = "0.1.0", path = "../aequora-diagnostics" }
-aequora-executor = { version = "0.1.0", path = "../aequora-executor" }
-aequora-jobs = { version = "0.1.0", path = "../aequora-jobs" }
-aequora-observability = { version = "0.1.0", path = "../aequora-observability" }
-aequora-operation = { version = "0.1.0", path = "../aequora-operation" }
-aequora-performance = { version = "0.1.0", path = "../aequora-performance" }
-aequora-protocol = { version = "0.1.0", path = "../aequora-protocol" }
-aequora-region = { version = "0.1.0", path = "../aequora-region" }
-aequora-scheduler = { version = "0.1.0", path = "../aequora-scheduler" }
-aequora-side-effects = { version = "0.1.0", path = "../aequora-side-effects" }
-aequora-store = { version = "0.1.0", path = "../aequora-store" }
-aequora-types = { version = "0.1.0", path = "../aequora-types" }
-aequora-validator = { version = "0.1.0", path = "../aequora-validator" }
-aequora-workflow = { version = "0.1.0", path = "../aequora-workflow" }
+aequora-adapter-sdk = { version = "0.1.1", path = "../aequora-adapter-sdk" }
+aequora-admission = { version = "0.1.1", path = "../aequora-admission" }
+aequora-admin = { version = "0.1.1", path = "../aequora-admin" }
+aequora-authority = { version = "0.1.1", path = "../aequora-authority" }
+aequora-clock = { version = "0.1.1", path = "../aequora-clock" }
+aequora-codec = { version = "0.1.1", path = "../aequora-codec" }
+aequora-conflict = { version = "0.1.1", path = "../aequora-conflict" }
+aequora-compute = { version = "0.1.1", path = "../aequora-compute" }
+aequora-diagnostics = { version = "0.1.1", path = "../aequora-diagnostics" }
+aequora-executor = { version = "0.1.1", path = "../aequora-executor" }
+aequora-jobs = { version = "0.1.1", path = "../aequora-jobs" }
+aequora-observability = { version = "0.1.1", path = "../aequora-observability" }
+aequora-operation = { version = "0.1.1", path = "../aequora-operation" }
+aequora-performance = { version = "0.1.1", path = "../aequora-performance" }
+aequora-protocol = { version = "0.1.1", path = "../aequora-protocol" }
+aequora-region = { version = "0.1.1", path = "../aequora-region" }
+aequora-scheduler = { version = "0.1.1", path = "../aequora-scheduler" }
+aequora-side-effects = { version = "0.1.1", path = "../aequora-side-effects" }
+aequora-store = { version = "0.1.1", path = "../aequora-store" }
+aequora-types = { version = "0.1.1", path = "../aequora-types" }
+aequora-validator = { version = "0.1.1", path = "../aequora-validator" }
+aequora-workflow = { version = "0.1.1", path = "../aequora-workflow" }
 async-trait.workspace = true
 blake3.workspace = true
 rayon.workspace = true
