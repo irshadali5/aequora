@@ -9,6 +9,7 @@ use thiserror::Error;
 
 const MAX_ITEMS: usize = 256;
 const MAX_TEXT_BYTES: usize = 1_024;
+const MAX_MANIFEST_RON_BYTES: usize = 1024 * 1024;
 
 /// Stable v1 product components which may appear on the critical path.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -62,6 +63,9 @@ impl V1Scope {
     ///
     /// Returns an error for malformed RON or a scope which expands or weakens v1.
     pub fn from_ron(input: &str) -> Result<Self, ProductizationError> {
+        if input.len() > MAX_MANIFEST_RON_BYTES {
+            return Err(ProductizationError::InputLimit);
+        }
         let scope = ron::from_str(input)
             .map_err(|error| ProductizationError::MalformedManifest(error.to_string()))?;
         Self::validate(&scope)?;
@@ -502,6 +506,9 @@ impl GaReadinessManifest {
     ///
     /// Returns an error for malformed RON or internally inconsistent evidence.
     pub fn from_ron(input: &str) -> Result<Self, ProductizationError> {
+        if input.len() > MAX_MANIFEST_RON_BYTES {
+            return Err(ProductizationError::InputLimit);
+        }
         let manifest = ron::from_str(input)
             .map_err(|error| ProductizationError::MalformedManifest(error.to_string()))?;
         Self::validate(&manifest)?;
@@ -728,6 +735,19 @@ pub enum ProductizationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_productization_manifests_fail_closed() {
+        let oversized = " ".repeat(MAX_MANIFEST_RON_BYTES + 1);
+        assert_eq!(
+            V1Scope::from_ron(&oversized),
+            Err(ProductizationError::InputLimit)
+        );
+        assert_eq!(
+            GaReadinessManifest::from_ron(&oversized),
+            Err(ProductizationError::InputLimit)
+        );
+    }
 
     fn gate(gate: GaGate) -> GateEvidence {
         GateEvidence {
