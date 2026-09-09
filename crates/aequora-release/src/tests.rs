@@ -1,5 +1,13 @@
 use super::*;
 
+#[test]
+fn oversized_support_matrix_is_rejected_before_decoding() {
+    assert_eq!(
+        SupportMatrix::from_ron(&" ".repeat(MAX_SUPPORT_MATRIX_RON_BYTES + 1)),
+        Err(ReleaseError::SupportMatrixEncoding)
+    );
+}
+
 fn compatibility() -> CompatibilityMatrix {
     CompatibilityMatrix {
         protocol_min: 1,
