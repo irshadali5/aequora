@@ -233,8 +233,8 @@ Run the real-world distributed simulation and containerized chaos suites:
 # In-process distributed simulation (10 mission-critical scenarios)
 cargo test -p aequora-testkit --test real_world_simulation -- --nocapture
 
-# Containerized 10x stress & chaos test suite (Podman / Kubernetes)
-bash scripts/run-chaos-10x-test.sh
+# Containerized high-load stress & chaos test suite (Podman / Kubernetes)
+bash scripts/run-chaos-stress-test.sh
 ```
 
 ### Minimal in-process assembly
@@ -612,6 +612,14 @@ harness in addition to unit, property, model, and conformance tests.
 > figures below are retained as historical observations only: they predate fail-closed worker,
 > outbox-drain, and authentication checks and therefore are not current release evidence.
 
+The launcher now uses a longer soak profile: 40 clients for 30 seconds with 8 hot-key targets and
+8 adversarial clients, followed by 40-client 25-second pause and restart experiments. All inputs
+remain bounded by the stress executable. On 2026-09-09, the rebuilt profile reached 4,280 committed
+operations in its first phase but failed closed after observing 11 unhandled failures and 69/80
+adversarial requests rejected; the chaos phases were therefore not started. Higher local profiles
+(80 and 120 clients) also failed closed under container resource contention. These are capacity
+observations, not claims of a passing release-quality run.
+
 Build and run the contained harness with:
 
 ```bash
@@ -621,7 +629,7 @@ CARGO_BUILD_JOBS=1 cargo build --release -p aequora --example realworld_stress \
   --features axum,http-client,stoolap,testkit --locked
 podman build -f deploy/container/realworld.Containerfile \
   -t localhost/aequora-stress-harness:local .
-bash scripts/run-chaos-10x-test.sh
+bash scripts/run-chaos-stress-test.sh
 ```
 
 > [!IMPORTANT]
@@ -637,18 +645,18 @@ bash scripts/run-chaos-10x-test.sh
 | Component / File | Purpose | Characteristics |
 |:---|:---|:---|
 | [`realworld_stress.rs`](crates/aequora/examples/realworld_stress.rs) | Multi-client stress harness | Bounded inputs and telemetry; fail-closed worker, outbox-drain, and adversarial checks |
-| [`run-chaos-10x-test.sh`](scripts/run-chaos-10x-test.sh) | Automated chaos orchestrator | Ephemeral MAC key and manifest; container lifecycle chaos (`pause`, `unpause`, `restart`) |
+| [`run-chaos-stress-test.sh`](scripts/run-chaos-stress-test.sh) | Automated chaos orchestrator | Ephemeral MAC key and manifest; container lifecycle chaos (`pause`, `unpause`, `restart`) |
 | [`realworld-k8s.yaml`](deploy/kubernetes/realworld-k8s.yaml) | Podman/Kubernetes test manifest | Loopback-only host port, no service-account token, read-only root, dropped capabilities |
 | [`real_world_simulation.rs`](crates/aequora-testkit/tests/real_world_simulation.rs) | In-process simulation test suite | 1,447 lines; 10 mission-critical distributed failure scenarios |
 | Container Image | Ephemeral Axum test runtime | `localhost/aequora-stress-harness:local`; never publish or deploy as a production service |
 
 ---
 
-### Containerized Chaos Stress Results (3 Independent Runs)
+### Historical Containerized Chaos Stress Results (3 Independent Runs)
 
 Each run deploys a fresh containerized Aequora server pod via `podman play kube` and executes three distinct chaos experiments.
 
-#### Experiment 1: 10x Load + Hot-Key Contention + Adversarial Attacks
+#### Experiment 1: High Load + Hot-Key Contention + Adversarial Attacks
 *100 concurrent worker clients, 10 shared hot-key entity targets, 10 adversarial attack threads injecting corrupted frames and forged tokens.*
 
 | Metric | Run 1 | Run 2 | Run 3 | Variance (Δ) | CV% | Verdict |
@@ -724,7 +732,7 @@ captured by the release-quality workflow.
 
 #### Coefficient of Variation (CV%) Summary
 
-| Metric | Exp 1 (10x Load + Attacks) | Exp 2 (Hypervisor Freeze) | Exp 3 (Mid-Flight Crash) | Industry Standard (<10% = Stable) |
+| Metric | Exp 1 (High Load + Attacks) | Exp 2 (Hypervisor Freeze) | Exp 3 (Mid-Flight Crash) | Industry Standard (<10% = Stable) |
 |:---|:---:|:---:|:---:|:---|
 | **Throughput (ops/sec)** | 1.8% | 4.3% | 0.5% | ✅ Excellent |
 | **Committed Operations** | 1.4% | 3.5% | 0.3% | ✅ Excellent |
