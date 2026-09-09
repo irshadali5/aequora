@@ -5,9 +5,14 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, env, fmt, fs, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, env, fmt, fs::File, io::Read as _, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+/// Maximum provider/key identifier size accepted at the resolution boundary.
+pub const MAX_SECRET_IDENTIFIER_BYTES: usize = 256;
+/// Maximum secret value accepted from any built-in or application provider.
+pub const MAX_SECRET_BYTES: usize = 1_048_576;
 
 /// Stable, non-secret lookup key understood by a secret provider.
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -22,7 +27,7 @@ impl SecretKey {
     /// Returns [`SecretError::InvalidReference`] for an empty or whitespace-only key.
     pub fn new(value: impl Into<String>) -> Result<Self, SecretError> {
         let value = value.into();
-        if value.trim().is_empty() {
+        if !valid_identifier(&value) {
             return Err(SecretError::InvalidReference);
         }
         Ok(Self(value))
@@ -149,12 +154,16 @@ pub struct EnvironmentSecretProvider;
 #[async_trait]
 impl SecretProvider for EnvironmentSecretProvider {
     async fn resolve(&self, key: &SecretKey) -> Result<SecretBytes, SecretError> {
+        validate_key(key)?;
         let value = env::var(key.as_str()).map_err(|error| match error {
             env::VarError::NotPresent => SecretError::NotFound,
             env::VarError::NotUnicode(_) => SecretError::ProviderFailure,
         })?;
         if value.is_empty() {
             return Err(SecretError::NotFound);
+        }
+        if value.len() > MAX_SECRET_BYTES {
+            return Err(SecretError::ProviderFailure);
         }
         Ok(SecretBytes::new(value.into_bytes()))
     }
@@ -229,8 +238,9 @@ impl SecretResolver {
     /// Returns [`SecretError`] when the provider is unavailable, the file is insecure, or
     /// resolution fails.
     pub async fn resolve(&self, reference: &SecretRef) -> Result<SecretBytes, SecretError> {
-        match reference {
+        let value = match reference {
             SecretRef::Environment(key) => {
+                validate_key(key)?;
                 self.environment
                     .as_ref()
                     .ok_or(SecretError::ProviderUnavailable)?
@@ -238,6 +248,7 @@ impl SecretResolver {
                     .await
             }
             SecretRef::OsStore(key) => {
+                validate_key(key)?;
                 self.os_store
                     .as_ref()
                     .ok_or(SecretError::ProviderUnavailable)?
@@ -245,6 +256,10 @@ impl SecretResolver {
                     .await
             }
             SecretRef::Provider(reference) => {
+                if !valid_identifier(&reference.provider) {
+                    return Err(SecretError::InvalidReference);
+                }
+                validate_key(&reference.key)?;
                 self.providers
                     .get(&reference.provider)
                     .ok_or(SecretError::ProviderUnavailable)?
@@ -252,13 +267,15 @@ impl SecretResolver {
                     .await
             }
             SecretRef::File(path) => read_secret_file(path),
-        }
+        }?;
+        validate_secret_value(value)
     }
 }
 
 fn read_secret_file(path: &PathBuf) -> Result<SecretBytes, SecretError> {
-    let metadata = fs::metadata(path).map_err(|_| SecretError::InsecureFile)?;
-    if !metadata.is_file() || metadata.len() > 1_048_576 {
+    let mut file = File::open(path).map_err(|_| SecretError::InsecureFile)?;
+    let metadata = file.metadata().map_err(|_| SecretError::InsecureFile)?;
+    if !metadata.is_file() || metadata.len() > MAX_SECRET_BYTES as u64 {
         return Err(SecretError::InsecureFile);
     }
     #[cfg(unix)]
@@ -268,18 +285,58 @@ fn read_secret_file(path: &PathBuf) -> Result<SecretBytes, SecretError> {
             return Err(SecretError::InsecureFile);
         }
     }
-    let bytes = fs::read(path).map_err(|_| SecretError::InsecureFile)?;
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(metadata.len())
+            .unwrap_or(MAX_SECRET_BYTES)
+            .min(MAX_SECRET_BYTES),
+    );
+    file.by_ref()
+        .take(u64::try_from(MAX_SECRET_BYTES + 1).unwrap_or(u64::MAX))
+        .read_to_end(&mut bytes)
+        .map_err(|_| SecretError::InsecureFile)?;
+    if bytes.len() > MAX_SECRET_BYTES {
+        bytes.zeroize();
+        return Err(SecretError::InsecureFile);
+    }
     if bytes.is_empty() {
         return Err(SecretError::NotFound);
     }
     Ok(SecretBytes::new(bytes))
 }
 
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_SECRET_IDENTIFIER_BYTES
+        && value.trim() == value
+        && !value.chars().any(char::is_control)
+}
+
+fn validate_key(key: &SecretKey) -> Result<(), SecretError> {
+    if valid_identifier(key.as_str()) {
+        Ok(())
+    } else {
+        Err(SecretError::InvalidReference)
+    }
+}
+
+fn validate_secret_value(mut value: SecretBytes) -> Result<SecretBytes, SecretError> {
+    if value.0.is_empty() {
+        return Err(SecretError::NotFound);
+    }
+    if value.0.len() > MAX_SECRET_BYTES {
+        value.0.zeroize();
+        return Err(SecretError::ProviderFailure);
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{
+        fs,
         future::Future,
+        io::Write as _,
         task::{Context, Poll, Wake, Waker},
         thread,
     };
@@ -315,6 +372,15 @@ mod tests {
         }
     }
 
+    struct OversizedProvider;
+
+    #[async_trait]
+    impl SecretProvider for OversizedProvider {
+        async fn resolve(&self, _key: &SecretKey) -> Result<SecretBytes, SecretError> {
+            Ok(SecretBytes::new(vec![7; MAX_SECRET_BYTES + 1]))
+        }
+    }
+
     #[test]
     fn provider_resolution_redacts_marker_and_fails_closed() {
         let resolver = SecretResolver::new().with_provider("vault", Arc::new(MarkerProvider));
@@ -343,5 +409,47 @@ mod tests {
         assert_eq!(format!("{secret:?}"), "<redacted>");
         let file = SecretRef::File(PathBuf::from("/sensitive/mounted/credential"));
         assert_eq!(format!("{file:?}"), "File(<redacted-path>)");
+    }
+
+    #[test]
+    fn invalid_references_and_oversized_provider_values_fail_closed() {
+        assert_eq!(
+            SecretKey::new(" padded "),
+            Err(SecretError::InvalidReference)
+        );
+        assert_eq!(
+            SecretKey::new("x".repeat(MAX_SECRET_IDENTIFIER_BYTES + 1)),
+            Err(SecretError::InvalidReference)
+        );
+
+        let resolver = SecretResolver::new().with_provider("vault", Arc::new(OversizedProvider));
+        let reference = SecretRef::Provider(SecretProviderRef {
+            provider: "vault".to_owned(),
+            key: SecretKey::new("bounded").unwrap_or_else(|error| panic!("{error}")),
+        });
+        assert!(matches!(
+            block_on(resolver.resolve(&reference)),
+            Err(SecretError::ProviderFailure)
+        ));
+    }
+
+    #[test]
+    fn secret_file_read_is_bounded_from_the_open_handle() {
+        let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let path = directory.path().join("oversized-secret");
+        let mut file = File::create(&path).unwrap_or_else(|error| panic!("{error}"));
+        file.write_all(&vec![5; MAX_SECRET_BYTES + 1])
+            .unwrap_or_else(|error| panic!("{error}"));
+        drop(file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+        assert!(matches!(
+            read_secret_file(&path),
+            Err(SecretError::InsecureFile)
+        ));
     }
 }
