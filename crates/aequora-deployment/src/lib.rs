@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 /// Version of the checked-in deployment descriptor schema.
 pub const DEPLOYMENT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+const MAX_DEPLOYMENT_RON_BYTES: usize = 1024 * 1024;
+const MAX_DEPLOYMENT_NODES: usize = 4_096;
+const MAX_AUTHORITY_BINDINGS: usize = 16_384;
 
 /// Stable identity of one logical deployment across node replacement.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -330,6 +333,9 @@ impl DeploymentDescriptor {
     ///
     /// Returns an encoding or topology-policy error.
     pub fn from_ron(input: &str) -> Result<Self, DeploymentError> {
+        if input.len() > MAX_DEPLOYMENT_RON_BYTES {
+            return Err(DeploymentError::Encoding);
+        }
         let descriptor = ron::from_str(input).map_err(|_| DeploymentError::Encoding)?;
         Self::validate(&descriptor)?;
         Ok(descriptor)
@@ -344,7 +350,11 @@ impl DeploymentDescriptor {
         if self.schema_version != DEPLOYMENT_DESCRIPTOR_SCHEMA_VERSION {
             return Err(DeploymentError::SchemaVersion);
         }
-        if self.nodes.is_empty() || self.authorities.is_empty() {
+        if self.nodes.is_empty()
+            || self.nodes.len() > MAX_DEPLOYMENT_NODES
+            || self.authorities.is_empty()
+            || self.authorities.len() > MAX_AUTHORITY_BINDINGS
+        {
             return Err(DeploymentError::MissingAuthority);
         }
         if !self.connections.fits() {
@@ -398,7 +408,12 @@ impl DeploymentDescriptor {
             {
                 return Err(DeploymentError::TenantAuthorityRequired);
             }
-        } else if self.authorities.len() != 1 || self.authorities[0].tenant.is_some() {
+        } else if self.authorities.len() != 1
+            || self
+                .authorities
+                .first()
+                .is_none_or(|binding| binding.tenant.is_some())
+        {
             return Err(DeploymentError::GlobalAuthorityRequired);
         }
         Ok(())
@@ -711,6 +726,14 @@ pub fn authority_distribution(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_descriptor_is_rejected_before_decoding() {
+        assert_eq!(
+            DeploymentDescriptor::from_ron(&" ".repeat(MAX_DEPLOYMENT_RON_BYTES + 1)),
+            Err(DeploymentError::Encoding)
+        );
+    }
 
     fn digest(value: char) -> String {
         std::iter::repeat_n(value, 64).collect()
