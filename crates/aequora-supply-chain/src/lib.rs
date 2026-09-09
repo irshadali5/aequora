@@ -10,6 +10,7 @@ use thiserror::Error;
 pub const POLICY_SCHEMA_VERSION: u16 = 1;
 pub const MAX_RECORDS: usize = 16_384;
 const MAX_TEXT_BYTES: usize = 2_048;
+const MAX_POLICY_RON_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum DependencyClass {
@@ -108,6 +109,9 @@ impl DependencyPolicy {
     ///
     /// Returns an error for malformed RON, invalid records, or expired exceptions and reviews.
     pub fn from_ron(input: &str, now_unix_seconds: u64) -> Result<Self, SupplyChainError> {
+        if input.len() > MAX_POLICY_RON_BYTES {
+            return Err(SupplyChainError::MalformedPolicy);
+        }
         let policy: Self = ron::from_str(input).map_err(|_| SupplyChainError::MalformedPolicy)?;
         policy.validate(now_unix_seconds)?;
         Ok(policy)
@@ -709,6 +713,14 @@ pub enum SupplyChainError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_policy_text_is_rejected_before_decoding() {
+        assert_eq!(
+            DependencyPolicy::from_ron(&" ".repeat(MAX_POLICY_RON_BYTES + 1), 0),
+            Err(SupplyChainError::MalformedPolicy)
+        );
+    }
 
     fn digest(byte: char) -> String {
         format!("sha256:{}", byte.to_string().repeat(64))
