@@ -28,6 +28,8 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 use thiserror::Error;
 
+const MAX_CONFIG_RON_BYTES: usize = 1024 * 1024;
+
 #[cfg(feature = "axum")]
 use aequora_axum::AxumConfig;
 #[cfg(feature = "http-client")]
@@ -631,6 +633,9 @@ impl AequoraConfig {
     ///
     /// Returns [`ConfigError`] for malformed RON, unknown fields, or unsafe values.
     pub fn from_ron(input: &str) -> Result<Self, ConfigError> {
+        if input.len() > MAX_CONFIG_RON_BYTES {
+            return Err(ConfigError::Invalid("configuration text exceeds its limit"));
+        }
         let config: Self =
             ron::from_str(input).map_err(|error| ConfigError::Ron(error.to_string()))?;
         config.validate()?;
@@ -947,6 +952,14 @@ impl AequoraConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_configuration_is_rejected_before_decoding() {
+        assert_eq!(
+            AequoraConfig::from_ron(&" ".repeat(MAX_CONFIG_RON_BYTES + 1)),
+            Err(ConfigError::Invalid("configuration text exceeds its limit"))
+        );
+    }
     use aequora_types::{ActorId, DeviceId, SessionId, SyncScopeId, TenantId};
 
     fn session() -> SessionMetadata {
