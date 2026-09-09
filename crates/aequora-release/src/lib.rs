@@ -21,6 +21,7 @@ const MANIFEST_FORMAT_VERSION: u16 = 1;
 const MAX_TEXT_BYTES: usize = 512;
 const MAX_ARTIFACTS: usize = 512;
 const MAX_STORE_FORMATS: usize = 64;
+const MAX_SUPPORT_MATRIX_RON_BYTES: usize = 1024 * 1024;
 
 /// Both interoperable and Aequora-native hashes for immutable bytes.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -146,6 +147,9 @@ impl SupportMatrix {
     ///
     /// Returns an error for malformed RON or an invalid matrix.
     pub fn from_ron(input: &str) -> Result<Self, ReleaseError> {
+        if input.len() > MAX_SUPPORT_MATRIX_RON_BYTES {
+            return Err(ReleaseError::SupportMatrixEncoding);
+        }
         let matrix: Self = ron::from_str(input).map_err(|_| ReleaseError::SupportMatrixEncoding)?;
         matrix.validate()?;
         Ok(matrix)
