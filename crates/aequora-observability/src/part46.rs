@@ -18,6 +18,8 @@ pub const MAX_ATTRIBUTE_BYTES: usize = 96;
 pub const MAX_EVENT_FIELDS: usize = 24;
 /// Maximum events emitted by one logical span.
 pub const MAX_SPAN_EVENTS: usize = 32;
+const MAX_CATALOG_RON_BYTES: usize = 1024 * 1024;
+const MAX_CATALOG_ITEMS: usize = 4_096;
 
 /// Stable, bounded metric identity. Names are operational API contracts.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -912,8 +914,14 @@ impl AlertCatalog {
     ///
     /// Rejects malformed RON, unsupported schema, duplicate IDs, or invalid alerts.
     pub fn from_ron(input: &str) -> Result<Self, ObservabilityError> {
+        if input.len() > MAX_CATALOG_RON_BYTES {
+            return Err(ObservabilityError::Encoding);
+        }
         let catalog: Self = ron::from_str(input).map_err(|_| ObservabilityError::Encoding)?;
-        if catalog.schema_version != 1 || catalog.alerts.is_empty() {
+        if catalog.schema_version != 1
+            || catalog.alerts.is_empty()
+            || catalog.alerts.len() > MAX_CATALOG_ITEMS
+        {
             return Err(ObservabilityError::InvalidAlert);
         }
         let mut ids = BTreeSet::new();
@@ -942,8 +950,14 @@ impl SloCatalog {
     ///
     /// Rejects malformed RON, unsupported schema, duplicate IDs, or incomplete objectives.
     pub fn from_ron(input: &str) -> Result<Self, ObservabilityError> {
+        if input.len() > MAX_CATALOG_RON_BYTES {
+            return Err(ObservabilityError::Encoding);
+        }
         let catalog: Self = ron::from_str(input).map_err(|_| ObservabilityError::Encoding)?;
-        if catalog.schema_version != 1 || catalog.objectives.is_empty() {
+        if catalog.schema_version != 1
+            || catalog.objectives.is_empty()
+            || catalog.objectives.len() > MAX_CATALOG_ITEMS
+        {
             return Err(ObservabilityError::InvalidSlo);
         }
         let mut ids = BTreeSet::new();
@@ -1145,6 +1159,19 @@ fn truncate_utf8(value: &str, maximum: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_catalogs_are_rejected_before_decoding() {
+        let oversized = " ".repeat(MAX_CATALOG_RON_BYTES + 1);
+        assert_eq!(
+            AlertCatalog::from_ron(&oversized),
+            Err(ObservabilityError::Encoding)
+        );
+        assert_eq!(
+            SloCatalog::from_ron(&oversized),
+            Err(ObservabilityError::Encoding)
+        );
+    }
 
     #[test]
     fn stable_metrics_have_prefix_and_correct_types() {
