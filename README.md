@@ -600,14 +600,32 @@ skips because these variables are absent is not a current live-database proof.
 CI also builds all fuzz targets, the Criterion harness, both runnable examples, and every
 publishable package.
 
-## Real-World Stress & Chaos Verification (Podman / Kubernetes)
+## Local Stress & Chaos Harness (Podman)
 
-Aequora's correctness invariants (Tx A/B/C atomicity, `OperationId` idempotency, conflict policies, causal DAG ordering, and crash resilience) are verified not only in unit and property tests, but also through **empirical real-world stress testing and containerized chaos engineering**.
+Aequora's correctness invariants (Tx A/B/C atomicity, `OperationId` idempotency, conflict policies,
+causal DAG ordering, and crash resilience) are exercised by a bounded, local-only Podman stress
+harness in addition to unit, property, model, and conformance tests.
 
-To prove that benchmark figures and correctness claims are **accurate and reproducible**—not false positives or flukes—the system underwent automated multi-stage chaos testing in containerized Kubernetes environments (`podman play kube`) across multiple independent runs.
+> [!CAUTION]
+> This harness is not a production deployment. It uses plaintext loopback HTTP, an ephemeral
+> in-memory authority, synthetic data, and a test-only MAC key generated for each run. The older
+> figures below are retained as historical observations only: they predate fail-closed worker,
+> outbox-drain, and authentication checks and therefore are not current release evidence.
+
+Build and run the contained harness with:
+
+```bash
+CARGO_BUILD_JOBS=1 cargo build --release -p aequora --example realworld_server \
+  --features axum,testkit --locked
+CARGO_BUILD_JOBS=1 cargo build --release -p aequora --example realworld_stress \
+  --features axum,http-client,stoolap,testkit --locked
+podman build -f deploy/container/realworld.Containerfile \
+  -t localhost/aequora-stress-harness:local .
+bash scripts/run-chaos-10x-test.sh
+```
 
 > [!IMPORTANT]
-> **Key Verification Findings Across 3 Independent Chaos Runs:**
+> **Historical pre-hardening observations across 3 runs (not current release evidence):**
 > - **465,560 total operations** committed across 9 experiments with **0 unhandled errors, 0 data loss events, and 0 invariant violations**.
 > - **1,089 / 1,089 adversarial injection attacks blocked (100.0%)** at the transport/admission boundary.
 > - **Throughput coefficient of variation (CV) < 5%** across all runs (0.5% in crash recovery), proving high reproducibility.
@@ -618,11 +636,11 @@ To prove that benchmark figures and correctness claims are **accurate and reprod
 
 | Component / File | Purpose | Characteristics |
 |:---|:---|:---|
-| [`realworld_stress.rs`](crates/aequora/examples/realworld_stress.rs) | Multi-client stress harness | 614 lines of Rust; hot-key write contention, adversarial payload injection, latency histogram tracking |
-| [`run-chaos-10x-test.sh`](scripts/run-chaos-10x-test.sh) | Automated chaos orchestrator | 110-line bash script executing container lifecycle chaos (`pause`, `unpause`, `restart`) |
-| [`realworld-k8s.yaml`](deploy/kubernetes/realworld-k8s.yaml) | Kubernetes Pod / Service manifest | Resource limits: 4 vCPU, 1 GiB RAM; readiness & liveness health probes |
+| [`realworld_stress.rs`](crates/aequora/examples/realworld_stress.rs) | Multi-client stress harness | Bounded inputs and telemetry; fail-closed worker, outbox-drain, and adversarial checks |
+| [`run-chaos-10x-test.sh`](scripts/run-chaos-10x-test.sh) | Automated chaos orchestrator | Ephemeral MAC key and manifest; container lifecycle chaos (`pause`, `unpause`, `restart`) |
+| [`realworld-k8s.yaml`](deploy/kubernetes/realworld-k8s.yaml) | Podman/Kubernetes test manifest | Loopback-only host port, no service-account token, read-only root, dropped capabilities |
 | [`real_world_simulation.rs`](crates/aequora-testkit/tests/real_world_simulation.rs) | In-process simulation test suite | 1,447 lines; 10 mission-critical distributed failure scenarios |
-| Container Image | Axum sync gateway runtime | `localhost/aequora-server:latest` (411 MB, multi-stage Rust build) |
+| Container Image | Ephemeral Axum test runtime | `localhost/aequora-stress-harness:local`; never publish or deploy as a production service |
 
 ---
 
@@ -698,7 +716,11 @@ Each run deploys a fresh containerized Aequora server pod via `podman play kube`
 | **Run 3** | 46,084 | 53,660 | 57,560 | **157,304** | **0** |
 | **Grand Total** | **137,760** | **155,640** | **172,160** | **465,560** | **0** |
 
-Across **465,560 operations** executed under severe chaos injection (container freezes, forced SIGKILL restarts, adversarial penetration, hot-key contention), Aequora maintained **100% data integrity with zero unhandled errors**.
+The pre-hardening harness reported **465,560 operations** across these runs. Because it suppressed
+some worker, join, and local-storage failures and did not prove every outbox drained, those numbers
+must not be interpreted as proof of zero data loss or complete invariant preservation. New results
+are acceptable only when the hardened harness exits successfully and the immutable run evidence is
+captured by the release-quality workflow.
 
 #### Coefficient of Variation (CV%) Summary
 
