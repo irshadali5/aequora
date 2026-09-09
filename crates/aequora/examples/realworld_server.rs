@@ -1,4 +1,7 @@
-//! Real-world authoritative Aequora application server for container & k8s deployment.
+//! Ephemeral authoritative server used only by the local stress and chaos harness.
+
+#[path = "support/stress_auth.rs"]
+mod stress_auth;
 
 use aequora_axum::{
     AuthenticationFailure, AxumConfig, HttpAuthenticator, PresentedCredential, ReadinessProbe,
@@ -11,17 +14,24 @@ use aequora_executor::{
     OperationHandler, OperationRegistry, ScopeAuthorizer,
 };
 use aequora_observability::NoopObserver;
-use aequora_protocol::{
-    ChangeKind, OperationEnvelope, SessionMetadata,
-};
+use aequora_protocol::{ChangeKind, OperationEnvelope, SessionMetadata};
 use aequora_server::{ExchangeService, SyncServer};
 use aequora_testkit::InMemoryAuthoritativeStore;
-use aequora_types::{
-    ActorId, DeviceId, EntityId, NodeId, TenantId,
-};
+use aequora_types::{ActorId, EntityId, NodeId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{env, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{
+    env,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
+use stress_auth::StressAuthKey;
+
+const DEFAULT_PORT: u16 = 8_443;
+const MAX_TITLE_BYTES: usize = 256;
+const MAX_STATUS_BYTES: usize = 32;
+const MAX_NOTES_BYTES: usize = 4_096;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskOperation {
@@ -61,18 +71,33 @@ struct TaskOperationHandler;
 impl OperationHandler<TaskOperation> for TaskOperationHandler {
     async fn authorize(
         &self,
-        _auth: &AuthContext,
+        auth: &AuthContext,
         command: &TaskOperation,
-        _envelope: &OperationEnvelope,
+        envelope: &OperationEnvelope,
     ) -> Result<(), ExecutionError> {
-        if command.title.trim().is_empty() {
+        if command.task_id != envelope.entity.entity_id || command.assignee != auth.actor_id {
+            return Err(ExecutionError::unauthorized("task identity mismatch"));
+        }
+        if command.title.trim().is_empty() || command.title.len() > MAX_TITLE_BYTES {
             return Err(ExecutionError::business_rule("task title cannot be empty"));
         }
         if command.priority < 1 || command.priority > 5 {
-            return Err(ExecutionError::business_rule("priority must be between 1 and 5"));
+            return Err(ExecutionError::business_rule(
+                "priority must be between 1 and 5",
+            ));
         }
-        if !matches!(command.status.as_str(), "todo" | "in_progress" | "completed") {
+        if command.status.len() > MAX_STATUS_BYTES
+            || !matches!(
+                command.status.as_str(),
+                "todo" | "in_progress" | "completed"
+            )
+        {
             return Err(ExecutionError::business_rule("invalid task status"));
+        }
+        if command.notes.len() > MAX_NOTES_BYTES {
+            return Err(ExecutionError::business_rule(
+                "task notes exceed their limit",
+            ));
         }
         Ok(())
     }
@@ -93,21 +118,7 @@ impl OperationHandler<TaskOperation> for TaskOperationHandler {
     }
 }
 
-struct BearerAuthenticator {
-    fallback_tenant: TenantId,
-    fallback_actor: ActorId,
-    fallback_device: DeviceId,
-}
-
-impl BearerAuthenticator {
-    fn new() -> Self {
-        Self {
-            fallback_tenant: TenantId::new(),
-            fallback_actor: ActorId::new(),
-            fallback_device: DeviceId::new(),
-        }
-    }
-}
+struct BearerAuthenticator(StressAuthKey);
 
 #[async_trait]
 impl HttpAuthenticator for BearerAuthenticator {
@@ -115,30 +126,9 @@ impl HttpAuthenticator for BearerAuthenticator {
         &self,
         credential: &PresentedCredential,
     ) -> Result<AuthContext, AuthenticationFailure> {
-        let token = credential.expose_for_authentication();
-        if let Some((tenant_str, rest)) = token.split_once(':') {
-            if let Some((actor_str, device_str)) = rest.split_once(':') {
-                if let (Ok(tenant_id), Ok(actor_id), Ok(device_id)) = (
-                    TenantId::from_str(tenant_str),
-                    ActorId::from_str(actor_str),
-                    DeviceId::from_str(device_str),
-                ) {
-                    return Ok(AuthContext {
-                        tenant_id,
-                        actor_id,
-                        device_id,
-                    });
-                }
-            }
-        }
-        if token.starts_with("test-token") || token.starts_with("bearer-") {
-            return Ok(AuthContext {
-                tenant_id: self.fallback_tenant,
-                actor_id: self.fallback_actor,
-                device_id: self.fallback_device,
-            });
-        }
-        Err(AuthenticationFailure::Invalid)
+        self.0
+            .authenticate(credential.expose_for_authentication())
+            .ok_or(AuthenticationFailure::Invalid)
     }
 }
 
@@ -154,17 +144,13 @@ impl ReadinessProbe for ServerReadiness {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let port: u16 = env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8443);
-
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let addr = bind_address()?;
+    let authentication_key = StressAuthKey::from_environment()?;
 
     println!("===============================================================");
-    println!("  Aequora Server - Authoritative Sync Engine (Production Node)");
+    println!("  Aequora local stress harness - ephemeral test server");
     println!("===============================================================");
+    println!("WARNING: in-memory state and plaintext local HTTP; never deploy as production.");
     println!("Binding address: http://{addr}");
     println!("Protocol: Postcard/AEQ1 over HTTP/1.1");
     println!("Health live endpoint:  http://{addr}/sync/v1/health/live");
@@ -185,24 +171,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(TestClock::new(node_id, 10_000)),
     ));
 
-    let authenticator = Arc::new(BearerAuthenticator::new());
+    let authenticator = Arc::new(BearerAuthenticator(authentication_key));
     let observer = Arc::new(NoopObserver);
     let readiness = Arc::new(ServerReadiness);
-    let config = AxumConfig::new(8 * 1024 * 1024);
+    let config = AxumConfig::new(MAX_BODY_BYTES);
 
-    let (app, _lifecycle) = router_with_authenticator(
-        service,
-        config,
-        observer,
-        readiness,
-        authenticator,
-    );
+    let (app, _lifecycle) =
+        router_with_authenticator(service, config, observer, readiness, authenticator);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("Aequora Server is listening on {addr}. Ready to process client sync sessions.");
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     println!("Aequora Server shutdown completed cleanly.");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let interrupt = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    result = interrupt => {
+                        if let Err(error) = result {
+                            eprintln!("failed to listen for Ctrl-C: {error}");
+                        }
+                    }
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(error) => {
+                eprintln!("failed to listen for SIGTERM: {error}");
+                let _ = interrupt.await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = interrupt.await {
+        eprintln!("failed to listen for Ctrl-C: {error}");
+    }
+}
+
+fn bind_address() -> Result<SocketAddr, Box<dyn std::error::Error>> {
+    let port = match env::var("PORT") {
+        Ok(value) => value.parse::<u16>()?,
+        Err(env::VarError::NotPresent) => DEFAULT_PORT,
+        Err(error) => return Err(error.into()),
+    };
+    let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+    let ip = host.parse::<IpAddr>()?;
+    if !ip.is_loopback() && env::var("AEQUORA_STRESS_ALLOW_CONTAINER_BIND").as_deref() != Ok("1") {
+        return Err("non-loopback stress-server binding requires explicit container opt-in".into());
+    }
+    Ok(SocketAddr::new(ip, port))
 }
