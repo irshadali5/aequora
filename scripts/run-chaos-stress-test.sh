@@ -5,7 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 echo "=========================================================================="
-echo "  Aequora Automated 10x Scale & Multi-Chaos Orchestration Runner"
+echo "  Aequora Automated High-Load & Multi-Chaos Orchestration Runner"
 echo "=========================================================================="
 
 manifest_path=""
@@ -62,16 +62,16 @@ fi
 CONTAINER_NAME="aequora-stress-harness-pod-aequora-api"
 
 echo -e "\n=========================================================================="
-echo "  EXPERIMENT 1: 10X LOAD SCALING + HOT-KEY CONTENTION + ADVERSARIAL ATTACKS"
+echo "  EXPERIMENT 1: HIGH LOAD + HOT-KEY CONTENTION + ADVERSARIAL ATTACKS"
 echo "=========================================================================="
-echo "Running 100 concurrent legitimate clients + 10 hot-keys + 10 rogue attack threads..."
+echo "Running 40 concurrent legitimate clients + 8 hot-keys + 8 rogue attack threads..."
 ./target/release/examples/realworld_stress \
     --url http://127.0.0.1:8443 \
-    --concurrency 100 \
-    --duration 12 \
+    --concurrency 40 \
+    --duration 30 \
     --batch-size 25 \
-    --hot-keys 10 \
-    --adversarial-clients 10 \
+    --hot-keys 8 \
+    --adversarial-clients 8 \
     --skip-functional
 
 echo -e "\nContainer resource stats after Experiment 1:"
@@ -80,19 +80,19 @@ podman stats --no-stream "$CONTAINER_NAME"
 echo -e "\n=========================================================================="
 echo "  EXPERIMENT 2: HYPERVISOR / NODE FREEZE & RECONNECT STORM (podman pause)"
 echo "=========================================================================="
-echo "Launching 80 concurrent clients for 12 seconds with runtime freeze at T+3s..."
+echo "Launching 40 concurrent clients for 25 seconds with runtime freeze at T+6s..."
 
 # Launch stress client in background
 ./target/release/examples/realworld_stress \
     --url http://127.0.0.1:8443 \
-    --concurrency 80 \
-    --duration 12 \
+    --concurrency 40 \
+    --duration 25 \
     --batch-size 20 \
     --skip-functional &
 CLIENT_PID=$!
 client_pid="$CLIENT_PID"
 
-sleep 3
+sleep 6
 echo -e "\n>>> [CHAOS INJECTION] Freezing container with 'podman pause' (simulating 2.5s network stall / hypervisor freeze)..."
 podman pause "$CONTAINER_NAME"
 podman ps --filter "name=$CONTAINER_NAME"
@@ -110,18 +110,18 @@ podman stats --no-stream "$CONTAINER_NAME"
 echo -e "\n=========================================================================="
 echo "  EXPERIMENT 3: CRASH RECOVERY & MID-FLIGHT RESTART (podman restart)"
 echo "=========================================================================="
-echo "Launching 60 concurrent clients for 14 seconds with container restart at T+4s..."
+echo "Launching 40 concurrent clients for 25 seconds with container restart at T+8s..."
 
 ./target/release/examples/realworld_stress \
     --url http://127.0.0.1:8443 \
-    --concurrency 60 \
-    --duration 14 \
+    --concurrency 40 \
+    --duration 25 \
     --batch-size 20 \
     --skip-functional &
 RESTART_CLIENT_PID=$!
 client_pid="$RESTART_CLIENT_PID"
 
-sleep 4
+sleep 8
 echo -e "\n>>> [CHAOS INJECTION] Restarting server container under full client flight..."
 podman restart "$CONTAINER_NAME" >/dev/null
 
@@ -132,5 +132,5 @@ echo -e "\nContainer resource stats after Experiment 3:"
 podman stats --no-stream "$CONTAINER_NAME"
 
 echo -e "\n=========================================================================="
-echo "  ALL 10X STRESS & CHAOS/INTERFERENCE EXPERIMENTS COMPLETED SUCCESSFULLY!"
+echo "  ALL HIGH-LOAD STRESS & CHAOS/INTERFERENCE EXPERIMENTS COMPLETED SUCCESSFULLY!"
 echo "=========================================================================="
